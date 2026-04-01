@@ -8,9 +8,11 @@ const sequelize = new Sequelize(
   config.password,
   {
     host: config.host,
+    port: config.port,
     dialect: config.dialect,
     logging: false,
     pool: config.pool,
+    dialectOptions: config.dialectOptions || {},
     define: {
       underscored: true
     }
