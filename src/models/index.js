@@ -119,8 +119,8 @@ db.Country.hasMany(db.State, { foreignKey: 'country_id', as: 'states' });
 db.State.belongsTo(db.Country, { foreignKey: 'country_id', as: 'country' });
 db.State.hasMany(db.District, { foreignKey: 'state_id', as: 'districts' });
 db.District.belongsTo(db.State, { foreignKey: 'state_id', as: 'state' });
-db.District.hasMany(db.City, { foreignKey: 'district_id', as: 'cities' });
-db.City.belongsTo(db.District, { foreignKey: 'district_id', as: 'district' });
+db.District.hasMany(db.City, { foreignKey: 'city_id', as: 'cities' });
+db.City.belongsTo(db.District, { foreignKey: 'city_id', as: 'district' });
 
 // Translation Relationships
 // Translation Relationships
