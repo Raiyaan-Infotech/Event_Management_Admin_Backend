@@ -186,7 +186,6 @@ const translationKeys = [
   { key: 'nav.employees', default_value: 'Employees', group: 'navigation' },
   { key: 'nav.modules', default_value: 'Modules', group: 'navigation' },
   { key: 'nav.navigation', default_value: 'Navigation', group: 'navigation' },
-  { key: 'nav.newsletters', default_value: 'Newsletters', group: 'navigation' },
   { key: 'nav.contact', default_value: 'Contact', group: 'navigation' },
   { key: 'nav.plugins', default_value: 'Plugins', group: 'navigation' },
   { key: 'nav.payments', default_value: 'Payments', group: 'navigation' },

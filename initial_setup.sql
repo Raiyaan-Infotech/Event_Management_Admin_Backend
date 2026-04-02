@@ -620,7 +620,19 @@ INSERT INTO `settings` (`key`, `value`, `group`, `type`, `description`, `company
   ('optimize.image_compression', '0',   'optimize',   'boolean', 'Enable image compression on upload', 1, 1),
   ('optimize.image_quality',     '80',  'optimize',   'number',  'Image compression quality (1-100)',  1, 1),
   ('optimize.lazy_loading',      '1',   'optimize',   'boolean', 'Enable lazy loading for images',     1, 1),
-  ('optimize.log_retention_days','90',  'optimize',   'number',  'Activity log retention in days',     1, 1)
+  ('optimize.log_retention_days','90',  'optimize',   'number',  'Activity log retention in days',     1, 1),
+  -- Media / S3 Storage
+  ('driver',                          '',   'media', 'text', 'Storage driver (local or s3)',                1, 1),
+  ('aws_access_key',                  '',   'media', 'text', 'AWS S3 access key',                          1, 1),
+  ('aws_secret_key',                  '',   'media', 'text', 'AWS S3 secret key',                          1, 1),
+  ('aws_region',                      '',   'media', 'text', 'AWS S3 region',                              1, 1),
+  ('aws_bucket',                      '',   'media', 'text', 'AWS S3 bucket name',                         1, 1),
+  ('aws_url',                         '',   'media', 'text', 'CloudFront or S3 public URL',                1, 1),
+  ('aws_endpoint',                    '',   'media', 'text', 'Custom S3-compatible endpoint',              1, 1),
+  ('aws_account_id',                  '',   'media', 'text', 'AWS account ID (for R2 etc)',                1, 1),
+  ('custom_s3_path',                  '',   'media', 'text', 'Custom path prefix in bucket',               1, 1),
+  ('use_path_style_endpoint',         'no', 'media', 'text', 'Use path-style S3 endpoint',                1, 1),
+  ('aws_cloudfront_distribution_id',  '',   'media', 'text', 'CloudFront distribution ID for invalidation',1, 1)
 ON DUPLICATE KEY UPDATE `value` = VALUES(`value`), `company_id` = VALUES(`company_id`);
 
 -- =============================================================================
@@ -661,7 +673,6 @@ INSERT INTO `modules` (`name`, `slug`, `description`, `company_id`, `is_active`)
   ('Companies',       'companies',       'Company management (developer only)',   1, 1),
   ('FAQ Categories',  'faq_categories',  'FAQ category management',               1, 1),
   ('FAQs',            'faqs',            'FAQ management',                        1, 1),
-  ('Newsletters',     'newsletters',     'Newsletter management',                 1, 1),
   ('Plugins',         'plugins',         'Plugin management',                     1, 1),
   ('Payments',        'payments',        'Payment gateway management',            1, 1),
   ('Platform',        'platform',        'Platform administration',               1, 1)
@@ -741,11 +752,6 @@ INSERT INTO `permissions` (`name`, `slug`, `module`, `company_id`, `description`
   ('Create FAQ',  'faqs.create', 'faqs', 1, 'Create FAQs', 1),
   ('Edit FAQ',    'faqs.edit',   'faqs', 1, 'Edit FAQs',   1),
   ('Delete FAQ',  'faqs.delete', 'faqs', 1, 'Delete FAQs', 1),
-  -- Newsletters
-  ('View Newsletters',   'newsletters.view',   'newsletters', 1, 'View newsletters', 1),
-  ('Create Newsletter',  'newsletters.create', 'newsletters', 1, 'Create newsletters', 1),
-  ('Edit Newsletter',    'newsletters.edit',   'newsletters', 1, 'Edit newsletters',   1),
-  ('Delete Newsletter',  'newsletters.delete', 'newsletters', 1, 'Delete newsletters', 1),
   -- Plugins
   ('View Plugins',   'plugins.view',   'plugins', 1, 'View plugins', 1),
   ('Manage Plugins', 'plugins.manage', 'plugins', 1, 'Manage plugins', 1),
@@ -852,7 +858,6 @@ INSERT INTO `translation_keys` (`key`, `default_value`, `group`, `company_id`) V
   ('nav.faq_list',      'FAQ List',        'nav', 1),
   ('nav.faq_categories','FAQ Categories',  'nav', 1),
   ('nav.locations',     'Locations',       'nav', 1),
-  ('nav.newsletters',   'Newsletters',     'nav', 1),
   ('nav.contact',       'Contact',         'nav', 1),
   ('nav.media',         'Media',           'nav', 1),
   ('nav.plugins',       'Plugins',         'nav', 1),
@@ -1214,7 +1219,6 @@ INSERT INTO `plugins` (`slug`, `name`, `description`, `category`, `icon`, `is_ac
   -- Content (built-in modules, active by default)
   ('faq',            'FAQ',             'Create frequently asked questions organized by category.',    'content',  'help-circle',  1, NULL, NULL, 1),
   -- Marketing (built-in modules, active by default)
-  ('newsletter',     'Newsletter',      'Grow your audience with email newsletter subscriptions.',    'marketing','mail',          1, NULL, NULL, 1),
   -- General (built-in modules, active by default)
   ('locations',      'Locations',       'Manage countries, states, districts, and cities.',           'general',  'map-pin',      1, NULL, NULL, 1),
   -- Authentication
@@ -1559,3 +1563,162 @@ INSERT IGNORE INTO `role_permissions` (`role_id`, `permission_id`, `company_id`,
 SELECT 3, p.id, 1,
   CASE WHEN p.`slug` IN ('companies.create','companies.edit','companies.delete') THEN 1 ELSE 0 END
 FROM `permissions` p WHERE p.`module` = 'companies';
+
+CREATE TABLE IF NOT EXISTS `menus` (
+  `id`                       INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `name`                     VARCHAR(255) NOT NULL,
+  `icon`                     VARCHAR(100) NULL DEFAULT '',
+  `icon_fill_color_light`    VARCHAR(20)  NULL DEFAULT NULL,
+  `icon_fill_color_dark`     VARCHAR(20)  NULL DEFAULT NULL,
+  `sort_order`               INT          NOT NULL DEFAULT 0,
+  `is_active`                TINYINT      NOT NULL DEFAULT 1 COMMENT '0=inactive, 1=active',
+  `display_status`           TINYINT      NOT NULL DEFAULT 1 COMMENT '0=hidden, 1=visible',
+  `company_id`               INT UNSIGNED NULL DEFAULT NULL,
+  `created_by`               INT UNSIGNED NULL DEFAULT NULL,
+  `updated_by`               INT UNSIGNED NULL DEFAULT NULL,
+  `created_at`               DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`               DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at`               DATETIME     NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_menus_company_id` (`company_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO `modules` (`name`, `slug`, `description`, `company_id`, `is_active`) VALUES
+('Menus', 'menus', 'Manage menu items', 1, 1);
+
+INSERT IGNORE INTO `permissions` (`name`, `slug`, `module`, `company_id`, `description`, `is_active`) VALUES
+('View Menus',   'menus.view',   'menus', 1, 'View menus list',       1),
+('Create Menus', 'menus.create', 'menus', 1, 'Create new menus',      1),
+('Edit Menus',   'menus.edit',   'menus', 1, 'Edit existing menus',   1),
+('Delete Menus', 'menus.delete', 'menus', 1, 'Delete menus',          1);
+
+UPDATE `permissions` p
+JOIN `modules` m ON m.`slug` = p.`module`
+SET p.`module_id` = m.`id`
+WHERE p.`module` = 'menus';
+
+-- SuperAdmin (role 2) gets all menus permissions without approval
+INSERT IGNORE INTO `role_permissions` (`role_id`, `permission_id`, `company_id`, `requires_approval`)
+SELECT 2, p.id, 1, 0 FROM `permissions` p WHERE p.`module` = 'menus';
+
+-- Admin (role 3) gets view freely; create/edit/delete require approval
+INSERT IGNORE INTO `role_permissions` (`role_id`, `permission_id`, `company_id`, `requires_approval`)
+SELECT 3, p.id, 1,
+  CASE WHEN p.`slug` IN ('menus.create', 'menus.edit', 'menus.delete') THEN 1 ELSE 0 END
+FROM `permissions` p WHERE p.`module` = 'menus';
+
+
+
+CREATE TABLE IF NOT EXISTS `subscriptions` (
+  `id`          INT            NOT NULL AUTO_INCREMENT,
+  `name`        VARCHAR(200)   NOT NULL,
+  `description` TEXT           DEFAULT NULL,
+  `menu_ids`    JSON           DEFAULT NULL COMMENT 'Array of menu IDs',
+  `price`       DECIMAL(10,2)  NOT NULL DEFAULT 0.00,
+  `validity`    INT            DEFAULT NULL COMMENT 'Days, NULL = no expiry',
+  `features`    LONGTEXT       DEFAULT NULL COMMENT 'Rich HTML content',
+  `sort_order`  INT            NOT NULL DEFAULT 0,
+  `is_active`   TINYINT        NOT NULL DEFAULT 1 COMMENT '0=inactive,1=active',
+  `is_custom`   TINYINT(1)     NOT NULL DEFAULT 0 COMMENT '1=custom plan for specific vendor',
+  `vendor_id`   INT UNSIGNED   DEFAULT NULL COMMENT 'FK to vendors.id (only when is_custom=1)',
+  `discounted_price` DECIMAL(10,2) DEFAULT NULL COMMENT 'Price after discount',
+  `company_id`  INT            DEFAULT NULL,
+  `created_by`  INT            DEFAULT NULL,
+  `updated_by`  INT            DEFAULT NULL,
+  `created_at`  DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`  DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at`  DATETIME       DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_subscriptions_company_id` (`company_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO `modules` (`name`, `slug`, `description`, `company_id`, `is_active`) VALUES
+('Subscriptions', 'subscriptions', 'Manage subscription plans', 1, 1);
+
+INSERT IGNORE INTO `permissions` (`name`, `slug`, `module`, `company_id`, `description`, `is_active`) VALUES
+('View Subscriptions',   'subscriptions.view',   'subscriptions', 1, 'View subscription plans list', 1),
+('Create Subscriptions', 'subscriptions.create', 'subscriptions', 1, 'Create new subscription plans', 1),
+('Edit Subscriptions',   'subscriptions.edit',   'subscriptions', 1, 'Edit existing subscription plans', 1),
+('Delete Subscriptions', 'subscriptions.delete', 'subscriptions', 1, 'Delete subscription plans', 1);
+
+UPDATE `permissions` p
+JOIN `modules` m ON m.`slug` = p.`module`
+SET p.`module_id` = m.`id`
+WHERE p.`module` = 'subscriptions';
+
+-- SuperAdmin (role 2) gets all subscriptions permissions without approval
+INSERT IGNORE INTO `role_permissions` (`role_id`, `permission_id`, `company_id`, `requires_approval`)
+SELECT 2, p.id, 1, 0 FROM `permissions` p WHERE p.`module` = 'subscriptions';
+
+-- Admin (role 3) gets view freely; create/edit/delete require approval
+INSERT IGNORE INTO `role_permissions` (`role_id`, `permission_id`, `company_id`, `requires_approval`)
+SELECT 3, p.id, 1,
+  CASE WHEN p.`slug` IN ('subscriptions.create', 'subscriptions.edit', 'subscriptions.delete') THEN 1 ELSE 0 END
+FROM `permissions` p WHERE p.`module` = 'subscriptions';
+
+INSERT INTO `translation_keys` (`key`, `default_value`, `group`, `company_id`) VALUES
+('nav.subscriptions',                'Subscriptions',                                         'nav',           1),
+('subscriptions.title',              'Subscriptions',                                         'subscriptions', 1),
+('subscriptions.desc',               'Manage subscription plans',                             'subscriptions', 1),
+('subscriptions.add',                'Add Subscription',                                      'subscriptions', 1),
+('subscriptions.edit',               'Edit Subscription',                                     'subscriptions', 1),
+('subscriptions.form_desc',          'Fill in the subscription plan details.',                'subscriptions', 1),
+('subscriptions.name',               'Plan Name',                                             'subscriptions', 1),
+('subscriptions.description',        'Description',                                           'subscriptions', 1),
+('subscriptions.menus',              'Menus',                                                 'subscriptions', 1),
+('subscriptions.price',              'Price',                                                 'subscriptions', 1),
+('subscriptions.validity',           'Validity (days)',                                       'subscriptions', 1),
+('subscriptions.validity_hint',      'Leave 0 for no expiry',                                 'subscriptions', 1),
+('subscriptions.features',           'Features',                                              'subscriptions', 1),
+('subscriptions.sort_order',         'Sort Order',                                            'subscriptions', 1),
+('subscriptions.sort_order_hint',    'Lower number = higher in list',                         'subscriptions', 1),
+('subscriptions.is_active',          'Active Status',                                         'subscriptions', 1),
+('subscriptions.no_records',         'No subscriptions found. Create your first plan.',       'subscriptions', 1),
+('subscriptions.delete',             'Delete Subscription',                                   'subscriptions', 1),
+('subscriptions.delete_confirm',     'Are you sure you want to delete this subscription plan? This action cannot be undone.', 'subscriptions', 1),
+('subscriptions.created',            'Subscription created successfully',                     'subscriptions', 1),
+('subscriptions.updated',            'Subscription updated successfully',                     'subscriptions', 1),
+('subscriptions.deleted',            'Subscription deleted successfully',                     'subscriptions', 1),
+('subscriptions.not_found',          'Subscription not found',                                'subscriptions', 1)
+ON DUPLICATE KEY UPDATE `default_value` = VALUES(`default_value`), `group` = VALUES(`group`);
+
+INSERT INTO `translations` (`translation_key_id`, `language_id`, `company_id`, `value`, `status`, `is_active`)
+SELECT tk.id, 1, 1, tk.default_value, 'reviewed', 1
+FROM `translation_keys` tk
+WHERE tk.`group` = 'subscriptions' OR tk.`key` = 'nav.subscriptions'
+ON DUPLICATE KEY UPDATE `value` = VALUES(`value`), `status` = 'reviewed';
+
+-- ============================================================
+-- Menus translation keys
+-- ============================================================
+INSERT INTO `translation_keys` (`key`, `default_value`, `group`, `company_id`) VALUES
+  ('nav.menus',                   'Menus',                                                                      'nav',   1),
+  ('nav.events',                  'Events',                                                                     'nav',   1),
+  ('nav.reports',                 'Report Management',                                                          'nav',   1),
+  ('nav.marketing',               'Marketing',                                                                  'nav',   1),
+  ('nav.communication',           'Communication',                                                              'nav',   1),
+  ('nav.notifications',           'Notifications',                                                              'nav',   1),
+  ('nav.mail',                    'Mail',                                                                       'nav',   1),
+  ('nav.support',                 'Support',                                                                    'nav',   1),
+  ('menus.title',                 'Menus',                                                                      'menus', 1),
+  ('menus.desc',                  'Manage menu items',                                                          'menus', 1),
+  ('menus.add',                   'Add Menu',                                                                   'menus', 1),
+  ('menus.edit',                  'Edit Menu',                                                                  'menus', 1),
+  ('menus.form_desc',             'Fill in the menu item details.',                                             'menus', 1),
+  ('menus.name',                  'Menu Name',                                                                  'menus', 1),
+  ('menus.icon',                  'Icon',                                                                       'menus', 1),
+  ('menus.icon_fill_color_light', 'Icon Color (Light)',                                                         'menus', 1),
+  ('menus.icon_fill_color_dark',  'Icon Color (Dark)',                                                          'menus', 1),
+  ('menus.sort_order',            'Sort Order',                                                                 'menus', 1),
+  ('menus.display_status',        'Display Status',                                                             'menus', 1),
+  ('menus.no_records',            'No menus found. Create your first menu.',                                    'menus', 1),
+  ('menus.delete',                'Delete Menu',                                                                'menus', 1),
+  ('menus.delete_confirm',        'Are you sure you want to delete this menu? This action cannot be undone.',   'menus', 1)
+ON DUPLICATE KEY UPDATE `default_value` = VALUES(`default_value`), `group` = VALUES(`group`);
+
+INSERT INTO `translations` (`translation_key_id`, `language_id`, `company_id`, `value`, `status`, `is_active`)
+SELECT tk.id, 1, 1, tk.default_value, 'reviewed', 1
+FROM `translation_keys` tk
+WHERE tk.`group` = 'menus'
+   OR tk.`key` IN ('nav.menus','nav.events','nav.reports','nav.marketing','nav.communication','nav.notifications','nav.mail','nav.support')
+ON DUPLICATE KEY UPDATE `value` = VALUES(`value`), `status` = 'reviewed';

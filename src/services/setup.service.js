@@ -263,7 +263,6 @@ const createCompany = async (data, config) => {
       ['Ads', 'ads', 'Advertisement management'],
       ['Announcements', 'announcements', 'Announcement management'],
       ['FAQs', 'faqs', 'FAQ management'],
-      ['Newsletters', 'newsletters', 'Newsletter management'],
       ['Contact', 'contact', 'Contact message management'],
       ['Plugins', 'plugins', 'Plugin management'],
       ['Tools', 'tools', 'Admin tools'],
@@ -373,11 +372,6 @@ const createCompany = async (data, config) => {
       ['Create FAQ', 'faqs.create', 'faqs', 'Create FAQs'],
       ['Edit FAQ', 'faqs.edit', 'faqs', 'Edit FAQs'],
       ['Delete FAQ', 'faqs.delete', 'faqs', 'Delete FAQs'],
-      // Newsletters
-      ['View Newsletters', 'newsletters.view', 'newsletters', 'View newsletters'],
-      ['Create Newsletter', 'newsletters.create', 'newsletters', 'Create newsletters'],
-      ['Edit Newsletter', 'newsletters.edit', 'newsletters', 'Edit newsletters'],
-      ['Delete Newsletter', 'newsletters.delete', 'newsletters', 'Delete newsletters'],
       // Contact
       ['View Contact', 'contact.view', 'contact', 'View contact messages'],
       ['Delete Contact', 'contact.delete', 'contact', 'Delete contact messages'],
@@ -581,7 +575,6 @@ const seedTranslations = async (companyId, config) => {
     ['nav.faq_list', 'FAQ List', 'nav'],
     ['nav.faq_categories', 'FAQ Categories', 'nav'],
     ['nav.locations', 'Locations', 'nav'],
-    ['nav.newsletters', 'Newsletters', 'nav'],
     ['nav.contact', 'Contact', 'nav'],
     ['nav.media', 'Media', 'nav'],
     ['nav.plugins', 'Plugins', 'nav'],

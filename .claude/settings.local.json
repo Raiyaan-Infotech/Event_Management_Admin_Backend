@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -1 /d/Jamal/Event_Management_Admin_Backend/src/services/*.js)"
+    ]
+  }
+}

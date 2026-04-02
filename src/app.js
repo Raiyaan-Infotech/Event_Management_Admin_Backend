@@ -48,6 +48,8 @@ app.use('/api/v1/plugins', require('./routes/plugin.routes'));
 app.use('/api/v1/faq-categories', require('./routes/faqCategory.routes'));
 app.use('/api/v1/faqs', require('./routes/faq.routes'));
 app.use('/api/v1/vendors', require('./routes/vendor.routes'));
+app.use('/api/v1/menus', require('./routes/menu.routes'));
+app.use('/api/v1/subscriptions', require('./routes/subscription.routes'));
 app.use('/api/v1/payments', require('./routes/payment.routes'));
 app.use('/api/v1/setup', require('./routes/setup.routes'));
 app.use('/api/v1/timezones', require('./routes/timezone.routes'));

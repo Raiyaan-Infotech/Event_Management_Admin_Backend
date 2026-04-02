@@ -1,6 +1,7 @@
 const { Payment, User } = require('../models');
 const { Op } = require('sequelize');
 const { parsePagination, getPaginationMeta } = require('../utils/helpers');
+const logger = require('../utils/logger');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -79,18 +80,20 @@ const getById = async (id, companyId) => {
 /**
  * Create a payment record
  */
-const create = async (data, companyId) => {
-    return Payment.create({
+const create = async (data, companyId, userId = null) => {
+    const payment = await Payment.create({
         ...data,
         company_id: companyId,
         status: data.status || 'pending',
     });
+    await logger.logActivity(userId, 'create', 'Payment', `Created payment #${payment.id}`, { recordId: payment.id, companyId });
+    return payment;
 };
 
 /**
  * Update payment status
  */
-const updateStatus = async (id, status, companyId) => {
+const updateStatus = async (id, status, companyId, userId = null) => {
     if (!ALLOWED_STATUSES.includes(status)) {
         const error = new Error(`Invalid status. Allowed: ${ALLOWED_STATUSES.join(', ')}`);
         error.statusCode = 400;
@@ -104,7 +107,9 @@ const updateStatus = async (id, status, companyId) => {
         throw error;
     }
 
+    const oldStatus = payment.status;
     await payment.update({ status });
+    await logger.logActivity(userId, 'update_status', 'Payment', `Payment #${id} status changed from ${oldStatus} to ${status}`, { recordId: id, companyId, oldValues: { status: oldStatus }, newValues: { status } });
     return payment;
 };
 

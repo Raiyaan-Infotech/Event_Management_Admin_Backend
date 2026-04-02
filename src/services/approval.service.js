@@ -1,6 +1,7 @@
 const { ApprovalRequest, User } = require('../models');
 const { Op } = require('sequelize');
 const ApiError = require('../utils/apiError');
+const logger = require('../utils/logger');
 
 // Lazy-load services to avoid circular dependency
 let _serviceMap = null;
@@ -24,18 +25,8 @@ function getServiceMap() {
       vendors: require('./vendor.service'),
       media: require('./media.service'),
 
-      // ❌ Comment out services that don't exist yet
-      // testimonials: require('./testimonial.service'),
-      // announcements: require('./announcement.service'),
-      // blog_categories: require('./blogCategory.service'),
-      // blog_tags: require('./blogTag.service'),
-      // blog_posts: require('./blogPost.service'),
-      // pages: require('./page.service'),
-      // simple_sliders: require('./simpleSlider.service'),
-      // menus: require('./menu.service'),
-      // subscriptions: require('./subscription.service'),
-      // ads: require('./ad.service'),
-      // banners: require('./adBanner.service'),
+      menus: require('./menu.service'),
+      subscriptions: require('./subscription.service'),
     };
   }
   return _serviceMap;
@@ -211,6 +202,7 @@ const approveRequest = async (id, approverId, reviewNotes = null) => {
   }
 
   await request.save();
+  await logger.logActivity(approverId, 'approve', 'ApprovalRequest', `Approved ${request.action} request for ${request.module_slug} #${request.resource_id || 'new'}`, { recordId: request.id, companyId: request.company_id });
 
   return { approval: request, result: executionResult };
 };
@@ -335,6 +327,7 @@ const rejectRequest = async (id, approverId, reviewNotes = null) => {
   request.review_notes = reviewNotes;
 
   await request.save();
+  await logger.logActivity(approverId, 'reject', 'ApprovalRequest', `Rejected ${request.action} request for ${request.module_slug} #${request.resource_id || 'new'}`, { recordId: request.id, companyId: request.company_id });
 
   return request;
 };

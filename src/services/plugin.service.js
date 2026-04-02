@@ -1,5 +1,6 @@
 const { Plugin, Setting } = require('../models');
 const { Op } = require('sequelize');
+const logger = require('../utils/logger');
 
 // ─── Predefined plugin definitions ───────────────────────────────────────────
 
@@ -11,15 +12,6 @@ const PREDEFINED_PLUGINS = [
         description: 'Manage blog posts, categories, and tags.',
         category: 'content',
         icon: 'book-open',
-        config_group: null,
-        config_route: null,
-    },
-    {
-        slug: 'faq',
-        name: 'FAQ',
-        description: 'Manage frequently asked questions and categories.',
-        category: 'content',
-        icon: 'help-circle',
         config_group: null,
         config_route: null,
     },
@@ -76,26 +68,6 @@ const PREDEFINED_PLUGINS = [
         description: 'Manage advertisements and ad banners on your site.',
         category: 'marketing',
         icon: 'megaphone',
-        config_group: null,
-        config_route: null,
-    },
-    {
-        slug: 'newsletter',
-        name: 'Newsletter',
-        description: 'Collect and manage newsletter subscriptions.',
-        category: 'marketing',
-        icon: 'newspaper',
-        config_group: null,
-        config_route: null,
-    },
-
-    // General (built-in)
-    {
-        slug: 'locations',
-        name: 'Locations',
-        description: 'Manage countries, states, and cities.',
-        category: 'general',
-        icon: 'map-pin',
         config_group: null,
         config_route: null,
     },
@@ -280,7 +252,6 @@ const CATEGORY_ORDER = [
     'maps',
     'security',
     'communication',
-    'general',
 ];
 
 // ─── Seed predefined plugins for a company ────────────────────────────────────
@@ -357,7 +328,7 @@ const getBySlug = async (slug, companyId) => {
 
 // ─── Toggle plugin active state ───────────────────────────────────────────────
 
-const toggle = async (slug, companyId) => {
+const toggle = async (slug, companyId, userId = null) => {
     const plugin = await Plugin.findOne({
         where: { slug, company_id: companyId },
     });
@@ -368,8 +339,10 @@ const toggle = async (slug, companyId) => {
         throw error;
     }
 
-    const newState = plugin.is_active === 1 ? 0 : 1;
+    const oldState = plugin.is_active;
+    const newState = oldState === 1 ? 0 : 1;
     await plugin.update({ is_active: newState });
+    await logger.logActivity(userId, 'toggle', 'Plugin', `Plugin "${plugin.name}" ${newState === 1 ? 'enabled' : 'disabled'}`, { recordId: plugin.id, companyId, oldValues: { is_active: oldState }, newValues: { is_active: newState } });
 
     return plugin;
 };

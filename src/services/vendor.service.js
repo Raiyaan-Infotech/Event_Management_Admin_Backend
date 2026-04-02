@@ -1,4 +1,4 @@
-const { Vendor, City } = require('../models');
+const { Vendor } = require('../models');
 const baseService = require('./base.service');
 const ApiError = require('../utils/apiError');
 const emailSenderService = require('./emailSender.service');
@@ -19,7 +19,6 @@ const getAll = async (query = {}, companyId = undefined) => {
 const getById = async (id, companyId = undefined) => {
     return baseService.getById(Vendor, MODEL_NAME, id, {
         companyId,
-        include: [{ model: City, as: 'cityRef', attributes: ['name', 'pincode'] }],
     });
 };
 
