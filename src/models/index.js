@@ -63,6 +63,8 @@ db.EmailSentLog = require('./EmailSentLog')(sequelize, Sequelize);
 
 // Vendor
 db.Vendor = require('./Vendor')(sequelize, Sequelize);
+db.VendorClient = require('./VendorClient')(sequelize, Sequelize);
+db.VendorStaff = require('./VendorStaff')(sequelize, Sequelize);
 
 // Menus & Subscriptions
 db.Menu = require('./Menu')(sequelize, Sequelize);
@@ -148,6 +150,13 @@ db.Translation.belongsTo(db.Language, {
 // FAQ Relationships
 db.FaqCategory.hasMany(db.Faq, { foreignKey: 'faq_category_id', as: 'faqs' });
 db.Faq.belongsTo(db.FaqCategory, { foreignKey: 'faq_category_id', as: 'category' });
+
+// Vendor Client & Staff Relationships
+db.Vendor.hasMany(db.VendorClient, { foreignKey: 'vendor_id', as: 'clients' });
+db.VendorClient.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
+
+db.Vendor.hasMany(db.VendorStaff, { foreignKey: 'vendor_id', as: 'staff' });
+db.VendorStaff.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
 
 
 

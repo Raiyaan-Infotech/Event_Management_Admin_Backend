@@ -39,7 +39,7 @@ const isVendorAuthenticated = async (req, res, next) => {
         req.vendor = vendor;
         next();
     } catch (error) {
-        return res.status(500).json({ success: false, message: 'Vendor authentication error' });
+        return res.status(401).json({ success: false, message: 'Vendor authentication required.' });
     }
 };
 
