@@ -151,6 +151,11 @@ db.Translation.belongsTo(db.Language, {
 db.FaqCategory.hasMany(db.Faq, { foreignKey: 'faq_category_id', as: 'faqs' });
 db.Faq.belongsTo(db.FaqCategory, { foreignKey: 'faq_category_id', as: 'category' });
 
+// Vendor Location Relationships
+db.Vendor.belongsTo(db.Country, { foreignKey: 'country_id', as: 'country' });
+db.Vendor.belongsTo(db.State,   { foreignKey: 'state_id',   as: 'state' });
+db.Vendor.belongsTo(db.City,    { foreignKey: 'city_id',    as: 'city' });
+
 // Vendor Client & Staff Relationships
 db.Vendor.hasMany(db.VendorClient, { foreignKey: 'vendor_id', as: 'clients' });
 db.VendorClient.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
