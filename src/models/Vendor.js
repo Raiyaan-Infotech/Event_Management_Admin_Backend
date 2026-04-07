@@ -17,6 +17,7 @@ module.exports = (sequelize) => {
         reg_no:          { type: DataTypes.STRING(100), allowNull: true },
         gst_no:          { type: DataTypes.STRING(100), allowNull: true },
         company_address: { type: DataTypes.TEXT,        allowNull: true },
+        about_us:        { type: DataTypes.TEXT,        allowNull: true },
         company_contact: { type: DataTypes.STRING(20),  allowNull: true },
         landline:        { type: DataTypes.STRING(20),  allowNull: true },
         company_email:   { type: DataTypes.STRING(255), allowNull: true },

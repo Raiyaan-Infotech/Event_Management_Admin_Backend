@@ -1328,6 +1328,7 @@ CREATE TABLE IF NOT EXISTS `vendors` (
   `reg_no`          VARCHAR(100) NULL,
   `gst_no`          VARCHAR(100) NULL,
   `company_address` TEXT NULL,
+  `about_us`        TEXT NULL,
   `company_contact` VARCHAR(50)  NULL,
   `landline`        VARCHAR(50)  NULL,
   `company_email`   VARCHAR(255) NULL,
@@ -1358,7 +1359,9 @@ CREATE TABLE IF NOT EXISTS `vendors` (
   `ifsc_code`       VARCHAR(50)  NULL,
   `acc_type`        ENUM('savings','current','overdraft') NULL,
   `branch`          VARCHAR(255) NULL,
-  `bank_logo`       VARCHAR(500) NULL,
+  `bank_logo`                VARCHAR(500) NULL,
+  `password_reset_token`     VARCHAR(10)  NULL,
+  `password_reset_expires`   DATETIME     NULL,
 
   `created_at`      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
