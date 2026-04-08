@@ -4,11 +4,13 @@ const multer = require('multer');
 const vendorController = require('../controllers/vendor.controller');
 const vendorClientController = require('../controllers/vendorClient.controller');
 const vendorStaffController = require('../controllers/vendorStaff.controller');
+const vendorStaffAuthController = require('../controllers/vendorStaffAuth.controller');
 const mediaService = require('../services/media.service');
 const ApiResponse = require('../utils/apiResponse');
 const { isAuthenticated, hasPermission } = require('../middleware/auth');
 const { extractCompanyContext } = require('../middleware/company');
 const { isVendorAuthenticated } = require('../middleware/vendorAuth');
+const { isStaffAuthenticated } = require('../middleware/staffAuth');
 const { checkApprovalRequired } = require('../middleware/approval');
 const { asyncHandler } = require('../utils/helpers');
 
@@ -20,6 +22,17 @@ const upload = multer({
         else cb(new Error('Only image files are allowed'), false);
     },
 });
+
+// ─── Staff Auth (public) ──────────────────────────────────────────────────────
+router.post('/staff/auth/login',             vendorStaffAuthController.staffLogin);
+router.post('/staff/auth/forgot-password',   vendorStaffAuthController.staffForgotPassword);
+router.post('/staff/auth/verify-reset-otp',  vendorStaffAuthController.staffVerifyResetOTP);
+router.post('/staff/auth/reset-password',    vendorStaffAuthController.staffResetPassword);
+
+// ─── Staff Auth (protected — staff JWT) ───────────────────────────────────────
+router.post('/staff/auth/logout',           isStaffAuthenticated, vendorStaffAuthController.staffLogout);
+router.get('/staff/auth/me',               isStaffAuthenticated, vendorStaffAuthController.staffMe);
+router.put('/staff/auth/change-password',  isStaffAuthenticated, vendorStaffAuthController.staffChangePassword);
 
 // ─── Vendor Portal Auth (public) ─────────────────────────────────────────────
 router.post('/auth/login',           vendorController.login);

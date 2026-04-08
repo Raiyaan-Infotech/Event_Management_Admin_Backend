@@ -84,6 +84,23 @@ const generateVendorRefreshToken = (vendor) => {
   );
 };
 
+// Staff-specific token generators — separate from vendor and admin
+const generateStaffAccessToken = (staff) => {
+  return jwt.sign(
+    { id: staff.id, email: staff.email, vendorId: staff.vendor_id, companyId: staff.company_id || null, type: 'staff' },
+    getAccessSecret(),
+    { expiresIn: '15m' }
+  );
+};
+
+const generateStaffRefreshToken = (staff) => {
+  return jwt.sign(
+    { id: staff.id, type: 'staff' },
+    getRefreshSecret(),
+    { expiresIn: '7d' }
+  );
+};
+
 module.exports = {
   generateAccessToken,
   generateRefreshToken,
@@ -94,4 +111,6 @@ module.exports = {
   COOKIE_OPTIONS,
   generateVendorAccessToken,
   generateVendorRefreshToken,
+  generateStaffAccessToken,
+  generateStaffRefreshToken,
 };

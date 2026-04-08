@@ -1,4 +1,5 @@
 const { DataTypes } = require('sequelize');
+const bcrypt = require('bcryptjs');
 
 module.exports = (sequelize) => {
     const VendorStaff = sequelize.define('VendorStaff', {
@@ -28,12 +29,42 @@ module.exports = (sequelize) => {
         locality: { type: DataTypes.STRING(100), allowNull: true },
         pincode:  { type: DataTypes.STRING(20),  allowNull: true },
         company_id: { type: DataTypes.INTEGER, allowNull: true },
+
+        // Auth fields
+        password:               { type: DataTypes.STRING(255), allowNull: true },
+        password_reset_token:   { type: DataTypes.STRING(10),  allowNull: true },
+        password_reset_expires: { type: DataTypes.DATE,        allowNull: true },
     }, {
         tableName: 'vendor_staff',
         timestamps: true,
         paranoid: true,
         underscored: true,
+        hooks: {
+            beforeCreate: async (staff) => {
+                if (staff.password) {
+                    staff.password = await bcrypt.hash(staff.password, 12);
+                }
+            },
+            beforeUpdate: async (staff) => {
+                if (staff.changed('password') && staff.password) {
+                    staff.password = await bcrypt.hash(staff.password, 12);
+                }
+            },
+        },
     });
+
+    VendorStaff.prototype.validatePassword = async function (password) {
+        if (!this.password) return false;
+        return bcrypt.compare(password, this.password);
+    };
+
+    VendorStaff.prototype.toJSON = function () {
+        const values = { ...this.get() };
+        delete values.password;
+        delete values.password_reset_token;
+        delete values.password_reset_expires;
+        return values;
+    };
 
     return VendorStaff;
 };
