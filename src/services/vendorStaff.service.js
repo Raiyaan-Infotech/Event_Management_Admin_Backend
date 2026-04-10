@@ -4,6 +4,30 @@ const ApiError = require('../utils/apiError');
 
 const MODEL_NAME = 'VendorStaff';
 
+// Sanitize date fields: convert "Invalid date" or invalid date strings to null
+const sanitizeDateFields = (data) => {
+    const dateFields = ['doj', 'dob', 'dor'];
+    const sanitized = { ...data };
+    
+    for (const field of dateFields) {
+        if (sanitized[field]) {
+            const dateStr = String(sanitized[field]).trim();
+            // Convert "Invalid date" string to null
+            if (dateStr === 'Invalid date' || dateStr === '') {
+                sanitized[field] = null;
+            } else {
+                // Validate the date string
+                const parsedDate = new Date(dateStr);
+                if (isNaN(parsedDate.getTime())) {
+                    sanitized[field] = null;
+                }
+            }
+        }
+    }
+    
+    return sanitized;
+};
+
 // Fields staff portal is allowed to edit on a staff record
 const STAFF_EDITABLE_FIELDS = ['name', 'mobile', 'designation', 'doj', 'address', 'work_status'];
 
@@ -48,11 +72,14 @@ const create = async (data, vendorId, companyId) => {
         if (data[field] !== undefined) safeData[field] = data[field];
     }
 
+    // Sanitize date fields
+    const sanitized = sanitizeDateFields(safeData);
+
     const count = await VendorStaff.count({ where: { vendor_id: vendorId } });
     const empId = `EMP-${String(count + 1).padStart(4, '0')}`;
 
     return baseService.create(VendorStaff, MODEL_NAME, {
-        ...safeData,
+        ...sanitized,
         vendor_id: vendorId,
         emp_id: empId,
         is_active: 1,
@@ -73,7 +100,10 @@ const update = async (id, data, vendorId, byVendor = false) => {
         if (data[field] !== undefined) safeData[field] = data[field];
     }
 
-    await record.update(safeData);
+    // Sanitize date fields
+    const sanitized = sanitizeDateFields(safeData);
+
+    await record.update(sanitized);
     return record;
 };
 
