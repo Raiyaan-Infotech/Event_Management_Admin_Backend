@@ -19,6 +19,10 @@ module.exports = (sequelize) => {
       type: DataTypes.INTEGER,
       allowNull: true,
     },
+    vendor_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
     requires_approval: {
       type: DataTypes.BOOLEAN,
       defaultValue: false,

@@ -163,6 +163,10 @@ db.VendorClient.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
 db.Vendor.hasMany(db.VendorStaff, { foreignKey: 'vendor_id', as: 'staff' });
 db.VendorStaff.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
 
+// Staff RBAC
+db.VendorStaff.belongsTo(db.Role, { foreignKey: 'role_id', as: 'role' });
+db.Role.hasMany(db.VendorStaff, { foreignKey: 'role_id', as: 'staffMembers' });
+
 
 
 module.exports = db;

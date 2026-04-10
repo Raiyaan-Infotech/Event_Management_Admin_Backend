@@ -29,6 +29,10 @@ module.exports = (sequelize) => {
       type: DataTypes.INTEGER,
       allowNull: true,
     },
+    vendor_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
     is_default: {
       type: DataTypes.BOOLEAN,
       defaultValue: false,

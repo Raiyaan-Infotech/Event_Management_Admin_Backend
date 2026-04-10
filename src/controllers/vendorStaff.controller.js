@@ -32,4 +32,9 @@ const remove = asyncHandler(async (req, res) => {
     ApiResponse.success(res, null, 'Staff member deleted successfully');
 });
 
-module.exports = { getAll, getById, create, update, updateStatus, remove };
+const reassignStaffRole = asyncHandler(async (req, res) => {
+    const staff = await vendorStaffService.reassignRole(req.params.id, req.body.role_id, req.vendor.id);
+    ApiResponse.success(res, { staff }, 'Staff role updated successfully');
+});
+
+module.exports = { getAll, getById, create, update, updateStatus, remove, reassignStaffRole };

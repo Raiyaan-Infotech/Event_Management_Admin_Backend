@@ -5,12 +5,15 @@ const vendorController = require('../controllers/vendor.controller');
 const vendorClientController = require('../controllers/vendorClient.controller');
 const vendorStaffController = require('../controllers/vendorStaff.controller');
 const vendorStaffAuthController = require('../controllers/vendorStaffAuth.controller');
+const vendorRoleController = require('../controllers/vendorRole.controller');
+const vendorPermissionController = require('../controllers/vendorPermission.controller');
+const staffPortalController = require('../controllers/staffPortal.controller');
 const mediaService = require('../services/media.service');
 const ApiResponse = require('../utils/apiResponse');
 const { isAuthenticated, hasPermission } = require('../middleware/auth');
 const { extractCompanyContext } = require('../middleware/company');
 const { isVendorAuthenticated } = require('../middleware/vendorAuth');
-const { isStaffAuthenticated } = require('../middleware/staffAuth');
+const { isStaffAuthenticated, hasStaffPermission } = require('../middleware/staffAuth');
 const { checkApprovalRequired } = require('../middleware/approval');
 const { asyncHandler } = require('../utils/helpers');
 
@@ -58,6 +61,46 @@ router.post('/auth/upload', isVendorAuthenticated, (req, res, next) => {
     return ApiResponse.success(res, { file: result }, 'File uploaded successfully');
 }));
 
+// ─── Vendor RBAC — Roles (vendor JWT) ────────────────────────────────────────
+router.get('/roles',                  isVendorAuthenticated, vendorRoleController.getAll);
+router.get('/roles/:id',              isVendorAuthenticated, vendorRoleController.getById);
+router.post('/roles',                 isVendorAuthenticated, vendorRoleController.create);
+router.put('/roles/:id',              isVendorAuthenticated, vendorRoleController.update);
+router.delete('/roles/:id',           isVendorAuthenticated, vendorRoleController.delete);
+router.put('/roles/:id/permissions',  isVendorAuthenticated, vendorRoleController.assignPermissions);
+
+// ─── Vendor RBAC — Modules & Permissions (vendor JWT, view only) ─────────────
+router.get('/modules',                isVendorAuthenticated, vendorPermissionController.getModules);
+router.get('/permissions',            isVendorAuthenticated, vendorPermissionController.getPermissions);
+
+// ─── Staff Portal — Clients (staff JWT, permission-gated) ────────────────────
+router.get('/staff/portal/clients',        isStaffAuthenticated, hasStaffPermission('client.view'),   staffPortalController.getClients);
+router.get('/staff/portal/clients/:id',    isStaffAuthenticated, hasStaffPermission('client.view'),   staffPortalController.getClientById);
+router.post('/staff/portal/clients',       isStaffAuthenticated, hasStaffPermission('client.create'), staffPortalController.createClient);
+router.put('/staff/portal/clients/:id',    isStaffAuthenticated, hasStaffPermission('client.edit'),   staffPortalController.updateClient);
+router.patch('/staff/portal/clients/:id',  isStaffAuthenticated, hasStaffPermission('client.edit'),   staffPortalController.updateClientStatus);
+router.delete('/staff/portal/clients/:id', isStaffAuthenticated, hasStaffPermission('client.delete'), staffPortalController.deleteClient);
+
+// ─── Staff Portal — Staff (staff JWT, permission-gated) ──────────────────────
+router.get('/staff/portal/staff',          isStaffAuthenticated, hasStaffPermission('staff.view'),   staffPortalController.getStaff);
+router.get('/staff/portal/staff/:id',      isStaffAuthenticated, hasStaffPermission('staff.view'),   staffPortalController.getStaffById);
+router.post('/staff/portal/staff',         isStaffAuthenticated, hasStaffPermission('staff.create'), staffPortalController.createStaff);
+router.put('/staff/portal/staff/:id',      isStaffAuthenticated, hasStaffPermission('staff.edit'),   staffPortalController.updateStaff);
+// NOTE: is_active and login_access changes are vendor-only — no PATCH in staff portal
+router.delete('/staff/portal/staff/:id',   isStaffAuthenticated, hasStaffPermission('staff.delete'), staffPortalController.deleteStaff);
+
+// ─── Staff Portal — Roles (staff JWT, permission-gated) ──────────────────────
+router.get('/staff/portal/roles',              isStaffAuthenticated, hasStaffPermission('roles.view'),   staffPortalController.getRoles);
+router.get('/staff/portal/roles/:id',          isStaffAuthenticated, hasStaffPermission('roles.view'),   staffPortalController.getRoleById);
+router.post('/staff/portal/roles',             isStaffAuthenticated, hasStaffPermission('roles.create'), staffPortalController.createRole);
+router.put('/staff/portal/roles/:id',          isStaffAuthenticated, hasStaffPermission('roles.edit'),   staffPortalController.updateRole);
+router.delete('/staff/portal/roles/:id',       isStaffAuthenticated, hasStaffPermission('roles.delete'), staffPortalController.deleteRole);
+router.put('/staff/portal/roles/:id/permissions', isStaffAuthenticated, hasStaffPermission('roles.edit'), staffPortalController.assignRolePermissions);
+
+// ─── Staff Portal — Modules & Permissions (view only) ────────────────────────
+router.get('/staff/portal/modules',      isStaffAuthenticated, staffPortalController.getModules);
+router.get('/staff/portal/permissions',  isStaffAuthenticated, staffPortalController.getPermissions);
+
 // ─── Vendor Clients (vendor JWT) ─────────────────────────────────────────────
 router.get('/clients',              isVendorAuthenticated, vendorClientController.getAll);
 router.get('/clients/:id',          isVendorAuthenticated, vendorClientController.getById);
@@ -71,6 +114,7 @@ router.get('/staff',              isVendorAuthenticated, vendorStaffController.g
 router.get('/staff/:id',          isVendorAuthenticated, vendorStaffController.getById);
 router.post('/staff',             isVendorAuthenticated, vendorStaffController.create);
 router.put('/staff/:id',          isVendorAuthenticated, vendorStaffController.update);
+router.put('/staff/:id/role',     isVendorAuthenticated, vendorStaffController.reassignStaffRole);
 router.patch('/staff/:id/status', isVendorAuthenticated, vendorStaffController.updateStatus);
 router.delete('/staff/:id',       isVendorAuthenticated, vendorStaffController.remove);
 

@@ -9,6 +9,8 @@ module.exports = (sequelize) => {
         mobile:           { type: DataTypes.STRING(20),  allowNull: false },
         email:            { type: DataTypes.STRING(255), allowNull: false },
         profile_pic:      { type: DataTypes.TEXT('long'), allowNull: true },
+        login_access:     { type: DataTypes.TINYINT, defaultValue: 0 },
+        send_credentials_to_email: { type: DataTypes.TINYINT, defaultValue: 0 },
         registration_type: {
             type: DataTypes.ENUM('guest', 'client'),
             defaultValue: 'client',

@@ -1,4 +1,4 @@
-const { VendorStaff, Vendor } = require('../models');
+const { VendorStaff, Vendor, Role, Permission } = require('../models');
 const ApiError = require('../utils/apiError');
 const emailSenderService = require('./emailSender.service');
 
@@ -39,7 +39,17 @@ const login = async (email, password) => {
  */
 const getProfile = async (staffId) => {
     const staff = await VendorStaff.findByPk(staffId, {
-        include: [{ model: Vendor, as: 'vendor', attributes: ['id', 'company_name', 'company_logo', 'status'] }],
+        include: [
+            { model: Vendor, as: 'vendor', attributes: ['id', 'company_name', 'company_logo', 'status'] },
+            {
+                model: Role,
+                as: 'role',
+                include: [{
+                    model: Permission,
+                    as: 'permissions',
+                }],
+            },
+        ],
     });
     if (!staff) throw ApiError.notFound('Staff member not found');
     return staff;

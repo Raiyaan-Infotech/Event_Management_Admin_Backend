@@ -1,5 +1,5 @@
 const { verifyAccessToken, verifyRefreshToken, generateStaffAccessToken, COOKIE_OPTIONS } = require('../utils/jwt');
-const { VendorStaff } = require('../models');
+const { VendorStaff, Role, Permission, Vendor } = require('../models');
 
 const isStaffAuthenticated = async (req, res, next) => {
     try {
@@ -33,7 +33,21 @@ const isStaffAuthenticated = async (req, res, next) => {
             return res.status(401).json({ success: false, message: 'Staff authentication required.' });
         }
 
-        const staff = await VendorStaff.findByPk(decoded.id);
+        // Fetch staff with role, permissions, and parent vendor status
+        const staff = await VendorStaff.findByPk(decoded.id, {
+            include: [
+                {
+                    model: Role,
+                    as: 'role',
+                    include: [{ model: Permission, as: 'permissions' }],
+                },
+                {
+                    model: Vendor,
+                    as: 'vendor',
+                    attributes: ['id', 'status'],
+                },
+            ],
+        });
 
         if (!staff) {
             return res.status(401).json({ success: false, message: 'Staff account not found.' });
@@ -47,6 +61,10 @@ const isStaffAuthenticated = async (req, res, next) => {
             return res.status(403).json({ success: false, message: 'Your login access has been revoked.' });
         }
 
+        if (staff.vendor && staff.vendor.status !== 'active') {
+            return res.status(403).json({ success: false, message: 'Your company account is suspended. Please contact support.' });
+        }
+
         req.staff = staff;
         next();
     } catch (error) {
@@ -54,4 +72,29 @@ const isStaffAuthenticated = async (req, res, next) => {
     }
 };
 
-module.exports = { isStaffAuthenticated };
+/**
+ * Check if staff has specific permission(s)
+ * Usage: hasStaffPermission('tasks.view', 'tasks.edit')
+ */
+const hasStaffPermission = (...permissions) => {
+    return (req, res, next) => {
+        if (!req.staff) {
+            return res.status(401).json({ success: false, message: 'Staff authentication required.' });
+        }
+
+        if (!req.staff.role) {
+            return res.status(403).json({ success: false, message: 'No role assigned. Please contact your vendor.' });
+        }
+
+        const staffPermissions = req.staff.role.permissions?.map(p => p.slug) || [];
+        const hasRequired = permissions.some(p => staffPermissions.includes(p));
+
+        if (!hasRequired) {
+            return res.status(403).json({ success: false, message: 'Access denied. Insufficient permissions.' });
+        }
+
+        next();
+    };
+};
+
+module.exports = { isStaffAuthenticated, hasStaffPermission };

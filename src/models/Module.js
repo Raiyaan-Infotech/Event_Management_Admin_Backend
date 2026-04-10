@@ -25,6 +25,10 @@ module.exports = (sequelize) => {
       type: DataTypes.INTEGER,
       allowNull: true,
     },
+    vendor_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
     is_active: {
       type: DataTypes.TINYINT,
       defaultValue: 1,

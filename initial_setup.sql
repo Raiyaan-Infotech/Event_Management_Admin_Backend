@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS `roles` (
   `description` TEXT         DEFAULT NULL,
   `level`       INT          NOT NULL DEFAULT 0 COMMENT 'developer=1000,super_admin=100,admin=50,subadmin=25,custom=10',
   `company_id`  INT          DEFAULT NULL,
+  `vendor_id`   INT          DEFAULT NULL,
   `is_default`  TINYINT(1)   NOT NULL DEFAULT 0,
   `is_active`   TINYINT      NOT NULL DEFAULT 1 COMMENT '0=inactive,1=active,2=pending',
   `approved_at` DATETIME     DEFAULT NULL,
@@ -51,6 +52,7 @@ CREATE TABLE IF NOT EXISTS `roles` (
   `deleted_at`  DATETIME     DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_roles_company` (`company_id`),
+  KEY `idx_roles_vendor` (`vendor_id`),
   KEY `idx_roles_slug` (`slug`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -97,10 +99,11 @@ CREATE TABLE IF NOT EXISTS `users` (
 -- Modules
 CREATE TABLE IF NOT EXISTS `modules` (
   `id`          INT          NOT NULL AUTO_INCREMENT,
-  `name`        VARCHAR(100) NOT NULL UNIQUE,
-  `slug`        VARCHAR(100) NOT NULL UNIQUE,
+  `name`        VARCHAR(100) NOT NULL,
+  `slug`        VARCHAR(100) NOT NULL,
   `description` TEXT         DEFAULT NULL,
   `company_id`  INT          DEFAULT NULL,
+  `vendor_id`   INT          DEFAULT NULL,
   `is_active`   TINYINT      NOT NULL DEFAULT 1 COMMENT '0=inactive,1=active,2=pending',
   `created_by`  INT          DEFAULT NULL,
   `updated_by`  INT          DEFAULT NULL,
@@ -116,6 +119,7 @@ CREATE TABLE IF NOT EXISTS `permissions` (
   `name`        VARCHAR(100) NOT NULL,
   `slug`        VARCHAR(100) NOT NULL,
   `company_id`  INT          DEFAULT NULL,
+  `vendor_id`   INT          DEFAULT NULL,
   `module_id`   INT          DEFAULT NULL,
   `module`      VARCHAR(100) NOT NULL,
   `description` TEXT         DEFAULT NULL,
@@ -136,6 +140,7 @@ CREATE TABLE IF NOT EXISTS `role_permissions` (
   `role_id`           INT       NOT NULL,
   `permission_id`     INT       NOT NULL,
   `company_id`        INT       DEFAULT NULL,
+  `vendor_id`         INT       DEFAULT NULL,
   `requires_approval` TINYINT(1) NOT NULL DEFAULT 0,
   `created_at`        DATETIME  NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`        DATETIME  NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -654,115 +659,68 @@ INSERT INTO `roles` (`id`, `name`, `slug`, `description`, `level`, `company_id`,
 ON DUPLICATE KEY UPDATE `level` = VALUES(`level`), `company_id` = VALUES(`company_id`), `is_active` = 1;
 
 
-INSERT INTO `modules` (`name`, `slug`, `description`, `company_id`, `is_active`) VALUES
-  ('Employees',       'employees',       'User/employee management',              1, 1),
-  ('Roles',           'roles',           'Role management',                       1, 1),
-  ('Permissions',     'permissions',     'Permission management',                 1, 1),
-  ('Modules',         'modules',         'Module management',                     1, 1),
-  ('Settings',        'settings',        'Application settings',                  1, 1),
-  ('Locations',       'locations',       'Country, state, district, city management', 1, 1),
-  ('Languages',       'languages',       'Language management',                   1, 1),
-  ('Currencies',      'currencies',      'Currency management',                   1, 1),
-  ('Media',           'media',           'File upload and management',            1, 1),
-  ('Translations',    'translations',    'Translation key management',            1, 1),
-  ('Email Configs',   'email_configs',   'Email provider configuration',          1, 1),
-  ('Email Templates', 'email_templates', 'Email template management',             1, 1),
-  ('Email Campaigns', 'email_campaigns', 'Email campaign management',             1, 1),
-  ('Activity Logs',   'activity_logs',   'User activity audit logs',              1, 1),
-  ('Approvals',       'approvals',       'Approval workflow management',          1, 1),
-  ('Companies',       'companies',       'Company management (developer only)',   1, 1),
-  ('FAQ Categories',  'faq_categories',  'FAQ category management',               1, 1),
-  ('FAQs',            'faqs',            'FAQ management',                        1, 1),
-  ('Plugins',         'plugins',         'Plugin management',                     1, 1),
-  ('Payments',        'payments',        'Payment gateway management',            1, 1),
-  ('Platform',        'platform',        'Platform administration',               1, 1)
-ON DUPLICATE KEY UPDATE `is_active` = 1, `company_id` = VALUES(`company_id`);
+INSERT INTO `modules` (`name`, `slug`, `description`, `company_id`, `vendor_id`, `is_active`) VALUES
+  ('Dashboard',           'dashboard',          'Dashboard and analytics',          NULL, NULL, 1),
+  ('Client',              'client',             'Client management',                NULL, NULL, 1),
+  ('Staff',               'staff',              'Staff management',                 NULL, NULL, 1),
+  ('Roles',               'roles',              'Role management',                  NULL, NULL, 1),
+  ('Modules',             'modules',            'Module management',                NULL, NULL, 1),
+  ('Communication',       'communication',      'Contact, email and chat',          NULL, NULL, 1),
+  ('Reports',             'reports',            'Reports and analytics',            NULL, NULL, 1),
+  ('Transactions',        'transactions',       'Transaction management',           NULL, NULL, 1),
+  ('Event',               'event',              'Event management',                 NULL, NULL, 1),
+  ('Payment',             'payment',            'Payment management',               NULL, NULL, 1),
+  ('Settings',            'settings',           'Payment settings, configuration, currency, timezone, activity log', NULL, NULL, 1),
+  ('Help',                'help',               'Help and support',                 NULL, NULL, 1),
+  ('Website Management',  'website_management', 'Website management',               NULL, NULL, 1)
+ON DUPLICATE KEY UPDATE `is_active` = 1;
 
 
 
-INSERT INTO `permissions` (`name`, `slug`, `module`, `company_id`, `description`, `is_active`) VALUES
-  -- Employees
-  ('View Employees',   'employees.view',   'employees', 1, 'View employee list and details', 1),
-  ('Create Employee',  'employees.create', 'employees', 1, 'Create new employees',           1),
-  ('Edit Employee',    'employees.edit',   'employees', 1, 'Edit employee information',       1),
-  ('Delete Employee',  'employees.delete', 'employees', 1, 'Delete employees',               1),
+INSERT INTO `permissions` (`name`, `slug`, `module`, `company_id`, `vendor_id`, `description`, `is_active`) VALUES
+  -- Dashboard
+  ('View Dashboard',        'dashboard.view',          'dashboard',          NULL, NULL, 'View dashboard',              1),
+  -- Client
+  ('View Client',           'client.view',             'client',             NULL, NULL, 'View clients',                1),
+  ('Create Client',         'client.create',           'client',             NULL, NULL, 'Create clients',              1),
+  ('Edit Client',           'client.edit',             'client',             NULL, NULL, 'Edit clients',                1),
+  ('Delete Client',         'client.delete',           'client',             NULL, NULL, 'Delete clients',              1),
+  -- Staff
+  ('View Staff',            'staff.view',              'staff',              NULL, NULL, 'View staff',                  1),
+  ('Create Staff',          'staff.create',            'staff',              NULL, NULL, 'Create staff',                1),
+  ('Edit Staff',            'staff.edit',              'staff',              NULL, NULL, 'Edit staff',                  1),
+  ('Delete Staff',          'staff.delete',            'staff',              NULL, NULL, 'Delete staff',                1),
   -- Roles
-  ('View Roles',   'roles.view',   'roles', 1, 'View roles list',               1),
-  ('Manage Roles', 'roles.manage', 'roles', 1, 'Create, edit and delete roles', 1),
-  -- Permissions
-  ('View Permissions',   'permissions.view',   'permissions', 1, 'View permissions list',         1),
-  ('Manage Permissions', 'permissions.manage', 'permissions', 1, 'Create and edit permissions',   1),
+  ('View Roles',            'roles.view',              'roles',              NULL, NULL, 'View roles',                  1),
+  ('Create Roles',          'roles.create',            'roles',              NULL, NULL, 'Create roles',                1),
+  ('Edit Roles',            'roles.edit',              'roles',              NULL, NULL, 'Edit roles',                  1),
+  ('Delete Roles',          'roles.delete',            'roles',              NULL, NULL, 'Delete roles',                1),
   -- Modules
-  ('View Modules',   'modules.view',   'modules', 1, 'View modules list',         1),
-  ('Manage Modules', 'modules.manage', 'modules', 1, 'Create and edit modules',   1),
+  ('View Modules',          'modules.view',            'modules',            NULL, NULL, 'View modules',                1),
+  -- Communication
+  ('View Communication',    'communication.view',      'communication',      NULL, NULL, 'View communication',          1),
+  ('Send Communication',    'communication.send',      'communication',      NULL, NULL, 'Send messages and emails',    1),
+  -- Reports
+  ('View Reports',          'reports.view',            'reports',            NULL, NULL, 'View reports',                1),
+  -- Transactions
+  ('View Transactions',     'transactions.view',       'transactions',       NULL, NULL, 'View transactions',           1),
+  -- Event
+  ('View Event',            'event.view',              'event',              NULL, NULL, 'View events',                 1),
+  ('Create Event',          'event.create',            'event',              NULL, NULL, 'Create events',               1),
+  ('Edit Event',            'event.edit',              'event',              NULL, NULL, 'Edit events',                 1),
+  ('Delete Event',          'event.delete',            'event',              NULL, NULL, 'Delete events',               1),
+  -- Payment
+  ('View Payment',          'payment.view',            'payment',            NULL, NULL, 'View payments',               1),
+  ('Edit Payment',          'payment.edit',            'payment',            NULL, NULL, 'Edit payments',               1),
   -- Settings
-  ('View Settings', 'settings.view', 'settings', 1, 'View application settings',   1),
-  ('Edit Settings', 'settings.edit', 'settings', 1, 'Modify application settings', 1),
-  -- Locations
-  ('View Locations',   'locations.view',   'locations', 1, 'View countries, states, cities',  1),
-  ('Manage Locations', 'locations.manage', 'locations', 1, 'Manage countries, states, cities', 1),
-  -- Languages
-  ('View Languages',   'languages.view',   'languages', 1, 'View languages list', 1),
-  ('Create Language',  'languages.create', 'languages', 1, 'Add new languages',   1),
-  ('Edit Language',    'languages.edit',   'languages', 1, 'Edit languages',      1),
-  ('Delete Language',  'languages.delete', 'languages', 1, 'Delete languages',    1),
-  -- Currencies
-  ('View Currencies',  'currencies.view',   'currencies', 1, 'View currencies list', 1),
-  ('Create Currency',  'currencies.create', 'currencies', 1, 'Add new currencies',  1),
-  ('Edit Currency',    'currencies.edit',   'currencies', 1, 'Edit currencies',     1),
-  ('Delete Currency',  'currencies.delete', 'currencies', 1, 'Delete currencies',   1),
-  -- Media
-  ('View Media',   'media.view',   'media', 1, 'View media library',   1),
-  ('Upload Media', 'media.upload', 'media', 1, 'Upload files',         1),
-  ('Delete Media', 'media.delete', 'media', 1, 'Delete uploaded files', 1),
-  -- Translations
-  ('View Translations',   'translations.view',   'translations', 1, 'View translation keys',       1),
-  ('Create Translation',  'translations.create', 'translations', 1, 'Create translation keys',     1),
-  ('Edit Translation',    'translations.edit',   'translations', 1, 'Edit translations',           1),
-  ('Delete Translation',  'translations.delete', 'translations', 1, 'Delete translation keys',     1),
-  ('Manage Translations', 'translations.manage', 'translations', 1, 'Manage translation settings', 1),
-  -- Email Configs
-  ('View Email Configs',   'email_configs.view',   'email_configs', 1, 'View email configurations',    1),
-  ('Create Email Config',  'email_configs.create', 'email_configs', 1, 'Create email configs',         1),
-  ('Edit Email Config',    'email_configs.edit',   'email_configs', 1, 'Edit email configurations',    1),
-  ('Delete Email Config',  'email_configs.delete', 'email_configs', 1, 'Delete email configs',         1),
-  ('Manage Email Configs', 'email_configs.manage', 'email_configs', 1, 'Manage email config settings', 1),
-  -- Email Templates
-  ('Read Email Templates',   'email_templates.read',   'email_templates', 1, 'View email templates',   1),
-  ('Create Email Template',  'email_templates.create', 'email_templates', 1, 'Create email templates', 1),
-  ('Update Email Template',  'email_templates.update', 'email_templates', 1, 'Update email templates', 1),
-  ('Delete Email Template',  'email_templates.delete', 'email_templates', 1, 'Delete email templates', 1),
-  ('Manage Email Templates', 'email_templates.manage', 'email_templates', 1, 'Manage email templates', 1),
-  -- Email Campaigns
-  ('Read Email Campaigns',   'email_campaigns.read',   'email_campaigns', 1, 'View email campaigns',    1),
-  ('Create Email Campaign',  'email_campaigns.create', 'email_campaigns', 1, 'Create email campaigns',  1),
-  ('Update Email Campaign',  'email_campaigns.update', 'email_campaigns', 1, 'Update email campaigns',  1),
-  ('Delete Email Campaign',  'email_campaigns.delete', 'email_campaigns', 1, 'Delete email campaigns',  1),
-  ('Manage Email Campaigns', 'email_campaigns.manage', 'email_campaigns', 1, 'Manage campaign actions', 1),
-  -- Activity Logs
-  ('View Activity Logs',   'activity_logs.view',   'activity_logs', 1, 'View activity logs', 1),
-  ('Delete Activity Logs', 'activity_logs.delete', 'activity_logs', 1, 'Clear activity logs', 1),
-  -- FAQ Categories
-  ('View FAQ Categories',   'faq_categories.view',   'faq_categories', 1, 'View FAQ categories', 1),
-  ('Create FAQ Category',  'faq_categories.create', 'faq_categories', 1, 'Create FAQ categories', 1),
-  ('Edit FAQ Category',    'faq_categories.edit',   'faq_categories', 1, 'Edit FAQ categories',   1),
-  ('Delete FAQ Category',  'faq_categories.delete', 'faq_categories', 1, 'Delete FAQ categories', 1),
-  -- FAQs
-  ('View FAQs',   'faqs.view',   'faqs', 1, 'View FAQs', 1),
-  ('Create FAQ',  'faqs.create', 'faqs', 1, 'Create FAQs', 1),
-  ('Edit FAQ',    'faqs.edit',   'faqs', 1, 'Edit FAQs',   1),
-  ('Delete FAQ',  'faqs.delete', 'faqs', 1, 'Delete FAQs', 1),
-  -- Plugins
-  ('View Plugins',   'plugins.view',   'plugins', 1, 'View plugins', 1),
-  ('Manage Plugins', 'plugins.manage', 'plugins', 1, 'Manage plugins', 1),
-  -- Payments
-  ('View Payments',   'payments.view',   'payments', 1, 'View payment methods and transactions', 1),
-  ('Create Payment',  'payments.create', 'payments', 1, 'Record manual payments',                1),
-  ('Manage Payments', 'payments.manage', 'payments', 1, 'Update payment status',                 1),
-  -- Platform
-  ('View Platform',   'platform.view',   'platform', 1, 'View platform settings', 1),
-  ('Manage Platform', 'platform.manage', 'platform', 1, 'Manage platform settings', 1)
-ON DUPLICATE KEY UPDATE `is_active` = 1, `company_id` = VALUES(`company_id`);
+  ('View Settings',         'settings.view',           'settings',           NULL, NULL, 'View settings',               1),
+  ('Edit Settings',         'settings.edit',           'settings',           NULL, NULL, 'Edit settings',               1),
+  -- Help
+  ('View Help',             'help.view',               'help',               NULL, NULL, 'View help',                   1),
+  -- Website Management
+  ('View Website',          'website_management.view', 'website_management', NULL, NULL, 'View website management',     1),
+  ('Edit Website',          'website_management.edit', 'website_management', NULL, NULL, 'Edit website management',     1)
+ON DUPLICATE KEY UPDATE `is_active` = 1;
 
 
 
@@ -1372,7 +1330,41 @@ CREATE TABLE IF NOT EXISTS `vendors` (
   INDEX `vendors_company_id` (`company_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-
+-- Vendor Staff
+CREATE TABLE IF NOT EXISTS `vendor_staff` (
+  `id`                    INT          NOT NULL AUTO_INCREMENT,
+  `vendor_id`             INT          NOT NULL,
+  `role_id`               INT          DEFAULT NULL,
+  `emp_id`                VARCHAR(50)  DEFAULT NULL,
+  `name`                  VARCHAR(200) NOT NULL,
+  `email`                 VARCHAR(255) NOT NULL,
+  `mobile`                VARCHAR(20)  NOT NULL,
+  `designation`           VARCHAR(200) DEFAULT NULL,
+  `doj`                   DATE         DEFAULT NULL,
+  `dor`                   DATE         DEFAULT NULL,
+  `dob`                   DATE         DEFAULT NULL,
+  `profile_pic`           LONGTEXT     DEFAULT NULL,
+  `login_access`          BOOLEAN      DEFAULT 1,
+  `is_active`             TINYINT      DEFAULT 1,
+  `work_status`           ENUM('active', 'inactive', 'resigned', 'relieved') DEFAULT 'active',
+  `address`               TEXT         DEFAULT NULL,
+  `country`               VARCHAR(100) DEFAULT NULL,
+  `state`                 VARCHAR(100) DEFAULT NULL,
+  `district`              VARCHAR(100) DEFAULT NULL,
+  `city`                  VARCHAR(100) DEFAULT NULL,
+  `locality`              VARCHAR(100) DEFAULT NULL,
+  `pincode`               VARCHAR(20)  DEFAULT NULL,
+  `company_id`            INT          DEFAULT NULL,
+  `password`              VARCHAR(255) DEFAULT NULL,
+  `password_reset_token`  VARCHAR(10)  DEFAULT NULL,
+  `password_reset_expires` DATETIME    DEFAULT NULL,
+  `created_at`            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at`            DATETIME     DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_vendor_staff_vendor` (`vendor_id`),
+  KEY `idx_vendor_staff_email` (`email`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT IGNORE INTO `modules` (`name`, `slug`, `description`, `company_id`, `is_active`) VALUES
 ('Vendors', 'vendors', 'Manage vendor accounts, company info and bank details', 1, 1);
@@ -1725,3 +1717,80 @@ FROM `translation_keys` tk
 WHERE tk.`group` = 'menus'
    OR tk.`key` IN ('nav.menus','nav.events','nav.reports','nav.marketing','nav.communication','nav.notifications','nav.mail','nav.support')
 ON DUPLICATE KEY UPDATE `value` = VALUES(`value`), `status` = 'reviewed';
+
+-- ═══════════════════════════════════════════════════════════════
+-- Vendor RBAC — Init
+-- ═══════════════════════════════════════════════════════════════
+
+-- STEP 1: Add new columns
+ALTER TABLE vendor_staff ADD COLUMN IF NOT EXISTS role_id INT NULL AFTER vendor_id;
+ALTER TABLE roles ADD COLUMN IF NOT EXISTS vendor_id INT NULL AFTER company_id;
+ALTER TABLE permissions ADD COLUMN IF NOT EXISTS vendor_id INT NULL AFTER company_id;
+ALTER TABLE modules ADD COLUMN IF NOT EXISTS vendor_id INT NULL AFTER company_id;
+ALTER TABLE role_permissions ADD COLUMN IF NOT EXISTS vendor_id INT NULL AFTER company_id;
+
+-- STEP 2: Clean old admin data
+DELETE FROM role_permissions;
+DELETE FROM permissions;
+DELETE FROM modules;
+
+-- STEP 3: Insert vendor portal modules
+INSERT INTO modules (name, slug, description, company_id, vendor_id, is_active, created_at, updated_at) VALUES
+('Dashboard',           'dashboard',            'Dashboard and analytics',          NULL, NULL, 1, NOW(), NOW()),
+('Client',              'client',               'Client management',                NULL, NULL, 1, NOW(), NOW()),
+('Staff',               'staff',                'Staff management',                 NULL, NULL, 1, NOW(), NOW()),
+('Roles',               'roles',                'Role management',                  NULL, NULL, 1, NOW(), NOW()),
+('Modules',             'modules',              'Module management',                NULL, NULL, 1, NOW(), NOW()),
+('Communication',       'communication',        'Contact, email and chat',          NULL, NULL, 1, NOW(), NOW()),
+('Reports',             'reports',              'Reports and analytics',            NULL, NULL, 1, NOW(), NOW()),
+('Transactions',        'transactions',         'Transaction management',           NULL, NULL, 1, NOW(), NOW()),
+('Event',               'event',                'Event management',                 NULL, NULL, 1, NOW(), NOW()),
+('Payment',             'payment',              'Payment management',               NULL, NULL, 1, NOW(), NOW()),
+('Settings',            'settings',             'Payment settings, configuration, currency, timezone, activity log', NULL, NULL, 1, NOW(), NOW()),
+('Help',                'help',                 'Help and support',                 NULL, NULL, 1, NOW(), NOW()),
+('Website Management',  'website_management',   'Website management',               NULL, NULL, 1, NOW(), NOW());
+
+-- STEP 4: Insert permissions for each module
+INSERT INTO permissions (name, slug, module_id, module, description, company_id, vendor_id, is_active, created_at, updated_at) VALUES
+-- Dashboard
+('View Dashboard',        'dashboard.view',          (SELECT id FROM modules WHERE slug='dashboard' LIMIT 1),          'dashboard',          'View dashboard',              NULL, NULL, 1, NOW(), NOW()),
+-- Client
+('View Client',           'client.view',             (SELECT id FROM modules WHERE slug='client' LIMIT 1),             'client',             'View clients',                NULL, NULL, 1, NOW(), NOW()),
+('Create Client',         'client.create',           (SELECT id FROM modules WHERE slug='client' LIMIT 1),             'client',             'Create clients',              NULL, NULL, 1, NOW(), NOW()),
+('Edit Client',           'client.edit',             (SELECT id FROM modules WHERE slug='client' LIMIT 1),             'client',             'Edit clients',                NULL, NULL, 1, NOW(), NOW()),
+('Delete Client',         'client.delete',           (SELECT id FROM modules WHERE slug='client' LIMIT 1),             'client',             'Delete clients',              NULL, NULL, 1, NOW(), NOW()),
+-- Staff
+('View Staff',            'staff.view',              (SELECT id FROM modules WHERE slug='staff' LIMIT 1),              'staff',              'View staff',                  NULL, NULL, 1, NOW(), NOW()),
+('Create Staff',          'staff.create',            (SELECT id FROM modules WHERE slug='staff' LIMIT 1),              'staff',              'Create staff',                NULL, NULL, 1, NOW(), NOW()),
+('Edit Staff',            'staff.edit',              (SELECT id FROM modules WHERE slug='staff' LIMIT 1),              'staff',              'Edit staff',                  NULL, NULL, 1, NOW(), NOW()),
+('Delete Staff',          'staff.delete',            (SELECT id FROM modules WHERE slug='staff' LIMIT 1),              'staff',              'Delete staff',                NULL, NULL, 1, NOW(), NOW()),
+-- Roles
+('View Roles',            'roles.view',              (SELECT id FROM modules WHERE slug='roles' LIMIT 1),              'roles',              'View roles',                  NULL, NULL, 1, NOW(), NOW()),
+('Create Roles',          'roles.create',            (SELECT id FROM modules WHERE slug='roles' LIMIT 1),              'roles',              'Create roles',                NULL, NULL, 1, NOW(), NOW()),
+('Edit Roles',            'roles.edit',              (SELECT id FROM modules WHERE slug='roles' LIMIT 1),              'roles',              'Edit roles',                  NULL, NULL, 1, NOW(), NOW()),
+('Delete Roles',          'roles.delete',            (SELECT id FROM modules WHERE slug='roles' LIMIT 1),              'roles',              'Delete roles',                NULL, NULL, 1, NOW(), NOW()),
+-- Modules
+('View Modules',          'modules.view',            (SELECT id FROM modules WHERE slug='modules' LIMIT 1),            'modules',            'View modules',                NULL, NULL, 1, NOW(), NOW()),
+-- Communication
+('View Communication',    'communication.view',      (SELECT id FROM modules WHERE slug='communication' LIMIT 1),      'communication',      'View communication',          NULL, NULL, 1, NOW(), NOW()),
+('Send Communication',    'communication.send',      (SELECT id FROM modules WHERE slug='communication' LIMIT 1),      'communication',      'Send messages and emails',    NULL, NULL, 1, NOW(), NOW()),
+-- Reports
+('View Reports',          'reports.view',            (SELECT id FROM modules WHERE slug='reports' LIMIT 1),            'reports',            'View reports',                NULL, NULL, 1, NOW(), NOW()),
+-- Transactions
+('View Transactions',     'transactions.view',       (SELECT id FROM modules WHERE slug='transactions' LIMIT 1),       'transactions',       'View transactions',           NULL, NULL, 1, NOW(), NOW()),
+-- Event
+('View Event',            'event.view',              (SELECT id FROM modules WHERE slug='event' LIMIT 1),              'event',              'View events',                 NULL, NULL, 1, NOW(), NOW()),
+('Create Event',          'event.create',            (SELECT id FROM modules WHERE slug='event' LIMIT 1),              'event',              'Create events',               NULL, NULL, 1, NOW(), NOW()),
+('Edit Event',            'event.edit',              (SELECT id FROM modules WHERE slug='event' LIMIT 1),              'event',              'Edit events',                 NULL, NULL, 1, NOW(), NOW()),
+('Delete Event',          'event.delete',            (SELECT id FROM modules WHERE slug='event' LIMIT 1),              'event',              'Delete events',               NULL, NULL, 1, NOW(), NOW()),
+-- Payment
+('View Payment',          'payment.view',            (SELECT id FROM modules WHERE slug='payment' LIMIT 1),            'payment',            'View payments',               NULL, NULL, 1, NOW(), NOW()),
+('Edit Payment',          'payment.edit',            (SELECT id FROM modules WHERE slug='payment' LIMIT 1),            'payment',            'Edit payments',               NULL, NULL, 1, NOW(), NOW()),
+-- Settings
+('View Settings',         'settings.view',           (SELECT id FROM modules WHERE slug='settings' LIMIT 1),           'settings',           'View settings',               NULL, NULL, 1, NOW(), NOW()),
+('Edit Settings',         'settings.edit',           (SELECT id FROM modules WHERE slug='settings' LIMIT 1),           'settings',           'Edit settings',               NULL, NULL, 1, NOW(), NOW()),
+-- Help
+('View Help',             'help.view',               (SELECT id FROM modules WHERE slug='help' LIMIT 1),               'help',               'View help',                   NULL, NULL, 1, NOW(), NOW()),
+-- Website Management
+('View Website',          'website_management.view', (SELECT id FROM modules WHERE slug='website_management' LIMIT 1), 'website_management', 'View website management',     NULL, NULL, 1, NOW(), NOW()),
+('Edit Website',          'website_management.edit', (SELECT id FROM modules WHERE slug='website_management' LIMIT 1), 'website_management', 'Edit website management',     NULL, NULL, 1, NOW(), NOW());
