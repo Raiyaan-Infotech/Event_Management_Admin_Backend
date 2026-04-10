@@ -18,7 +18,7 @@ const create = asyncHandler(async (req, res) => {
 });
 
 const update = asyncHandler(async (req, res) => {
-    const staff = await vendorStaffService.update(req.params.id, req.body, req.vendor.id);
+    const staff = await vendorStaffService.update(req.params.id, req.body, req.vendor.id, true);
     ApiResponse.success(res, staff, 'Staff member updated successfully');
 });
 

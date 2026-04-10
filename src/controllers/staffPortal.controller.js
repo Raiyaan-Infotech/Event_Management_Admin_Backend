@@ -59,7 +59,13 @@ const createStaff = asyncHandler(async (req, res) => {
     ApiResponse.success(res, staff, 'Staff created successfully', 201);
 });
 
+const VENDOR_ONLY_FIELDS = ['role_id', 'password', 'is_active', 'login_access', 'emp_id', 'vendor_id'];
+
 const updateStaff = asyncHandler(async (req, res) => {
+    const restricted = VENDOR_ONLY_FIELDS.filter(f => req.body[f] !== undefined);
+    if (restricted.length > 0) {
+        return ApiResponse.error(res, `Field(s) [${restricted.join(', ')}] can only be changed by the vendor`, 403);
+    }
     const staff = await vendorStaffService.update(req.params.id, req.body, req.staff.vendor_id);
     ApiResponse.success(res, staff, 'Staff updated successfully');
 });

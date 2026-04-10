@@ -5,7 +5,7 @@ const { Module, Permission } = require('../models');
  */
 const getModules = async () => {
   const modules = await Module.findAll({
-    where: { vendor_id: null, is_active: 1 },
+    where: { vendor_id: null, company_id: null, is_active: 1 },
     include: [{
       model: Permission,
       as: 'permissions',

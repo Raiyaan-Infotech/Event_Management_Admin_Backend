@@ -1366,6 +1366,38 @@ CREATE TABLE IF NOT EXISTS `vendor_staff` (
   KEY `idx_vendor_staff_email` (`email`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Vendor Clients
+CREATE TABLE IF NOT EXISTS `vendor_clients` (
+  `id`                        INT          NOT NULL AUTO_INCREMENT,
+  `vendor_id`                 INT          NOT NULL,
+  `client_id`                 VARCHAR(50)  DEFAULT NULL,
+  `name`                      VARCHAR(200) NOT NULL,
+  `mobile`                    VARCHAR(20)  NOT NULL,
+  `email`                     VARCHAR(255) NOT NULL,
+  `profile_pic`               LONGTEXT     DEFAULT NULL,
+  `registration_type`         ENUM('guest','client') DEFAULT 'client',
+  `plan`                      ENUM('silver','gold','platinum','standard','not_subscribed') DEFAULT 'not_subscribed',
+  `is_active`                 TINYINT      DEFAULT 1,
+  `address`                   TEXT         DEFAULT NULL,
+  `country`                   VARCHAR(100) DEFAULT NULL,
+  `state`                     VARCHAR(100) DEFAULT NULL,
+  `district`                  VARCHAR(100) DEFAULT NULL,
+  `city`                      VARCHAR(100) DEFAULT NULL,
+  `locality`                  VARCHAR(100) DEFAULT NULL,
+  `pincode`                   VARCHAR(20)  DEFAULT NULL,
+  `company_id`                INT          DEFAULT NULL,
+  `login_access`              TINYINT(1)   DEFAULT 0,
+  `send_credentials_to_email` TINYINT(1)   DEFAULT 0,
+  `created_at`                DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`                DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at`                DATETIME     DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- Add new client columns if table already exists (for live DB upgrades)
+ALTER TABLE `vendor_clients` ADD COLUMN IF NOT EXISTS `login_access`              TINYINT(1) DEFAULT 0;
+ALTER TABLE `vendor_clients` ADD COLUMN IF NOT EXISTS `send_credentials_to_email` TINYINT(1) DEFAULT 0;
+
 INSERT IGNORE INTO `modules` (`name`, `slug`, `description`, `company_id`, `is_active`) VALUES
 ('Vendors', 'vendors', 'Manage vendor accounts, company info and bank details', 1, 1);
 
@@ -1524,19 +1556,7 @@ ON DUPLICATE KEY UPDATE `value` = VALUES(`value`), `status` = 'reviewed';
 
 
 
-INSERT IGNORE INTO `modules` (`name`, `slug`, `description`, `company_id`, `is_active`) VALUES
-('Approvals', 'approvals', 'Approval workflow management', 1, 1);
-
-INSERT IGNORE INTO `permissions` (`name`, `slug`, `module`, `company_id`, `description`, `is_active`) VALUES
-('View Approvals',   'approvals.view',   'approvals', 1, 'View approval requests',   1),
-('Manage Approvals', 'approvals.manage', 'approvals', 1, 'Manage approval requests', 1);
-
--- Approvals are SuperAdmin-level (minLevel=100) but assign to Admin for completeness
-INSERT IGNORE INTO `role_permissions` (`role_id`, `permission_id`, `company_id`, `requires_approval`)
-SELECT 2, p.id, 1, 0 FROM `permissions` p WHERE p.`module` = 'approvals';
-
-INSERT IGNORE INTO `role_permissions` (`role_id`, `permission_id`, `company_id`, `requires_approval`)
-SELECT 3, p.id, 1, 0 FROM `permissions` p WHERE p.`module` = 'approvals';
+-- Approvals module removed — no permissions or functionality implemented
 
 -- -----------------------------------------------------------------------------
 -- 6. Companies module + permissions
@@ -1729,13 +1749,20 @@ ALTER TABLE permissions ADD COLUMN IF NOT EXISTS vendor_id INT NULL AFTER compan
 ALTER TABLE modules ADD COLUMN IF NOT EXISTS vendor_id INT NULL AFTER company_id;
 ALTER TABLE role_permissions ADD COLUMN IF NOT EXISTS vendor_id INT NULL AFTER company_id;
 
--- STEP 2: Clean old admin data
-DELETE FROM role_permissions;
-DELETE FROM permissions;
-DELETE FROM modules;
+-- STEP 2: Remove known orphaned permission records (IDs 71-76 from old seeder run — safe: 0 rows on clean DB)
+DELETE FROM permissions WHERE id BETWEEN 71 AND 76;
+
+-- STEP 2b: Rename admin modules/permissions that share slugs with vendor RBAC (safe: WHERE company_id=1 guards admin-only rows)
+UPDATE modules     SET slug='admin_roles',        name='Admin Roles'    WHERE slug='roles'         AND company_id=1;
+UPDATE modules     SET slug='admin_modules',      name='Admin Modules'  WHERE slug='modules'       AND company_id=1;
+UPDATE modules     SET slug='admin_settings',     name='Admin Settings' WHERE slug='settings'      AND company_id=1;
+UPDATE permissions SET slug='admin_roles.view'    WHERE slug='roles.view'    AND company_id=1;
+UPDATE permissions SET slug='admin_modules.view'  WHERE slug='modules.view'  AND company_id=1;
+UPDATE permissions SET slug='admin_settings.view' WHERE slug='settings.view' AND company_id=1;
+UPDATE permissions SET slug='admin_settings.edit' WHERE slug='settings.edit' AND company_id=1;
 
 -- STEP 3: Insert vendor portal modules
-INSERT INTO modules (name, slug, description, company_id, vendor_id, is_active, created_at, updated_at) VALUES
+INSERT IGNORE INTO modules (name, slug, description, company_id, vendor_id, is_active, created_at, updated_at) VALUES
 ('Dashboard',           'dashboard',            'Dashboard and analytics',          NULL, NULL, 1, NOW(), NOW()),
 ('Client',              'client',               'Client management',                NULL, NULL, 1, NOW(), NOW()),
 ('Staff',               'staff',                'Staff management',                 NULL, NULL, 1, NOW(), NOW()),
@@ -1751,7 +1778,7 @@ INSERT INTO modules (name, slug, description, company_id, vendor_id, is_active, 
 ('Website Management',  'website_management',   'Website management',               NULL, NULL, 1, NOW(), NOW());
 
 -- STEP 4: Insert permissions for each module
-INSERT INTO permissions (name, slug, module_id, module, description, company_id, vendor_id, is_active, created_at, updated_at) VALUES
+INSERT IGNORE INTO permissions (name, slug, module_id, module, description, company_id, vendor_id, is_active, created_at, updated_at) VALUES
 -- Dashboard
 ('View Dashboard',        'dashboard.view',          (SELECT id FROM modules WHERE slug='dashboard' LIMIT 1),          'dashboard',          'View dashboard',              NULL, NULL, 1, NOW(), NOW()),
 -- Client

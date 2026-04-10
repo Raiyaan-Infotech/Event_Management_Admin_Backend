@@ -59,20 +59,17 @@ const create = async (data, vendorId, companyId) => {
     }, null, companyId);
 };
 
-const VENDOR_ONLY_FIELDS = ['role_id', 'password', 'is_active', 'login_access', 'emp_id', 'vendor_id'];
+// Fields vendor portal can edit on a staff record (broader than staff portal)
+const VENDOR_EDITABLE_FIELDS = ['name', 'mobile', 'designation', 'doj', 'dob', 'dor', 'address', 'country', 'state', 'district', 'city', 'locality', 'pincode', 'work_status', 'login_access', 'password', 'role_id'];
 
-const update = async (id, data, vendorId) => {
+
+const update = async (id, data, vendorId, byVendor = false) => {
     const record = await VendorStaff.findOne({ where: { id, vendor_id: vendorId } });
     if (!record) throw ApiError.notFound('Staff member not found');
 
-    // Reject if any vendor-only fields are present in the payload
-    const restricted = VENDOR_ONLY_FIELDS.filter(f => data[f] !== undefined);
-    if (restricted.length > 0) {
-        throw ApiError.forbidden(`Field(s) [${restricted.join(', ')}] can only be changed by the vendor`);
-    }
-
+    const allowedFields = byVendor ? VENDOR_EDITABLE_FIELDS : STAFF_EDITABLE_FIELDS;
     const safeData = {};
-    for (const field of STAFF_EDITABLE_FIELDS) {
+    for (const field of allowedFields) {
         if (data[field] !== undefined) safeData[field] = data[field];
     }
 
