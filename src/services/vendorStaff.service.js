@@ -10,7 +10,7 @@ const sanitizeDateFields = (data) => {
     const sanitized = { ...data };
     
     for (const field of dateFields) {
-        if (sanitized[field]) {
+        if (sanitized[field] !== undefined && sanitized[field] !== null) {
             const dateStr = String(sanitized[field]).trim();
             // Convert "Invalid date" string to null
             if (dateStr === 'Invalid date' || dateStr === '') {
@@ -33,7 +33,7 @@ const STAFF_EDITABLE_FIELDS = ['name', 'mobile', 'designation', 'doj', 'address'
 
 // Fields allowed when creating a new staff member
 // role_id is included so vendor portal can assign a role at creation — staff portal blocks it at controller level
-const STAFF_CREATABLE_FIELDS = ['name', 'email', 'mobile', 'password', 'designation', 'doj', 'address', 'role_id', 'login_access'];
+const STAFF_CREATABLE_FIELDS = ['name', 'email', 'mobile', 'password', 'designation', 'doj', 'dob', 'dor', 'address', 'country', 'state', 'district', 'city', 'locality', 'pincode', 'work_status', 'profile_pic', 'role_id', 'login_access'];
 
 const EXCLUDE_SENSITIVE = ['password', 'password_reset_token', 'password_reset_expires'];
 
@@ -87,7 +87,8 @@ const create = async (data, vendorId, companyId) => {
 };
 
 // Fields vendor portal can edit on a staff record (broader than staff portal)
-const VENDOR_EDITABLE_FIELDS = ['name', 'mobile', 'designation', 'doj', 'dob', 'dor', 'address', 'country', 'state', 'district', 'city', 'locality', 'pincode', 'work_status', 'login_access', 'password', 'role_id'];
+// role_id is intentionally excluded — use PUT /vendors/staff/:id/role (reassignRole) which validates vendor ownership
+const VENDOR_EDITABLE_FIELDS = ['name', 'mobile', 'designation', 'doj', 'dob', 'dor', 'address', 'country', 'state', 'district', 'city', 'locality', 'pincode', 'work_status', 'profile_pic', 'login_access', 'password'];
 
 
 const update = async (id, data, vendorId, byVendor = false) => {

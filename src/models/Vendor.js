@@ -33,16 +33,21 @@ module.exports = (sequelize) => {
         pinterest:       { type: DataTypes.STRING(500), allowNull: true },
 
         // Vendor (Person) Info
-        name:       { type: DataTypes.STRING(200), allowNull: false },
-        profile:    { type: DataTypes.STRING(500), allowNull: true },
-        address:    { type: DataTypes.TEXT,        allowNull: true },
-        contact:    { type: DataTypes.STRING(20),  allowNull: true },
-        email:      { type: DataTypes.STRING(255), allowNull: false, unique: true },
+        name:        { type: DataTypes.STRING(200), allowNull: false },
+        profile:     { type: DataTypes.STRING(500), allowNull: true },
+        address:     { type: DataTypes.TEXT,        allowNull: true },
+        alt_address: { type: DataTypes.TEXT,        allowNull: true },
+        contact:     { type: DataTypes.STRING(50),  allowNull: true },
+        alt_contact: { type: DataTypes.STRING(50),  allowNull: true },
+        alt_email:   { type: DataTypes.STRING(255), allowNull: true },
+        email:       { type: DataTypes.STRING(255), allowNull: false, unique: true },
         password:   { type: DataTypes.STRING(255), allowNull: false },
         membership: {
             type: DataTypes.ENUM('basic', 'silver', 'gold', 'platinum'),
             defaultValue: 'basic',
         },
+        copywrite:   { type: DataTypes.STRING(255), allowNull: true },
+        poweredby:  { type: DataTypes.STRING(255), allowNull: true },
 
         // Bank Info
         bank_name: { type: DataTypes.STRING(200), allowNull: true },

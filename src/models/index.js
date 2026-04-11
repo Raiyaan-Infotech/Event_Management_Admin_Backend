@@ -79,7 +79,7 @@ db.MissingTranslationKey = require('./MissingTranslationKey')(sequelize, Sequeli
 // Payments
 db.Payment = require('./Payment')(sequelize, Sequelize);
 db.Currency = require('./Currency')(sequelize, Sequelize); // ✅ Add this line
-
+db.VendorPage = require('./vendorPage')(sequelize, Sequelize);
 
 // Define Associations
 // Company Relationships
@@ -152,9 +152,12 @@ db.FaqCategory.hasMany(db.Faq, { foreignKey: 'faq_category_id', as: 'faqs' });
 db.Faq.belongsTo(db.FaqCategory, { foreignKey: 'faq_category_id', as: 'category' });
 
 // Vendor Location Relationships
-db.Vendor.belongsTo(db.Country, { foreignKey: 'country_id', as: 'country' });
-db.Vendor.belongsTo(db.State,   { foreignKey: 'state_id',   as: 'state' });
-db.Vendor.belongsTo(db.City,    { foreignKey: 'city_id',    as: 'city' });
+// city_id → districts.id (the "district" level)
+// pincode_id → cities.id (locality row which has pincode column)
+db.Vendor.belongsTo(db.Country,  { foreignKey: 'country_id',  as: 'country'  });
+db.Vendor.belongsTo(db.State,    { foreignKey: 'state_id',    as: 'state'    });
+db.Vendor.belongsTo(db.District, { foreignKey: 'city_id',     as: 'district' });
+db.Vendor.belongsTo(db.City,     { foreignKey: 'pincode_id',  as: 'locality' });
 
 // Vendor Client & Staff Relationships
 db.Vendor.hasMany(db.VendorClient, { foreignKey: 'vendor_id', as: 'clients' });

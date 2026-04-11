@@ -48,6 +48,8 @@ router.get('/auth/me',               isVendorAuthenticated, vendorController.me)
 router.put('/auth/profile',          isVendorAuthenticated, vendorController.updateProfile);
 router.post('/auth/change-password', isVendorAuthenticated, vendorController.changePassword);
 router.get('/auth/activity',         isVendorAuthenticated, vendorController.getMyActivity);
+router.get('/auth/about',            isVendorAuthenticated, vendorController.getAbout);
+router.put('/auth/about',            isVendorAuthenticated, vendorController.updateAbout);
 
 // ─── Vendor Media Upload (vendor JWT) ────────────────────────────────────────
 router.post('/auth/upload', isVendorAuthenticated, (req, res, next) => {

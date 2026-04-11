@@ -1,4 +1,4 @@
-const { Vendor } = require('../models');
+const { Vendor, District, City } = require('../models');
 const baseService = require('./base.service');
 const ApiError = require('../utils/apiError');
 const emailSenderService = require('./emailSender.service');
@@ -20,6 +20,18 @@ const getById = async (id, companyId = undefined) => {
     return baseService.getById(Vendor, MODEL_NAME, id, {
         companyId,
     });
+};
+
+// For vendor portal /auth/about — includes city join for city name display
+const getProfile = async (vendorId) => {
+    const vendor = await Vendor.findByPk(vendorId, {
+        include: [
+            { model: District, as: 'district', attributes: ['id', 'name'] },
+            { model: City, as: 'locality', attributes: ['id', 'name', 'pincode'] },
+        ],
+    });
+    if (!vendor) throw ApiError.notFound('Vendor not found');
+    return vendor;
 };
 
 // For auth — needs password field included
@@ -61,10 +73,12 @@ const updateProfile = async (vendorId, data) => {
 
     // Exclude sensitive/protected fields from self-update
     const allowed = [
-        'name', 'contact', 'address', 'profile',
-        'company_name', 'company_contact', 'company_address', 'about_us',
+        'name', 'contact', 'alt_contact', 'address', 'alt_address', 'alt_email', 'profile',
+        'company_name', 'company_logo', 'company_contact', 'company_address', 'about_us',
         'company_email', 'website', 'youtube', 'facebook', 'instagram',
+        'twitter', 'linkedin', 'whatsapp', 'tiktok', 'telegram', 'pinterest',
         'bank_name', 'acc_no', 'ifsc_code', 'acc_type', 'branch',
+        'copywrite', 'poweredby',
     ];
     const filtered = {};
     for (const key of allowed) {
@@ -147,4 +161,4 @@ const resetPassword = async (email, otp, newPassword) => {
     return true;
 };
 
-module.exports = { getAll, getById, getByEmailWithPassword, create, update, updateStatus, remove, updateProfile, changePassword, forgotPassword, resetPassword };
+module.exports = { getAll, getById, getProfile, getByEmailWithPassword, create, update, updateStatus, remove, updateProfile, changePassword, forgotPassword, resetPassword };

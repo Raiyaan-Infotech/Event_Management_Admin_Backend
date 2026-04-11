@@ -29,8 +29,8 @@ const update = asyncHandler(async (req, res) => {
 });
 
 const updateStatus = asyncHandler(async (req, res) => {
-    const vendor = await vendorService.updateStatus(req.params.id, req.body.status, req.companyId);
-    ApiResponse.success(res, vendor, 'Vendor status updated successfully');
+    const page = await vendorPageService.updateStatus(req.params.id, req.vendor.id);
+    ApiResponse.success(res, page, 'Vendor status updated successfully');
 });
 
 const remove = asyncHandler(async (req, res) => {
@@ -136,4 +136,17 @@ const resetPassword = asyncHandler(async (req, res) => {
     ApiResponse.success(res, null, 'Password reset successfully');
 });
 
-module.exports = { getAll, getById, create, update, updateStatus, remove, login, logout, me, updateProfile, changePassword, getMyActivity, forgotPassword, resetPassword };
+// ─── About Company (vendor portal) ───────────────────────────────────────────
+
+const getAbout = asyncHandler(async (req, res) => {
+    const vendor = await vendorService.getProfile(req.vendor.id);
+    ApiResponse.success(res, vendor, 'About company retrieved');
+});
+
+const updateAbout = asyncHandler(async (req, res) => {
+    const vendor = await vendorService.updateProfile(req.vendor.id, req.body);
+    logVendorActivity(req.vendor.id, 'update_about', 'vendor_about', 'About company updated', req);
+    ApiResponse.success(res, vendor, 'About company updated successfully');
+});
+
+module.exports = { getAll, getById, create, update, updateStatus, remove, login, logout, me, updateProfile, changePassword, getMyActivity, forgotPassword, resetPassword, getAbout, updateAbout };
