@@ -718,8 +718,10 @@ INSERT INTO `permissions` (`name`, `slug`, `module`, `company_id`, `vendor_id`, 
   -- Help
   ('View Help',             'help.view',               'help',               NULL, NULL, 'View help',                   1),
   -- Website Management
-  ('View Website',          'website_management.view', 'website_management', NULL, NULL, 'View website management',     1),
-  ('Edit Website',          'website_management.edit', 'website_management', NULL, NULL, 'Edit website management',     1)
+  ('View Website',          'website_management.view',   'website_management', NULL, NULL, 'View website management',     1),
+  ('Edit Website',          'website_management.edit',   'website_management', NULL, NULL, 'Edit website management',     1),
+  ('Create Website Page',   'website_management.create', 'website_management', NULL, NULL, 'Create website pages',        1),
+  ('Delete Website Page',   'website_management.delete', 'website_management', NULL, NULL, 'Delete website pages',        1)
 ON DUPLICATE KEY UPDATE `is_active` = 1;
 
 
@@ -1315,6 +1317,10 @@ CREATE TABLE IF NOT EXISTS `vendors` (
   `email`           VARCHAR(255) NOT NULL,
   `password`        VARCHAR(255) NOT NULL,
   `membership`      ENUM('basic','silver','gold','platinum') NOT NULL DEFAULT 'basic',
+  `copywrite`       VARCHAR(255) NULL,
+  `poweredby`       VARCHAR(255) NULL,
+  `footer_links`    JSON NULL,
+  `nav_menu`        JSON NULL,
   `status`          ENUM('active','inactive') NOT NULL DEFAULT 'active',
 
   -- Bank Info
@@ -1843,5 +1849,7 @@ INSERT IGNORE INTO permissions (name, slug, module_id, module, description, comp
 -- Help
 ('View Help',             'help.view',               (SELECT id FROM modules WHERE slug='help' LIMIT 1),               'help',               'View help',                   NULL, NULL, 1, NOW(), NOW()),
 -- Website Management
-('View Website',          'website_management.view', (SELECT id FROM modules WHERE slug='website_management' LIMIT 1), 'website_management', 'View website management',     NULL, NULL, 1, NOW(), NOW()),
-('Edit Website',          'website_management.edit', (SELECT id FROM modules WHERE slug='website_management' LIMIT 1), 'website_management', 'Edit website management',     NULL, NULL, 1, NOW(), NOW());
+('View Website',          'website_management.view',   (SELECT id FROM modules WHERE slug='website_management' LIMIT 1), 'website_management', 'View website management',     NULL, NULL, 1, NOW(), NOW()),
+('Edit Website',          'website_management.edit',   (SELECT id FROM modules WHERE slug='website_management' LIMIT 1), 'website_management', 'Edit website management',     NULL, NULL, 1, NOW(), NOW()),
+('Create Website Page',   'website_management.create', (SELECT id FROM modules WHERE slug='website_management' LIMIT 1), 'website_management', 'Create website pages',        NULL, NULL, 1, NOW(), NOW()),
+('Delete Website Page',   'website_management.delete', (SELECT id FROM modules WHERE slug='website_management' LIMIT 1), 'website_management', 'Delete website pages',        NULL, NULL, 1, NOW(), NOW());

@@ -57,8 +57,10 @@ module.exports = (sequelize) => {
             type: DataTypes.ENUM('basic', 'silver', 'gold', 'platinum'),
             defaultValue: 'basic',
         },
-        copywrite:   { type: DataTypes.STRING(255), allowNull: true },
-        poweredby:  { type: DataTypes.STRING(255), allowNull: true },
+        copywrite:     { type: DataTypes.STRING(255), allowNull: true },
+        poweredby:     { type: DataTypes.STRING(255), allowNull: true },
+        footer_links:  { type: DataTypes.JSON, allowNull: true, defaultValue: null },
+        nav_menu:      { type: DataTypes.JSON, allowNull: true, defaultValue: null },
 
         // Bank Info
         bank_name: { type: DataTypes.STRING(200), allowNull: true },
