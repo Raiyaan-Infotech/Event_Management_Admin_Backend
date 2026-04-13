@@ -6,6 +6,8 @@ const vendorClientService     = require('../services/vendorClient.service');
 const vendorStaffService      = require('../services/vendorStaff.service');
 const vendorRoleService       = require('../services/vendorRole.service');
 const vendorPermissionService = require('../services/vendorPermission.service');
+const vendorService           = require('../services/vendor.service');
+const vendorPageService       = require('../services/vendorPage.service');
 const ApiResponse             = require('../utils/apiResponse');
 const { asyncHandler }        = require('../utils/helpers');
 
@@ -137,6 +139,43 @@ const assignRolePermissions = asyncHandler(async (req, res) => {
     ApiResponse.success(res, { role }, 'Permissions assigned successfully');
 });
 
+// ─── Website About ────────────────────────────────────────────────────────────
+const getWebsiteAbout = asyncHandler(async (req, res) => {
+    const vendor = await vendorService.getProfile(req.staff.vendor_id);
+    ApiResponse.success(res, vendor, 'Vendor profile retrieved successfully');
+});
+
+const updateWebsiteAbout = asyncHandler(async (req, res) => {
+    const vendor = await vendorService.updateProfile(req.staff.vendor_id, req.body);
+    ApiResponse.success(res, vendor, 'Vendor profile updated successfully');
+});
+
+// ─── Website Pages ────────────────────────────────────────────────────────────
+const getPages = asyncHandler(async (req, res) => {
+    const result = await vendorPageService.getAll(req.query, req.staff.vendor_id, req.staff.company_id);
+    ApiResponse.success(res, result, 'Pages retrieved successfully');
+});
+
+const getPageById = asyncHandler(async (req, res) => {
+    const page = await vendorPageService.getById(req.params.id, req.staff.vendor_id);
+    ApiResponse.success(res, page, 'Page retrieved successfully');
+});
+
+const createPage = asyncHandler(async (req, res) => {
+    const page = await vendorPageService.create(req.body, req.staff.vendor_id, req.staff.company_id);
+    ApiResponse.success(res, page, 'Page created successfully', 201);
+});
+
+const updatePage = asyncHandler(async (req, res) => {
+    const page = await vendorPageService.update(req.params.id, req.body, req.staff.vendor_id);
+    ApiResponse.success(res, page, 'Page updated successfully');
+});
+
+const deletePage = asyncHandler(async (req, res) => {
+    await vendorPageService.remove(req.params.id, req.staff.vendor_id);
+    ApiResponse.success(res, null, 'Page deleted successfully');
+});
+
 // ─── Modules & Permissions (view only) ───────────────────────────────────────
 const getModules = asyncHandler(async (req, res) => {
     const modules = await vendorPermissionService.getModules();
@@ -157,4 +196,8 @@ module.exports = {
     getRoles, getRoleById, createRole, updateRole, deleteRole, assignRolePermissions,
     // modules & permissions
     getModules, getPermissions,
+    // website about
+    getWebsiteAbout, updateWebsiteAbout,
+    // website pages
+    getPages, getPageById, createPage, updatePage, deletePage,
 };

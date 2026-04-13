@@ -8,6 +8,7 @@ const vendorStaffAuthController = require('../controllers/vendorStaffAuth.contro
 const vendorRoleController = require('../controllers/vendorRole.controller');
 const vendorPermissionController = require('../controllers/vendorPermission.controller');
 const staffPortalController = require('../controllers/staffPortal.controller');
+const vendorPageController = require('../controllers/vendorPage.controller');
 const mediaService = require('../services/media.service');
 const ApiResponse = require('../utils/apiResponse');
 const { isAuthenticated, hasPermission } = require('../middleware/auth');
@@ -103,6 +104,29 @@ router.put('/staff/portal/roles/:id/permissions', isStaffAuthenticated, hasStaff
 router.get('/staff/portal/modules',      isStaffAuthenticated, staffPortalController.getModules);
 router.get('/staff/portal/permissions',  isStaffAuthenticated, staffPortalController.getPermissions);
 
+// ─── Staff Portal — Website About ─────────────────────────────────────────────
+router.get('/staff/portal/website/about', isStaffAuthenticated, hasStaffPermission('website_management.view'),   staffPortalController.getWebsiteAbout);
+router.put('/staff/portal/website/about', isStaffAuthenticated, hasStaffPermission('website_management.edit'),   staffPortalController.updateWebsiteAbout);
+
+// ─── Staff Portal — Website Upload ────────────────────────────────────────────
+router.post('/staff/portal/website/upload', isStaffAuthenticated, hasStaffPermission('website_management.edit'), (req, res, next) => {
+    upload.single('file')(req, res, (err) => {
+        if (err) return res.status(400).json({ success: false, message: err.message || 'Upload failed' });
+        next();
+    });
+}, asyncHandler(async (req, res) => {
+    if (!req.file) return ApiResponse.error(res, 'No file provided', 400);
+    const result = await mediaService.upload(req.file, { folder: req.body.folder || 'vendors' }, req.staff.company_id);
+    return ApiResponse.success(res, { file: result }, 'File uploaded successfully');
+}));
+
+// ─── Staff Portal — Website Pages ─────────────────────────────────────────────
+router.get('/staff/portal/pages',        isStaffAuthenticated, hasStaffPermission('website_management.view'),   staffPortalController.getPages);
+router.get('/staff/portal/pages/:id',    isStaffAuthenticated, hasStaffPermission('website_management.view'),   staffPortalController.getPageById);
+router.post('/staff/portal/pages',       isStaffAuthenticated, hasStaffPermission('website_management.create'), staffPortalController.createPage);
+router.put('/staff/portal/pages/:id',    isStaffAuthenticated, hasStaffPermission('website_management.edit'),   staffPortalController.updatePage);
+router.delete('/staff/portal/pages/:id', isStaffAuthenticated, hasStaffPermission('website_management.delete'), staffPortalController.deletePage);
+
 // ─── Vendor Clients (vendor JWT) ─────────────────────────────────────────────
 router.get('/clients',              isVendorAuthenticated, vendorClientController.getAll);
 router.get('/clients/:id',          isVendorAuthenticated, vendorClientController.getById);
@@ -119,6 +143,14 @@ router.put('/staff/:id',          isVendorAuthenticated, vendorStaffController.u
 router.put('/staff/:id/role',     isVendorAuthenticated, vendorStaffController.reassignStaffRole);
 router.patch('/staff/:id/status', isVendorAuthenticated, vendorStaffController.updateStatus);
 router.delete('/staff/:id',       isVendorAuthenticated, vendorStaffController.remove);
+
+// ─── Vendor Pages (vendor JWT) ───────────────────────────────────────────────
+router.get('/pages',               isVendorAuthenticated, vendorPageController.getAll);
+router.get('/pages/:id',           isVendorAuthenticated, vendorPageController.getById);
+router.post('/pages',              isVendorAuthenticated, vendorPageController.create);
+router.put('/pages/:id',           isVendorAuthenticated, vendorPageController.update);
+router.patch('/pages/:id/status',  isVendorAuthenticated, vendorPageController.updateStatus);
+router.delete('/pages/:id',        isVendorAuthenticated, vendorPageController.remove);
 
 // ─── Admin CRUD (admin JWT) ───────────────────────────────────────────────────
 router.use(isAuthenticated);

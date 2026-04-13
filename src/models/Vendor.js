@@ -17,7 +17,9 @@ module.exports = (sequelize) => {
         reg_no:          { type: DataTypes.STRING(100), allowNull: true },
         gst_no:          { type: DataTypes.STRING(100), allowNull: true },
         company_address: { type: DataTypes.TEXT,        allowNull: true },
-        about_us:        { type: DataTypes.TEXT,        allowNull: true },
+        about_us:             { type: DataTypes.TEXT,        allowNull: true },
+        company_information:  { type: DataTypes.TEXT,        allowNull: true },
+        short_description:    { type: DataTypes.TEXT,        allowNull: true },
         company_contact: { type: DataTypes.STRING(20),  allowNull: true },
         landline:        { type: DataTypes.STRING(20),  allowNull: true },
         company_email:   { type: DataTypes.STRING(255), allowNull: true },
@@ -31,6 +33,15 @@ module.exports = (sequelize) => {
         tiktok:          { type: DataTypes.STRING(500), allowNull: true },
         telegram:        { type: DataTypes.STRING(500), allowNull: true },
         pinterest:       { type: DataTypes.STRING(500), allowNull: true },
+        social_visibility: {
+            type: DataTypes.JSON,
+            allowNull: true,
+            defaultValue: {
+                website: true, youtube: true, facebook: true, instagram: true,
+                twitter: true, linkedin: true, whatsapp: true, tiktok: true,
+                telegram: true, pinterest: true,
+            },
+        },
 
         // Vendor (Person) Info
         name:        { type: DataTypes.STRING(200), allowNull: false },

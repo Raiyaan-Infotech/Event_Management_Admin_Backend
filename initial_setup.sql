@@ -1286,7 +1286,9 @@ CREATE TABLE IF NOT EXISTS `vendors` (
   `reg_no`          VARCHAR(100) NULL,
   `gst_no`          VARCHAR(100) NULL,
   `company_address` TEXT NULL,
-  `about_us`        TEXT NULL,
+  `about_us`            TEXT NULL,
+  `company_information` TEXT NULL,
+  `short_description`   TEXT NULL,
   `company_contact` VARCHAR(50)  NULL,
   `landline`        VARCHAR(50)  NULL,
   `company_email`   VARCHAR(255) NULL,
@@ -1300,6 +1302,7 @@ CREATE TABLE IF NOT EXISTS `vendors` (
   `tiktok`          VARCHAR(500) NULL,
   `telegram`        VARCHAR(500) NULL,
   `pinterest`       VARCHAR(500) NULL,
+  `social_visibility` JSON NULL DEFAULT ('{"website":true,"youtube":true,"facebook":true,"instagram":true,"twitter":true,"linkedin":true,"whatsapp":true,"tiktok":true,"telegram":true,"pinterest":true}'),
 
   -- Vendor / Login Info
   `name`            VARCHAR(255) NOT NULL,
@@ -1400,6 +1403,24 @@ CREATE TABLE IF NOT EXISTS `vendor_clients` (
 -- Add new client columns if table already exists (for live DB upgrades)
 ALTER TABLE `vendor_clients` ADD COLUMN IF NOT EXISTS `login_access`              TINYINT(1) DEFAULT 0;
 ALTER TABLE `vendor_clients` ADD COLUMN IF NOT EXISTS `send_credentials_to_email` TINYINT(1) DEFAULT 0;
+
+-- ─── Vendor Pages ─────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `vendor_pages` (
+  `id`          INT          NOT NULL AUTO_INCREMENT,
+  `name`        VARCHAR(255) NOT NULL,
+  `description` TEXT         DEFAULT NULL,
+  `content`     LONGTEXT     DEFAULT NULL,
+  `is_active`   TINYINT(1)   NOT NULL DEFAULT 1,
+  `vendor_id`   INT          DEFAULT NULL,
+  `company_id`  INT          DEFAULT NULL,
+  `created_by`  INT          DEFAULT NULL,
+  `updated_by`  INT          DEFAULT NULL,
+  `deleted_by`  INT          DEFAULT NULL,
+  `created_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at`  DATETIME     DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT IGNORE INTO `modules` (`name`, `slug`, `description`, `company_id`, `is_active`) VALUES
 ('Vendors', 'vendors', 'Manage vendor accounts, company info and bank details', 1, 1);

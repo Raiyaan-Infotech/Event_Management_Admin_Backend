@@ -74,11 +74,11 @@ const updateProfile = async (vendorId, data) => {
     // Exclude sensitive/protected fields from self-update
     const allowed = [
         'name', 'contact', 'alt_contact', 'address', 'alt_address', 'alt_email', 'profile',
-        'company_name', 'company_logo', 'company_contact', 'company_address', 'about_us',
+        'company_name', 'company_logo', 'company_contact', 'company_address', 'about_us', 'short_description',
         'company_email', 'website', 'youtube', 'facebook', 'instagram',
         'twitter', 'linkedin', 'whatsapp', 'tiktok', 'telegram', 'pinterest',
         'bank_name', 'acc_no', 'ifsc_code', 'acc_type', 'branch',
-        'copywrite', 'poweredby',
+        'copywrite', 'poweredby', 'social_visibility',
     ];
     const filtered = {};
     for (const key of allowed) {
