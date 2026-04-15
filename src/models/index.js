@@ -83,7 +83,7 @@ db.VendorPage = require('./vendorPage')(sequelize, Sequelize);
 db.VendorSlider = require('./VendorSlider')(sequelize, Sequelize);
 db.VendorPortfolioItem = require('./VendorPortfolioItem')(sequelize, Sequelize);
 db.VendorGallery = require('./VendorGallery')(sequelize, Sequelize);
-db.VendorTestimonial = require('./vendorTestimonial')(sequelize, Sequelize);
+db.VendorTestimonial = require('./VendorTestimonial')(sequelize, Sequelize);
 
 // Vendor Slider → Page
 db.VendorSlider.belongsTo(db.VendorPage, { foreignKey: 'page_id', as: 'page' });
