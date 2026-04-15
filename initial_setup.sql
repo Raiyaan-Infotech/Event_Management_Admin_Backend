@@ -672,7 +672,19 @@ INSERT INTO `modules` (`name`, `slug`, `description`, `company_id`, `vendor_id`,
   ('Payment',             'payment',            'Payment management',               NULL, NULL, 1),
   ('Settings',            'settings',           'Payment settings, configuration, currency, timezone, activity log', NULL, NULL, 1),
   ('Help',                'help',               'Help and support',                 NULL, NULL, 1),
-  ('Website Management',  'website_management', 'Website management',               NULL, NULL, 1)
+  ('Website Management',  'website_management', 'Website management',               NULL, NULL, 1),
+  ('About Company',       'about',              'About company section',            NULL, NULL, 1),
+  ('Pages',               'pages',              'Website pages management',         NULL, NULL, 1),
+  ('Menu',                'menu',               'Website navigation menu',          NULL, NULL, 1),
+  ('Home',                'home',               'Home page section',                NULL, NULL, 1),
+  ('Home Slider',         'home_slider',        'Home slider management',           NULL, NULL, 1),
+  ('Gallery',             'gallery',            'Gallery management',               NULL, NULL, 1),
+  ('Portfolio',           'portfolio',          'Portfolio management',             NULL, NULL, 1),
+  ('Events Section',      'events_section',     'Website events section',           NULL, NULL, 1),
+  ('Subscription',        'subscription',       'Subscription section',             NULL, NULL, 1),
+  ('Testimonial',         'testimonial',        'Testimonials management',          NULL, NULL, 1),
+  ('Contact Us',          'contact_us',         'Contact us section',              NULL, NULL, 1),
+  ('Footer',              'footer',             'Website footer management',        NULL, NULL, 1)
 ON DUPLICATE KEY UPDATE `is_active` = 1;
 
 
@@ -717,11 +729,52 @@ INSERT INTO `permissions` (`name`, `slug`, `module`, `company_id`, `vendor_id`, 
   ('Edit Settings',         'settings.edit',           'settings',           NULL, NULL, 'Edit settings',               1),
   -- Help
   ('View Help',             'help.view',               'help',               NULL, NULL, 'View help',                   1),
-  -- Website Management
-  ('View Website',          'website_management.view',   'website_management', NULL, NULL, 'View website management',     1),
-  ('Edit Website',          'website_management.edit',   'website_management', NULL, NULL, 'Edit website management',     1),
-  ('Create Website Page',   'website_management.create', 'website_management', NULL, NULL, 'Create website pages',        1),
-  ('Delete Website Page',   'website_management.delete', 'website_management', NULL, NULL, 'Delete website pages',        1)
+  -- About Company
+  ('View About Company',        'about.view',              'about',          NULL, NULL, 'View about company section',       1),
+  ('Edit About Company',        'about.edit',              'about',          NULL, NULL, 'Edit about company section',       1),
+  -- Pages
+  ('View Pages',                'pages.view',              'pages',          NULL, NULL, 'View website pages',               1),
+  ('Create Page',               'pages.create',            'pages',          NULL, NULL, 'Create a new website page',        1),
+  ('Edit Page',                 'pages.edit',              'pages',          NULL, NULL, 'Edit an existing website page',    1),
+  ('Delete Page',               'pages.delete',            'pages',          NULL, NULL, 'Delete a website page',            1),
+  -- Menu
+  ('View Menu',                 'menu.view',               'menu',           NULL, NULL, 'View website navigation menu',     1),
+  ('Edit Menu',                 'menu.edit',               'menu',           NULL, NULL, 'Edit website navigation menu',     1),
+  -- Home
+  ('View Home',                 'home.view',               'home',           NULL, NULL, 'View home page section',           1),
+  ('Edit Home',                 'home.edit',               'home',           NULL, NULL, 'Edit home page section',           1),
+  -- Home Slider
+  ('View Home Slider',          'home_slider.view',        'home_slider',    NULL, NULL, 'View home slider items',           1),
+  ('Create Home Slider',        'home_slider.create',      'home_slider',    NULL, NULL, 'Add a home slider item',           1),
+  ('Edit Home Slider',          'home_slider.edit',        'home_slider',    NULL, NULL, 'Edit a home slider item',          1),
+  ('Delete Home Slider',        'home_slider.delete',      'home_slider',    NULL, NULL, 'Delete a home slider item',        1),
+  -- Gallery
+  ('View Gallery',              'gallery.view',            'gallery',        NULL, NULL, 'View gallery items',               1),
+  ('Create Gallery Item',       'gallery.create',          'gallery',        NULL, NULL, 'Add a gallery item',               1),
+  ('Edit Gallery Item',         'gallery.edit',            'gallery',        NULL, NULL, 'Edit a gallery item',              1),
+  ('Delete Gallery Item',       'gallery.delete',          'gallery',        NULL, NULL, 'Delete a gallery item',            1),
+  -- Portfolio
+  ('View Portfolio',            'portfolio.view',          'portfolio',      NULL, NULL, 'View portfolio items',             1),
+  ('Create Portfolio Item',     'portfolio.create',        'portfolio',      NULL, NULL, 'Add a portfolio item',             1),
+  ('Edit Portfolio Item',       'portfolio.edit',          'portfolio',      NULL, NULL, 'Edit a portfolio item',            1),
+  ('Delete Portfolio Item',     'portfolio.delete',        'portfolio',      NULL, NULL, 'Delete a portfolio item',          1),
+  -- Events Section
+  ('View Events Section',       'events_section.view',     'events_section', NULL, NULL, 'View website events section',      1),
+  ('Edit Events Section',       'events_section.edit',     'events_section', NULL, NULL, 'Edit website events section',      1),
+  -- Subscription
+  ('View Subscription',         'subscription.view',       'subscription',   NULL, NULL, 'View subscription section',        1),
+  ('Edit Subscription',         'subscription.edit',       'subscription',   NULL, NULL, 'Edit subscription section',        1),
+  -- Testimonial
+  ('View Testimonials',         'testimonial.view',        'testimonial',    NULL, NULL, 'View testimonials',                1),
+  ('Create Testimonial',        'testimonial.create',      'testimonial',    NULL, NULL, 'Add a testimonial',                1),
+  ('Edit Testimonial',          'testimonial.edit',        'testimonial',    NULL, NULL, 'Edit a testimonial',               1),
+  ('Delete Testimonial',        'testimonial.delete',      'testimonial',    NULL, NULL, 'Delete a testimonial',             1),
+  -- Contact Us
+  ('View Contact Us',           'contact_us.view',         'contact_us',     NULL, NULL, 'View contact us section',          1),
+  ('Edit Contact Us',           'contact_us.edit',         'contact_us',     NULL, NULL, 'Edit contact us section',          1),
+  -- Footer
+  ('View Footer',               'footer.view',             'footer',         NULL, NULL, 'View website footer',              1),
+  ('Edit Footer',               'footer.edit',             'footer',         NULL, NULL, 'Edit website footer',              1)
 ON DUPLICATE KEY UPDATE `is_active` = 1;
 
 
@@ -1428,6 +1481,53 @@ CREATE TABLE IF NOT EXISTS `vendor_pages` (
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS `vendor_sliders` (
+  `id`                BIGINT       NOT NULL AUTO_INCREMENT,
+  `type`              ENUM('basic','advanced') NOT NULL DEFAULT 'basic',
+  `title`             VARCHAR(255) NOT NULL,
+  `image_path`        VARCHAR(500) NOT NULL,
+  `button_label`      VARCHAR(100) NOT NULL,
+  `page_id`           INT          DEFAULT NULL,
+  `button_color`      VARCHAR(7)   DEFAULT '#3B82F6',
+  `status`            ENUM('published','draft') NOT NULL DEFAULT 'draft',
+  `is_active`         TINYINT(1)   NOT NULL DEFAULT 0,
+  `description`       TEXT         DEFAULT NULL,
+  `title_color`       VARCHAR(7)   DEFAULT '#FFFFFF',
+  `description_color` VARCHAR(7)   DEFAULT '#E2E8F0',
+  `overlay_opacity`   TINYINT      DEFAULT 40,
+  `image_blur`        TINYINT      DEFAULT 0,
+  `image_brightness`  TINYINT      DEFAULT 100,
+  `content_alignment` ENUM('left','center','right') DEFAULT 'center',
+  `vendor_id`         INT          DEFAULT NULL,
+  `company_id`        INT          DEFAULT NULL,
+  `created_by`        INT          DEFAULT NULL,
+  `updated_by`        INT          DEFAULT NULL,
+  `deleted_by`        INT          DEFAULT NULL,
+  `created_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at`        DATETIME     DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `vendor_portfolio_items` (
+  `id`         BIGINT       NOT NULL AUTO_INCREMENT,
+  `type`       ENUM('client','sponsor','event') NOT NULL,
+  `image_path` VARCHAR(500) DEFAULT NULL,
+  `label`      VARCHAR(255) DEFAULT NULL,
+  `value`      VARCHAR(255) DEFAULT NULL,
+  `sort_order` INT          DEFAULT 0,
+  `is_active`  TINYINT(1)   DEFAULT 1,
+  `vendor_id`  INT          DEFAULT NULL,
+  `company_id` INT          DEFAULT NULL,
+  `created_by` INT          DEFAULT NULL,
+  `deleted_by` INT          DEFAULT NULL,
+  `createdAt`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updatedAt`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deletedAt`  DATETIME     DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_vendor_portfolio_items_vendor_type` (`vendor_id`, `type`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 INSERT IGNORE INTO `modules` (`name`, `slug`, `description`, `company_id`, `is_active`) VALUES
 ('Vendors', 'vendors', 'Manage vendor accounts, company info and bank details', 1, 1);
 
@@ -1805,7 +1905,19 @@ INSERT IGNORE INTO modules (name, slug, description, company_id, vendor_id, is_a
 ('Payment',             'payment',              'Payment management',               NULL, NULL, 1, NOW(), NOW()),
 ('Settings',            'settings',             'Payment settings, configuration, currency, timezone, activity log', NULL, NULL, 1, NOW(), NOW()),
 ('Help',                'help',                 'Help and support',                 NULL, NULL, 1, NOW(), NOW()),
-('Website Management',  'website_management',   'Website management',               NULL, NULL, 1, NOW(), NOW());
+('Website Management',  'website_management',   'Website management',               NULL, NULL, 1, NOW(), NOW()),
+('About Company',       'about',                'About company section',            NULL, NULL, 1, NOW(), NOW()),
+('Pages',               'pages',                'Website pages management',         NULL, NULL, 1, NOW(), NOW()),
+('Menu',                'menu',                 'Website navigation menu',          NULL, NULL, 1, NOW(), NOW()),
+('Home',                'home',                 'Home page section',                NULL, NULL, 1, NOW(), NOW()),
+('Home Slider',         'home_slider',          'Home slider management',           NULL, NULL, 1, NOW(), NOW()),
+('Gallery',             'gallery',              'Gallery management',               NULL, NULL, 1, NOW(), NOW()),
+('Portfolio',           'portfolio',            'Portfolio management',             NULL, NULL, 1, NOW(), NOW()),
+('Events Section',      'events_section',       'Website events section',           NULL, NULL, 1, NOW(), NOW()),
+('Subscription',        'subscription',         'Subscription section',             NULL, NULL, 1, NOW(), NOW()),
+('Testimonial',         'testimonial',          'Testimonials management',          NULL, NULL, 1, NOW(), NOW()),
+('Contact Us',          'contact_us',           'Contact us section',              NULL, NULL, 1, NOW(), NOW()),
+('Footer',              'footer',               'Website footer management',        NULL, NULL, 1, NOW(), NOW());
 
 -- STEP 4: Insert permissions for each module
 INSERT IGNORE INTO permissions (name, slug, module_id, module, description, company_id, vendor_id, is_active, created_at, updated_at) VALUES
@@ -1848,8 +1960,49 @@ INSERT IGNORE INTO permissions (name, slug, module_id, module, description, comp
 ('Edit Settings',         'settings.edit',           (SELECT id FROM modules WHERE slug='settings' LIMIT 1),           'settings',           'Edit settings',               NULL, NULL, 1, NOW(), NOW()),
 -- Help
 ('View Help',             'help.view',               (SELECT id FROM modules WHERE slug='help' LIMIT 1),               'help',               'View help',                   NULL, NULL, 1, NOW(), NOW()),
--- Website Management
-('View Website',          'website_management.view',   (SELECT id FROM modules WHERE slug='website_management' LIMIT 1), 'website_management', 'View website management',     NULL, NULL, 1, NOW(), NOW()),
-('Edit Website',          'website_management.edit',   (SELECT id FROM modules WHERE slug='website_management' LIMIT 1), 'website_management', 'Edit website management',     NULL, NULL, 1, NOW(), NOW()),
-('Create Website Page',   'website_management.create', (SELECT id FROM modules WHERE slug='website_management' LIMIT 1), 'website_management', 'Create website pages',        NULL, NULL, 1, NOW(), NOW()),
-('Delete Website Page',   'website_management.delete', (SELECT id FROM modules WHERE slug='website_management' LIMIT 1), 'website_management', 'Delete website pages',        NULL, NULL, 1, NOW(), NOW());
+-- About Company
+('View About Company',        'about.view',              (SELECT id FROM modules WHERE slug='about'          LIMIT 1), 'about',          'View about company section',       NULL, NULL, 1, NOW(), NOW()),
+('Edit About Company',        'about.edit',              (SELECT id FROM modules WHERE slug='about'          LIMIT 1), 'about',          'Edit about company section',       NULL, NULL, 1, NOW(), NOW()),
+-- Pages
+('View Pages',                'pages.view',              (SELECT id FROM modules WHERE slug='pages'          LIMIT 1), 'pages',          'View website pages',               NULL, NULL, 1, NOW(), NOW()),
+('Create Page',               'pages.create',            (SELECT id FROM modules WHERE slug='pages'          LIMIT 1), 'pages',          'Create a new website page',        NULL, NULL, 1, NOW(), NOW()),
+('Edit Page',                 'pages.edit',              (SELECT id FROM modules WHERE slug='pages'          LIMIT 1), 'pages',          'Edit an existing website page',    NULL, NULL, 1, NOW(), NOW()),
+('Delete Page',               'pages.delete',            (SELECT id FROM modules WHERE slug='pages'          LIMIT 1), 'pages',          'Delete a website page',            NULL, NULL, 1, NOW(), NOW()),
+-- Menu
+('View Menu',                 'menu.view',               (SELECT id FROM modules WHERE slug='menu'           LIMIT 1), 'menu',           'View website navigation menu',     NULL, NULL, 1, NOW(), NOW()),
+('Edit Menu',                 'menu.edit',               (SELECT id FROM modules WHERE slug='menu'           LIMIT 1), 'menu',           'Edit website navigation menu',     NULL, NULL, 1, NOW(), NOW()),
+-- Home
+('View Home',                 'home.view',               (SELECT id FROM modules WHERE slug='home'           LIMIT 1), 'home',           'View home page section',           NULL, NULL, 1, NOW(), NOW()),
+('Edit Home',                 'home.edit',               (SELECT id FROM modules WHERE slug='home'           LIMIT 1), 'home',           'Edit home page section',           NULL, NULL, 1, NOW(), NOW()),
+-- Home Slider
+('View Home Slider',          'home_slider.view',        (SELECT id FROM modules WHERE slug='home_slider'    LIMIT 1), 'home_slider',    'View home slider items',           NULL, NULL, 1, NOW(), NOW()),
+('Create Home Slider',        'home_slider.create',      (SELECT id FROM modules WHERE slug='home_slider'    LIMIT 1), 'home_slider',    'Add a home slider item',           NULL, NULL, 1, NOW(), NOW()),
+('Edit Home Slider',          'home_slider.edit',        (SELECT id FROM modules WHERE slug='home_slider'    LIMIT 1), 'home_slider',    'Edit a home slider item',          NULL, NULL, 1, NOW(), NOW()),
+('Delete Home Slider',        'home_slider.delete',      (SELECT id FROM modules WHERE slug='home_slider'    LIMIT 1), 'home_slider',    'Delete a home slider item',        NULL, NULL, 1, NOW(), NOW()),
+-- Gallery
+('View Gallery',              'gallery.view',            (SELECT id FROM modules WHERE slug='gallery'        LIMIT 1), 'gallery',        'View gallery items',               NULL, NULL, 1, NOW(), NOW()),
+('Create Gallery Item',       'gallery.create',          (SELECT id FROM modules WHERE slug='gallery'        LIMIT 1), 'gallery',        'Add a gallery item',               NULL, NULL, 1, NOW(), NOW()),
+('Edit Gallery Item',         'gallery.edit',            (SELECT id FROM modules WHERE slug='gallery'        LIMIT 1), 'gallery',        'Edit a gallery item',              NULL, NULL, 1, NOW(), NOW()),
+('Delete Gallery Item',       'gallery.delete',          (SELECT id FROM modules WHERE slug='gallery'        LIMIT 1), 'gallery',        'Delete a gallery item',            NULL, NULL, 1, NOW(), NOW()),
+-- Portfolio
+('View Portfolio',            'portfolio.view',          (SELECT id FROM modules WHERE slug='portfolio'      LIMIT 1), 'portfolio',      'View portfolio items',             NULL, NULL, 1, NOW(), NOW()),
+('Create Portfolio Item',     'portfolio.create',        (SELECT id FROM modules WHERE slug='portfolio'      LIMIT 1), 'portfolio',      'Add a portfolio item',             NULL, NULL, 1, NOW(), NOW()),
+('Edit Portfolio Item',       'portfolio.edit',          (SELECT id FROM modules WHERE slug='portfolio'      LIMIT 1), 'portfolio',      'Edit a portfolio item',            NULL, NULL, 1, NOW(), NOW()),
+('Delete Portfolio Item',     'portfolio.delete',        (SELECT id FROM modules WHERE slug='portfolio'      LIMIT 1), 'portfolio',      'Delete a portfolio item',          NULL, NULL, 1, NOW(), NOW()),
+-- Events Section
+('View Events Section',       'events_section.view',     (SELECT id FROM modules WHERE slug='events_section' LIMIT 1), 'events_section', 'View website events section',      NULL, NULL, 1, NOW(), NOW()),
+('Edit Events Section',       'events_section.edit',     (SELECT id FROM modules WHERE slug='events_section' LIMIT 1), 'events_section', 'Edit website events section',      NULL, NULL, 1, NOW(), NOW()),
+-- Subscription
+('View Subscription',         'subscription.view',       (SELECT id FROM modules WHERE slug='subscription'   LIMIT 1), 'subscription',   'View subscription section',        NULL, NULL, 1, NOW(), NOW()),
+('Edit Subscription',         'subscription.edit',       (SELECT id FROM modules WHERE slug='subscription'   LIMIT 1), 'subscription',   'Edit subscription section',        NULL, NULL, 1, NOW(), NOW()),
+-- Testimonial
+('View Testimonials',         'testimonial.view',        (SELECT id FROM modules WHERE slug='testimonial'    LIMIT 1), 'testimonial',    'View testimonials',                NULL, NULL, 1, NOW(), NOW()),
+('Create Testimonial',        'testimonial.create',      (SELECT id FROM modules WHERE slug='testimonial'    LIMIT 1), 'testimonial',    'Add a testimonial',                NULL, NULL, 1, NOW(), NOW()),
+('Edit Testimonial',          'testimonial.edit',        (SELECT id FROM modules WHERE slug='testimonial'    LIMIT 1), 'testimonial',    'Edit a testimonial',               NULL, NULL, 1, NOW(), NOW()),
+('Delete Testimonial',        'testimonial.delete',      (SELECT id FROM modules WHERE slug='testimonial'    LIMIT 1), 'testimonial',    'Delete a testimonial',             NULL, NULL, 1, NOW(), NOW()),
+-- Contact Us
+('View Contact Us',           'contact_us.view',         (SELECT id FROM modules WHERE slug='contact_us'     LIMIT 1), 'contact_us',     'View contact us section',          NULL, NULL, 1, NOW(), NOW()),
+('Edit Contact Us',           'contact_us.edit',         (SELECT id FROM modules WHERE slug='contact_us'     LIMIT 1), 'contact_us',     'Edit contact us section',          NULL, NULL, 1, NOW(), NOW()),
+-- Footer
+('View Footer',               'footer.view',             (SELECT id FROM modules WHERE slug='footer'         LIMIT 1), 'footer',         'View website footer',              NULL, NULL, 1, NOW(), NOW()),
+('Edit Footer',               'footer.edit',             (SELECT id FROM modules WHERE slug='footer'         LIMIT 1), 'footer',         'Edit website footer',              NULL, NULL, 1, NOW(), NOW());

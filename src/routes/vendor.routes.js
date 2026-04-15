@@ -9,6 +9,12 @@ const vendorRoleController = require('../controllers/vendorRole.controller');
 const vendorPermissionController = require('../controllers/vendorPermission.controller');
 const staffPortalController = require('../controllers/staffPortal.controller');
 const vendorPageController = require('../controllers/vendorPage.controller');
+const vendorSliderController = require('../controllers/vendorSlider.controller');
+const vendorGalleryController = require('../controllers/vendorGallery.controller');
+const vendorTestimonialController = require('../controllers/vendorTestimonial.controller');
+const { makeController, getEvents: portfolioGetEvents, replaceEvents: portfolioReplaceEvents } = require('../controllers/vendorPortfolioItem.controller');
+const portfolioClientCtrl = makeController('client');
+const portfolioSponsorCtrl = makeController('sponsor');
 const mediaService = require('../services/media.service');
 const ApiResponse = require('../utils/apiResponse');
 const { isAuthenticated, hasPermission } = require('../middleware/auth');
@@ -151,6 +157,50 @@ router.post('/pages',              isVendorAuthenticated, vendorPageController.c
 router.put('/pages/:id',           isVendorAuthenticated, vendorPageController.update);
 router.patch('/pages/:id/status',  isVendorAuthenticated, vendorPageController.updateStatus);
 router.delete('/pages/:id',        isVendorAuthenticated, vendorPageController.remove);
+
+// ─── Vendor Sliders (vendor JWT) ─────────────────────────────────────────────
+router.get('/sliders',              isVendorAuthenticated, vendorSliderController.getAll);
+router.get('/sliders/:id',          isVendorAuthenticated, vendorSliderController.getById);
+router.post('/sliders',             isVendorAuthenticated, vendorSliderController.create);
+router.put('/sliders/:id',          isVendorAuthenticated, vendorSliderController.update);
+router.patch('/sliders/:id/status', isVendorAuthenticated, vendorSliderController.updateStatus);
+router.delete('/sliders/:id',       isVendorAuthenticated, vendorSliderController.remove);
+
+// ─── Portfolio Clients (vendor JWT) ──────────────────────────────────────────
+router.get('/portfolio/clients',              isVendorAuthenticated, portfolioClientCtrl.getAll);
+router.get('/portfolio/clients/:id',          isVendorAuthenticated, portfolioClientCtrl.getById);
+router.post('/portfolio/clients',             isVendorAuthenticated, portfolioClientCtrl.create);
+router.put('/portfolio/clients/:id',          isVendorAuthenticated, portfolioClientCtrl.update);
+router.patch('/portfolio/clients/:id/status', isVendorAuthenticated, portfolioClientCtrl.updateStatus);
+router.delete('/portfolio/clients/:id',       isVendorAuthenticated, portfolioClientCtrl.remove);
+
+// ─── Portfolio Events (vendor JWT) ───────────────────────────────────────────
+router.get('/portfolio/events', isVendorAuthenticated, portfolioGetEvents);
+router.put('/portfolio/events', isVendorAuthenticated, portfolioReplaceEvents);
+
+// ─── Portfolio Sponsors (vendor JWT) ─────────────────────────────────────────
+router.get('/portfolio/sponsors',              isVendorAuthenticated, portfolioSponsorCtrl.getAll);
+router.get('/portfolio/sponsors/:id',          isVendorAuthenticated, portfolioSponsorCtrl.getById);
+router.post('/portfolio/sponsors',             isVendorAuthenticated, portfolioSponsorCtrl.create);
+router.put('/portfolio/sponsors/:id',          isVendorAuthenticated, portfolioSponsorCtrl.update);
+router.patch('/portfolio/sponsors/:id/status', isVendorAuthenticated, portfolioSponsorCtrl.updateStatus);
+router.delete('/portfolio/sponsors/:id',       isVendorAuthenticated, portfolioSponsorCtrl.remove);
+
+// ─── Vendor Gallery (vendor JWT) ─────────────────────────────────────────────
+router.get('/gallery',               isVendorAuthenticated, vendorGalleryController.getAll);
+router.get('/gallery/:id',           isVendorAuthenticated, vendorGalleryController.getById);
+router.post('/gallery',              isVendorAuthenticated, vendorGalleryController.create);
+router.put('/gallery/:id',           isVendorAuthenticated, vendorGalleryController.update);
+router.patch('/gallery/:id/status',  isVendorAuthenticated, vendorGalleryController.updateStatus);
+router.delete('/gallery/:id',        isVendorAuthenticated, vendorGalleryController.remove);
+
+// ─── Vendor Testimonials (vendor JWT) ────────────────────────────────────────
+router.get('/testimonials',              isVendorAuthenticated, vendorTestimonialController.getAll);
+router.get('/testimonials/:id',          isVendorAuthenticated, vendorTestimonialController.getById);
+router.post('/testimonials',             isVendorAuthenticated, vendorTestimonialController.create);
+router.put('/testimonials/:id',          isVendorAuthenticated, vendorTestimonialController.update);
+router.patch('/testimonials/:id/status', isVendorAuthenticated, vendorTestimonialController.updateStatus);
+router.delete('/testimonials/:id',       isVendorAuthenticated, vendorTestimonialController.remove);
 
 // ─── Admin CRUD (admin JWT) ───────────────────────────────────────────────────
 router.use(isAuthenticated);

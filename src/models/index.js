@@ -80,6 +80,18 @@ db.MissingTranslationKey = require('./MissingTranslationKey')(sequelize, Sequeli
 db.Payment = require('./Payment')(sequelize, Sequelize);
 db.Currency = require('./Currency')(sequelize, Sequelize); // ✅ Add this line
 db.VendorPage = require('./vendorPage')(sequelize, Sequelize);
+db.VendorSlider = require('./VendorSlider')(sequelize, Sequelize);
+db.VendorPortfolioItem = require('./VendorPortfolioItem')(sequelize, Sequelize);
+db.VendorGallery = require('./VendorGallery')(sequelize, Sequelize);
+db.VendorTestimonial = require('./vendorTestimonial')(sequelize, Sequelize);
+
+// Vendor Slider → Page
+db.VendorSlider.belongsTo(db.VendorPage, { foreignKey: 'page_id', as: 'page' });
+db.VendorPage.hasMany(db.VendorSlider, { foreignKey: 'page_id', as: 'sliders' });
+
+//Vendor gallery → Vendor
+db.Vendor.hasMany(db.VendorGallery, { foreignKey: 'vendor_id', as: 'gallery' });
+db.VendorGallery.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
 
 // Define Associations
 // Company Relationships
