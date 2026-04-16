@@ -14,9 +14,9 @@ const getById = asyncHandler(async (req, res) => {
 });
 
 const create = asyncHandler(async (req, res) => {
-    const { customer_name, customer_portrait, event_name, client_feedback } = req.body;
+    const { customer_name, customer_portrait, event_name, client_feedback, is_active } = req.body;
     const item = await vendorTestimonialService.create(
-        { customer_name, customer_portrait, event_name, client_feedback, created_by: req.vendor.id },
+        { customer_name, customer_portrait, event_name, client_feedback, is_active, created_by: req.vendor.id },
         req.vendor.id,
         req.vendor.company_id,
     );
@@ -25,10 +25,10 @@ const create = asyncHandler(async (req, res) => {
 });
 
 const update = asyncHandler(async (req, res) => {
-    const { customer_name, customer_portrait, event_name, client_feedback } = req.body;
+    const { customer_name, customer_portrait, event_name, client_feedback, is_active } = req.body;
     const item = await vendorTestimonialService.update(
         req.params.id,
-        { customer_name, customer_portrait, event_name, client_feedback },
+        { customer_name, customer_portrait, event_name, client_feedback, is_active },
         req.vendor.id,
     );
     logVendorActivity(req.vendor.id, 'update_testimonial', 'vendor_testimonials', `Testimonial ${req.params.id} updated`, req);

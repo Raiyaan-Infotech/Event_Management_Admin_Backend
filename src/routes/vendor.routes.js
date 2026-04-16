@@ -194,6 +194,10 @@ router.put('/gallery/:id',           isVendorAuthenticated, vendorGalleryControl
 router.patch('/gallery/:id/status',  isVendorAuthenticated, vendorGalleryController.updateStatus);
 router.delete('/gallery/:id',        isVendorAuthenticated, vendorGalleryController.remove);
 
+// ─── Vendor Subscription (vendor JWT) ───────────────────────────────────────
+const vendorSubscriptionController = require('../controllers/vendorSubscription.controller');
+router.get('/subscription', isVendorAuthenticated, vendorSubscriptionController.getMyPlan);
+
 // ─── Vendor Testimonials (vendor JWT) ────────────────────────────────────────
 router.get('/testimonials',              isVendorAuthenticated, vendorTestimonialController.getAll);
 router.get('/testimonials/:id',          isVendorAuthenticated, vendorTestimonialController.getById);

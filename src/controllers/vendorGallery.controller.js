@@ -14,9 +14,9 @@ const getById = asyncHandler(async (req, res) => {
 });
 
 const create = asyncHandler(async (req, res) => {
-    const { event_name, city, event_img } = req.body;
+    const { event_name, city, images, img_view, is_active } = req.body;
     const item = await vendorGalleryService.create(
-        { event_name, city, event_img, created_by: req.vendor.id },
+        { event_name, city, images, img_view, is_active, created_by: req.vendor.id },
         req.vendor.id,
         req.vendor.company_id,
     );
@@ -25,10 +25,10 @@ const create = asyncHandler(async (req, res) => {
 });
 
 const update = asyncHandler(async (req, res) => {
-    const { event_name, city, event_img } = req.body;
+    const { event_name, city, images, img_view, is_active } = req.body;
     const item = await vendorGalleryService.update(
         req.params.id,
-        { event_name, city, event_img },
+        { event_name, city, images, img_view, is_active },
         req.vendor.id,
     );
     logVendorActivity(req.vendor.id, 'update_gallery', 'vendor_gallery', `Gallery item ${req.params.id} updated`, req);

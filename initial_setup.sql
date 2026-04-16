@@ -1367,6 +1367,7 @@ CREATE TABLE IF NOT EXISTS `vendors` (
   `contact`         VARCHAR(50)  NULL,
   `alt_contact`     VARCHAR(50)  NULL,
   `alt_email`       VARCHAR(255) NULL,
+  `contact_mode`    ENUM('default','alternative') NULL DEFAULT 'default',
   `email`           VARCHAR(255) NOT NULL,
   `password`        VARCHAR(255) NOT NULL,
   `membership`      ENUM('basic','silver','gold','platinum') NOT NULL DEFAULT 'basic',
@@ -1526,6 +1527,42 @@ CREATE TABLE IF NOT EXISTS `vendor_portfolio_items` (
   `deletedAt`  DATETIME     DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_vendor_portfolio_items_vendor_type` (`vendor_id`, `type`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `vendor_gallery` (
+  `id`          BIGINT       NOT NULL AUTO_INCREMENT,
+  `event_name`  VARCHAR(255) NOT NULL,
+  `city`        VARCHAR(255) NOT NULL,
+  `images`      JSON         DEFAULT NULL,
+  `img_view`    ENUM('public','private') NOT NULL DEFAULT 'public',
+  `is_active`   TINYINT(1)   DEFAULT 1,
+  `vendor_id`   INT          DEFAULT NULL,
+  `company_id`  INT          DEFAULT NULL,
+  `created_by`  INT          DEFAULT NULL,
+  `deleted_by`  INT          DEFAULT NULL,
+  `createdAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updatedAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deletedAt`   DATETIME     DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_vendor_gallery_vendor` (`vendor_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `vendor_testimonials` (
+  `id`                BIGINT        NOT NULL AUTO_INCREMENT,
+  `customer_name`     VARCHAR(255)  NOT NULL,
+  `customer_portrait` VARCHAR(500)  DEFAULT NULL,
+  `event_name`        VARCHAR(255)  NOT NULL,
+  `client_feedback`   TEXT          DEFAULT NULL,
+  `is_active`         TINYINT(1)    DEFAULT 1,
+  `vendor_id`         INT           DEFAULT NULL,
+  `company_id`        INT           DEFAULT NULL,
+  `created_by`        INT           DEFAULT NULL,
+  `deleted_by`        INT           DEFAULT NULL,
+  `createdAt`         DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updatedAt`         DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deletedAt`         DATETIME      DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_vendor_testimonials_vendor` (`vendor_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT IGNORE INTO `modules` (`name`, `slug`, `description`, `company_id`, `is_active`) VALUES

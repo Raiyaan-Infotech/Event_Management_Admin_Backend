@@ -50,7 +50,8 @@ module.exports = (sequelize) => {
         alt_address: { type: DataTypes.TEXT,        allowNull: true },
         contact:     { type: DataTypes.STRING(50),  allowNull: true },
         alt_contact: { type: DataTypes.STRING(50),  allowNull: true },
-        alt_email:   { type: DataTypes.STRING(255), allowNull: true },
+        alt_email:    { type: DataTypes.STRING(255), allowNull: true },
+        contact_mode: { type: DataTypes.ENUM('default', 'alternative'), allowNull: true, defaultValue: 'default' },
         email:       { type: DataTypes.STRING(255), allowNull: false, unique: true },
         password:   { type: DataTypes.STRING(255), allowNull: false },
         membership: {
