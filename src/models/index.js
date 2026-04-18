@@ -39,6 +39,7 @@ db.Setting = require('./Setting')(sequelize, Sequelize);
 db.ApprovalRequest = require('./ApprovalRequest')(sequelize, Sequelize);
 db.ActivityLog = require('./ActivityLog')(sequelize, Sequelize);
 db.Plugin = require('./Plugin')(sequelize, Sequelize);
+db.Theme = require('./Theme')(sequelize, Sequelize);
 
 // Locations
 db.Country = require('./Country')(sequelize, Sequelize);

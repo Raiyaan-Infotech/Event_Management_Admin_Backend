@@ -601,6 +601,27 @@ CREATE TABLE IF NOT EXISTS `faqs` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
+CREATE TABLE IF NOT EXISTS `themes` (
+  `id`             INT          NOT NULL AUTO_INCREMENT,
+  `company_id`     INT          DEFAULT NULL,
+  `name`           VARCHAR(255) NOT NULL,
+  `header_color`   VARCHAR(50)  DEFAULT NULL,
+  `footer_color`   VARCHAR(50)  DEFAULT NULL,
+  `primary_color`  VARCHAR(50)  DEFAULT NULL,
+  `secondary_color`VARCHAR(50)  DEFAULT NULL,
+  `hover_color`    VARCHAR(50)  DEFAULT NULL,
+  `text_color`     VARCHAR(50)  DEFAULT NULL,
+  `is_active`      TINYINT      NOT NULL DEFAULT 1 COMMENT '0=inactive,1=active',
+  `created_by`     INT          DEFAULT NULL,
+  `updated_by`     INT          DEFAULT NULL,
+  `created_at`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at`     DATETIME     DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_themes_company` (`company_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
 INSERT INTO `languages` (`name`, `code`, `native_name`, `direction`, `is_default`, `is_active`) VALUES
   ('English', 'en', 'English', 'ltr', 1, 1)
 ON DUPLICATE KEY UPDATE `is_default` = 1;
@@ -684,7 +705,8 @@ INSERT INTO `modules` (`name`, `slug`, `description`, `company_id`, `vendor_id`,
   ('Subscription',        'subscription',       'Subscription section',             NULL, NULL, 1),
   ('Testimonial',         'testimonial',        'Testimonials management',          NULL, NULL, 1),
   ('Contact Us',          'contact_us',         'Contact us section',              NULL, NULL, 1),
-  ('Footer',              'footer',             'Website footer management',        NULL, NULL, 1)
+  ('Footer',              'footer',             'Website footer management',        NULL, NULL, 1),
+  ('Themes',              'themes',             'Theme and styling management',     NULL, NULL, 1)
 ON DUPLICATE KEY UPDATE `is_active` = 1;
 
 
@@ -774,7 +796,12 @@ INSERT INTO `permissions` (`name`, `slug`, `module`, `company_id`, `vendor_id`, 
   ('Edit Contact Us',           'contact_us.edit',         'contact_us',     NULL, NULL, 'Edit contact us section',          1),
   -- Footer
   ('View Footer',               'footer.view',             'footer',         NULL, NULL, 'View website footer',              1),
-  ('Edit Footer',               'footer.edit',             'footer',         NULL, NULL, 'Edit website footer',              1)
+  ('Edit Footer',               'footer.edit',             'footer',         NULL, NULL, 'Edit website footer',              1),
+  -- Themes
+  ('View Themes',               'themes.view',             'themes',         NULL, NULL, 'View application themes',              1),
+  ('Create Theme',              'themes.create',           'themes',         NULL, NULL, 'Create a new theme',                   1),
+  ('Edit Theme',                'themes.edit',             'themes',         NULL, NULL, 'Edit an existing theme',               1),
+  ('Delete Theme',              'themes.delete',           'themes',         NULL, NULL, 'Delete a theme',                       1)
 ON DUPLICATE KEY UPDATE `is_active` = 1;
 
 

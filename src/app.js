@@ -52,6 +52,7 @@ app.use('/api/v1/menus', require('./routes/menu.routes'));
 app.use('/api/v1/subscriptions', require('./routes/subscription.routes'));
 app.use('/api/v1/payments', require('./routes/payment.routes'));
 app.use('/api/v1/setup', require('./routes/setup.routes'));
+app.use('/api/v1/themes', require('./routes/theme.routes'));
 app.use('/api/v1/timezones', require('./routes/timezone.routes'));
 
 // Basic health check
