@@ -101,6 +101,9 @@ db.VendorGallery.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' })
 db.VendorNewsletter.belongsTo(db.VendorClient, { foreignKey: 'client_id', as: 'client' });
 db.VendorClient.hasMany(db.VendorNewsletter, { foreignKey: 'client_id', as: 'newsletters' });
 
+// Vendor Newsletter Sent Log → Client (for current subscription status)
+db.VendorNewsletterSentLog.belongsTo(db.VendorClient, { foreignKey: 'client_id', as: 'client' });
+
 // Define Associations
 // Company Relationships
 db.Company.hasMany(db.User, { foreignKey: 'company_id', as: 'users' });

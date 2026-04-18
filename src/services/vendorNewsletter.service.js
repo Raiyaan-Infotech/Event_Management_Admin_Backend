@@ -17,7 +17,7 @@ const getUnsubscribers = async (vendorId) => {
 };
 
 // Toggle a single client's client_type
-const toggleClientType = async (id, vendorId) => {
+const toggleClientType = async (vendorId, id) => {
     const client = await VendorClient.findOne({ where: { id, vendor_id: vendorId } });
     if (!client) throw new Error('Client not found');
     const newType = client.client_type === 'subscribed' ? 'unsubscribed' : 'subscribed';
@@ -26,7 +26,7 @@ const toggleClientType = async (id, vendorId) => {
 };
 
 // Bulk-flip: all subscribed → unsubscribed, or all unsubscribed → subscribed
-const bulkUpdateClientType = async (from, to, vendorId) => {
+const bulkUpdateClientType = async (vendorId, from, to) => {
     const [affectedCount] = await VendorClient.update(
         { client_type: to },
         { where: { vendor_id: vendorId, client_type: from } }
@@ -35,7 +35,7 @@ const bulkUpdateClientType = async (from, to, vendorId) => {
 };
 
 // Bulk-update a specific list of client IDs to a given client_type
-const bulkUpdateByIds = async (ids, clientType, vendorId) => {
+const bulkUpdateByIds = async (vendorId, ids, clientType) => {
     const { Op } = require('sequelize');
     const [affectedCount] = await VendorClient.update(
         { client_type: clientType },
@@ -59,10 +59,22 @@ const createSentLog = async (vendorId, campaignId, clientId, email, name, member
 };
 
 const getSentLogs = async (vendorId) => {
-    const VendorNewsletterSentLog = require('../models').VendorNewsletterSentLog;
-    return await VendorNewsletterSentLog.findAll({
+    const { VendorNewsletterSentLog, VendorClient } = require('../models');
+    const logs = await VendorNewsletterSentLog.findAll({
         where: { vendor_id: vendorId },
+        include: [{
+            model: VendorClient,
+            as: 'client',
+            attributes: ['id', 'client_type'],
+            required: false,
+        }],
         order: [['createdAt', 'DESC']],
+    });
+    return logs.map((log) => {
+        const json = log.toJSON();
+        json.client_type = json.client?.client_type || null;
+        delete json.client;
+        return json;
     });
 };
 
