@@ -12,6 +12,7 @@ const vendorPageController = require('../controllers/vendorPage.controller');
 const vendorSliderController = require('../controllers/vendorSlider.controller');
 const vendorGalleryController = require('../controllers/vendorGallery.controller');
 const vendorTestimonialController = require('../controllers/vendorTestimonial.controller');
+const vendorNewsletterController = require('../controllers/vendorNewsletter.controller');
 const { makeController, getEvents: portfolioGetEvents, replaceEvents: portfolioReplaceEvents } = require('../controllers/vendorPortfolioItem.controller');
 const portfolioClientCtrl = makeController('client');
 const portfolioSponsorCtrl = makeController('sponsor');
@@ -205,6 +206,32 @@ router.post('/testimonials',             isVendorAuthenticated, vendorTestimonia
 router.put('/testimonials/:id',          isVendorAuthenticated, vendorTestimonialController.update);
 router.patch('/testimonials/:id/status', isVendorAuthenticated, vendorTestimonialController.updateStatus);
 router.delete('/testimonials/:id',       isVendorAuthenticated, vendorTestimonialController.remove);
+
+// ─── Vendor Newsletter (vendor JWT) ──────────────────────────────────────────
+router.get('/newsletter/subscribers',          isVendorAuthenticated, vendorNewsletterController.getSubscribers);
+router.get('/newsletter/unsubscribers',        isVendorAuthenticated, vendorNewsletterController.getUnsubscribers);
+router.get('/newsletter/sent-logs',            isVendorAuthenticated, vendorNewsletterController.getSentLogs);
+router.patch('/newsletter/bulk',               isVendorAuthenticated, vendorNewsletterController.bulkUpdateClientType);
+router.patch('/newsletter/bulk-ids',           isVendorAuthenticated, vendorNewsletterController.bulkUpdateByIds);
+router.patch('/newsletter/:id/client-type',    isVendorAuthenticated, vendorNewsletterController.toggleClientType);
+router.post('/newsletter/send',                isVendorAuthenticated, vendorNewsletterController.sendNewsletter);
+
+// ─── Vendor Email Categories (vendor JWT) ────────────────────────────────────
+const vendorEmailCategoryController = require('../controllers/vendorEmailCategory.controller');
+router.get('/email-categories',        isVendorAuthenticated, vendorEmailCategoryController.getAll);
+router.get('/email-categories/:id',    isVendorAuthenticated, vendorEmailCategoryController.getById);
+router.post('/email-categories',       isVendorAuthenticated, vendorEmailCategoryController.create);
+router.put('/email-categories/:id',    isVendorAuthenticated, vendorEmailCategoryController.update);
+router.delete('/email-categories/:id', isVendorAuthenticated, vendorEmailCategoryController.delete);
+
+// ─── Vendor Email Templates (vendor JWT) ─────────────────────────────────────
+const vendorEmailTemplateController = require('../controllers/vendorEmailTemplate.controller');
+router.get('/email-templates',               isVendorAuthenticated, vendorEmailTemplateController.getAll);
+router.get('/email-templates/:id',           isVendorAuthenticated, vendorEmailTemplateController.getById);
+router.post('/email-templates',              isVendorAuthenticated, vendorEmailTemplateController.create);
+router.put('/email-templates/:id',           isVendorAuthenticated, vendorEmailTemplateController.update);
+router.patch('/email-templates/:id/status',  isVendorAuthenticated, vendorEmailTemplateController.updateStatus);
+router.delete('/email-templates/:id',        isVendorAuthenticated, vendorEmailTemplateController.delete);
 
 // ─── Admin CRUD (admin JWT) ───────────────────────────────────────────────────
 router.use(isAuthenticated);

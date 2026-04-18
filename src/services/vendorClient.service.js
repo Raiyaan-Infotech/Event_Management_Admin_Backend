@@ -8,7 +8,7 @@ const MODEL_NAME = 'VendorClient';
 const CLIENT_CREATABLE_FIELDS = [
     'name', 'email', 'mobile', 'profile_pic',
     'address', 'country', 'state', 'district', 'city', 'locality', 'pincode',
-    'plan', 'registration_type', 'login_access', 'send_credentials_to_email',
+    'plan', 'registration_type', 'client_type', 'login_access', 'send_credentials_to_email',
     'password',
 ];
 
@@ -16,7 +16,7 @@ const CLIENT_CREATABLE_FIELDS = [
 const CLIENT_EDITABLE_FIELDS = [
     'name', 'email', 'mobile', 'profile_pic',
     'address', 'country', 'state', 'district', 'city', 'locality', 'pincode',
-    'plan', 'registration_type', 'login_access', 'send_credentials_to_email',
+    'plan', 'registration_type', 'client_type', 'login_access', 'send_credentials_to_email',
 ];
 
 const getAll = async (query = {}, vendorId) => {

@@ -1442,7 +1442,8 @@ CREATE TABLE IF NOT EXISTS `vendor_clients` (
   `email`                     VARCHAR(255) NOT NULL,
   `profile_pic`               LONGTEXT     DEFAULT NULL,
   `registration_type`         ENUM('guest','client') DEFAULT 'client',
-  `plan`                      ENUM('silver','gold','platinum','standard','not_subscribed') DEFAULT 'not_subscribed',
+  `plan`                      ENUM('silver','gold','platinum','standard') DEFAULT NULL,
+  `client_type`               ENUM('subscribed','unsubscribed') NOT NULL DEFAULT 'subscribed',
   `is_active`                 TINYINT      DEFAULT 1,
   `address`                   TEXT         DEFAULT NULL,
   `country`                   VARCHAR(100) DEFAULT NULL,
@@ -1463,6 +1464,8 @@ CREATE TABLE IF NOT EXISTS `vendor_clients` (
 -- Add new client columns if table already exists (for live DB upgrades)
 ALTER TABLE `vendor_clients` ADD COLUMN IF NOT EXISTS `login_access`              TINYINT(1) DEFAULT 0;
 ALTER TABLE `vendor_clients` ADD COLUMN IF NOT EXISTS `send_credentials_to_email` TINYINT(1) DEFAULT 0;
+ALTER TABLE `vendor_clients` ADD COLUMN IF NOT EXISTS `client_type`               ENUM('subscribed','unsubscribed') NOT NULL DEFAULT 'subscribed';
+ALTER TABLE `vendor_clients` MODIFY COLUMN `plan`                                  ENUM('silver','gold','platinum','standard') DEFAULT NULL;
 
 -- ─── Vendor Pages ─────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS `vendor_pages` (
@@ -1563,6 +1566,78 @@ CREATE TABLE IF NOT EXISTS `vendor_testimonials` (
   `deletedAt`         DATETIME      DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_vendor_testimonials_vendor` (`vendor_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `vendor_email_categories` (
+  `id`          INT          NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `vendor_id`   INT          NOT NULL,
+  `company_id`  INT          DEFAULT NULL,
+  `name`        VARCHAR(100) NOT NULL,
+  `description` TEXT         DEFAULT NULL,
+  `sort_order`  INT          DEFAULT 0,
+  `is_active`   TINYINT(1)   DEFAULT 1,
+  `created_by`  INT          DEFAULT NULL,
+  `deleted_by`  INT          DEFAULT NULL,
+  `createdAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updatedAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deletedAt`   DATETIME     DEFAULT NULL,
+  KEY `idx_vec_vendor` (`vendor_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `vendor_email_templates` (
+  `id`          INT          NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `vendor_id`   INT          NOT NULL,
+  `company_id`  INT          DEFAULT NULL,
+  `category_id` INT          DEFAULT NULL,
+  `name`        VARCHAR(255) NOT NULL,
+  `description` LONGTEXT     DEFAULT NULL,
+  `is_active`   TINYINT(1)   DEFAULT 1,
+  `created_by`  INT          DEFAULT NULL,
+  `deleted_by`  INT          DEFAULT NULL,
+  `createdAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updatedAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deletedAt`   DATETIME     DEFAULT NULL,
+  KEY `idx_vet_vendor` (`vendor_id`),
+  KEY `idx_vet_category` (`category_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `vendor_newsletters` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `vendor_id` INT UNSIGNED NOT NULL,
+  `company_id` INT UNSIGNED NULL,
+  `client_id` INT NOT NULL,
+  `client_type` ENUM('subscribed', 'unsubscribed') DEFAULT 'subscribed',
+  `registration_type` ENUM('guest', 'client') NOT NULL,
+  `created_by` INT NULL,
+  `updated_by` INT NULL,
+  `createdAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updatedAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `unique_vendor_client` (`vendor_id`, `client_id`),
+  KEY `idx_vendor` (`vendor_id`),
+  KEY `idx_client` (`client_id`),
+  FOREIGN KEY (`vendor_id`) REFERENCES `vendors`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`client_id`) REFERENCES `vendor_clients`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `vendor_newsletter_sent_logs` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `vendor_id` INT UNSIGNED NOT NULL,
+  `campaign_id` BIGINT NOT NULL,
+  `client_id` INT NOT NULL,
+  `email` VARCHAR(255) NOT NULL,
+  `name` VARCHAR(255) NOT NULL,
+  `membership` VARCHAR(100),
+  `template` VARCHAR(255) NOT NULL,
+  `status` ENUM('pending', 'sent', 'failed', 'bounced') DEFAULT 'pending',
+  `opened_at` DATETIME NULL,
+  `clicked_at` DATETIME NULL,
+  `createdAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updatedAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_vendor_campaign` (`vendor_id`, `campaign_id`),
+  KEY `idx_status` (`status`),
+  FOREIGN KEY (`vendor_id`) REFERENCES `vendors`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT IGNORE INTO `modules` (`name`, `slug`, `description`, `company_id`, `is_active`) VALUES

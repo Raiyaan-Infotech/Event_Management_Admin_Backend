@@ -16,8 +16,13 @@ module.exports = (sequelize) => {
             defaultValue: 'client',
         },
         plan: {
-            type: DataTypes.ENUM('silver', 'gold', 'platinum', 'standard', 'not_subscribed'),
-            defaultValue: 'not_subscribed',
+            type: DataTypes.ENUM('silver', 'gold', 'platinum', 'standard'),
+            allowNull: true,
+            defaultValue: null,
+        },
+        client_type: {
+            type: DataTypes.ENUM('subscribed', 'unsubscribed'),
+            defaultValue: 'subscribed',
         },
         // 0=inactive, 1=active, 2=blocked  (consistent with User model is_active pattern)
         is_active: { type: DataTypes.TINYINT, defaultValue: 1 },

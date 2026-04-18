@@ -84,6 +84,10 @@ db.VendorSlider = require('./VendorSlider')(sequelize, Sequelize);
 db.VendorPortfolioItem = require('./VendorPortfolioItem')(sequelize, Sequelize);
 db.VendorGallery = require('./VendorGallery')(sequelize, Sequelize);
 db.VendorTestimonial = require('./VendorTestimonial')(sequelize, Sequelize);
+db.VendorEmailCategory = require('./VendorEmailCategory')(sequelize, Sequelize);
+db.VendorEmailTemplate = require('./VendorEmailTemplate')(sequelize, Sequelize);
+db.VendorNewsletter = require('./VendorNewsletter')(sequelize, Sequelize);
+db.VendorNewsletterSentLog = require('./VendorNewsletterSentLog')(sequelize, Sequelize);
 
 // Vendor Slider → Page
 db.VendorSlider.belongsTo(db.VendorPage, { foreignKey: 'page_id', as: 'page' });
@@ -92,6 +96,10 @@ db.VendorPage.hasMany(db.VendorSlider, { foreignKey: 'page_id', as: 'sliders' })
 //Vendor gallery → Vendor
 db.Vendor.hasMany(db.VendorGallery, { foreignKey: 'vendor_id', as: 'gallery' });
 db.VendorGallery.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
+
+// Vendor Newsletter → Client
+db.VendorNewsletter.belongsTo(db.VendorClient, { foreignKey: 'client_id', as: 'client' });
+db.VendorClient.hasMany(db.VendorNewsletter, { foreignKey: 'client_id', as: 'newsletters' });
 
 // Define Associations
 // Company Relationships
@@ -181,6 +189,10 @@ db.VendorStaff.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
 // Staff RBAC
 db.VendorStaff.belongsTo(db.Role, { foreignKey: 'role_id', as: 'role' });
 db.Role.hasMany(db.VendorStaff, { foreignKey: 'role_id', as: 'staffMembers' });
+
+// Vendor Email Category → Email Template
+db.VendorEmailCategory.hasMany(db.VendorEmailTemplate, { foreignKey: 'category_id', as: 'templates' });
+db.VendorEmailTemplate.belongsTo(db.VendorEmailCategory, { foreignKey: 'category_id', as: 'category' });
 
 
 
