@@ -1,3 +1,6 @@
+# Graphify knowledge graph output
+graphify-out/
+
 # Logs
 logs
 *.log
