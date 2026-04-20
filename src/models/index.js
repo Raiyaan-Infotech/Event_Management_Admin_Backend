@@ -88,6 +88,7 @@ db.VendorTestimonial = require('./VendorTestimonial')(sequelize, Sequelize);
 db.VendorEmailCategory = require('./VendorEmailCategory')(sequelize, Sequelize);
 db.VendorEmailTemplate = require('./VendorEmailTemplate')(sequelize, Sequelize);
 db.VendorNewsletter = require('./VendorNewsletter')(sequelize, Sequelize);
+db.VendorNewsletterSend = require('./VendorNewsletterSend')(sequelize, Sequelize);
 db.VendorNewsletterSentLog = require('./VendorNewsletterSentLog')(sequelize, Sequelize);
 
 // Vendor Slider → Page
@@ -101,6 +102,10 @@ db.VendorGallery.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' })
 // Vendor Newsletter → Client
 db.VendorNewsletter.belongsTo(db.VendorClient, { foreignKey: 'client_id', as: 'client' });
 db.VendorClient.hasMany(db.VendorNewsletter, { foreignKey: 'client_id', as: 'newsletters' });
+
+// Vendor Newsletter Send → Sent Logs
+db.VendorNewsletterSend.hasMany(db.VendorNewsletterSentLog, { foreignKey: 'campaign_id', as: 'logs' });
+db.VendorNewsletterSentLog.belongsTo(db.VendorNewsletterSend, { foreignKey: 'campaign_id', as: 'send' });
 
 // Vendor Newsletter Sent Log → Client (for current subscription status)
 db.VendorNewsletterSentLog.belongsTo(db.VendorClient, { foreignKey: 'client_id', as: 'client' });
@@ -186,6 +191,7 @@ db.Vendor.belongsTo(db.City,     { foreignKey: 'pincode_id',  as: 'locality' });
 // Vendor Client & Staff Relationships
 db.Vendor.hasMany(db.VendorClient, { foreignKey: 'vendor_id', as: 'clients' });
 db.VendorClient.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
+db.VendorClient.belongsTo(db.Subscription, { foreignKey: 'subscription_id', as: 'subscription' });
 
 db.Vendor.hasMany(db.VendorStaff, { foreignKey: 'vendor_id', as: 'staff' });
 db.VendorStaff.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });

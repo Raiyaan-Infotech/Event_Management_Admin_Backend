@@ -59,6 +59,10 @@ module.exports = (sequelize) => {
             type: DataTypes.INTEGER.UNSIGNED,
             allowNull: true,
         },
+        label_color: {
+            type: DataTypes.STRING(20),
+            allowNull: true,
+        },
         created_by: {
             type: DataTypes.INTEGER.UNSIGNED,
             allowNull: true,

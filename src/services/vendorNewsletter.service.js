@@ -1,4 +1,5 @@
-const { VendorClient } = require('../models');
+const { Op, literal } = require('sequelize');
+const { VendorClient, VendorNewsletterSend, VendorNewsletterSentLog } = require('../models');
 
 const getSubscribers = async (vendorId) => {
     return VendorClient.findAll({
@@ -16,40 +17,62 @@ const getUnsubscribers = async (vendorId) => {
     });
 };
 
-// Toggle a single client's client_type
 const toggleClientType = async (vendorId, id) => {
     const client = await VendorClient.findOne({ where: { id, vendor_id: vendorId } });
     if (!client) throw new Error('Client not found');
-    const newType = client.client_type === 'subscribed' ? 'unsubscribed' : 'subscribed';
-    await client.update({ client_type: newType });
+    await client.update({ client_type: client.client_type === 'subscribed' ? 'unsubscribed' : 'subscribed' });
     return client;
 };
 
-// Bulk-flip: all subscribed → unsubscribed, or all unsubscribed → subscribed
 const bulkUpdateClientType = async (vendorId, from, to) => {
-    const [affectedCount] = await VendorClient.update(
+    const [count] = await VendorClient.update(
         { client_type: to },
         { where: { vendor_id: vendorId, client_type: from } }
     );
-    return affectedCount;
+    return count;
 };
 
-// Bulk-update a specific list of client IDs to a given client_type
 const bulkUpdateByIds = async (vendorId, ids, clientType) => {
-    const { Op } = require('sequelize');
-    const [affectedCount] = await VendorClient.update(
+    const [count] = await VendorClient.update(
         { client_type: clientType },
         { where: { vendor_id: vendorId, id: { [Op.in]: ids } } }
     );
-    return affectedCount;
+    return count;
 };
 
-const createSentLog = async (vendorId, campaignId, clientId, email, name, membership, template) => {
-    const VendorNewsletterSentLog = require('../models').VendorNewsletterSentLog;
-    return await VendorNewsletterSentLog.create({
-        vendor_id: vendorId,
-        campaign_id: campaignId,
-        client_id: clientId,
+const createSend = async (vendorId, companyId, data) => {
+    return VendorNewsletterSend.create({
+        vendor_id:     vendorId,
+        company_id:    companyId || null,
+        template_id:   data.templateId,
+        template_name: data.templateName,
+        category_id:   data.categoryId || null,
+        user_type:     data.userType,
+        plans:         data.plans && data.plans.length > 0 ? data.plans : null,
+        total_sent:    data.totalSent,
+        created_by:    vendorId,
+    });
+};
+
+const getNewsletterSends = async (vendorId) => {
+    return VendorNewsletterSend.findAll({
+        where: { vendor_id: vendorId },
+        attributes: [
+            'id', 'template_id', 'template_name', 'user_type', 'plans', 'total_sent', 'createdAt',
+            [literal(`(SELECT COUNT(*) FROM vendor_newsletter_sent_logs WHERE campaign_id = VendorNewsletterSend.id AND status = 'sent')`),   'success_count'],
+            [literal(`(SELECT COUNT(*) FROM vendor_newsletter_sent_logs WHERE campaign_id = VendorNewsletterSend.id AND status = 'failed')`), 'failed_count'],
+            [literal(`(SELECT COUNT(*) FROM vendor_newsletter_sent_logs WHERE campaign_id = VendorNewsletterSend.id AND opened_at IS NOT NULL)`), 'read_count'],
+            [literal(`(SELECT COUNT(*) FROM vendor_newsletter_sent_logs WHERE campaign_id = VendorNewsletterSend.id AND opened_at IS NULL AND status = 'sent')`), 'unread_count'],
+        ],
+        order: [['createdAt', 'DESC']],
+    });
+};
+
+const createSentLog = async (vendorId, sendId, clientId, email, name, membership, template) => {
+    return VendorNewsletterSentLog.create({
+        vendor_id:   vendorId,
+        campaign_id: sendId,
+        client_id:   clientId,
         email,
         name,
         membership,
@@ -58,10 +81,12 @@ const createSentLog = async (vendorId, campaignId, clientId, email, name, member
     });
 };
 
-const getSentLogs = async (vendorId) => {
-    const { VendorNewsletterSentLog, VendorClient } = require('../models');
+const getSentLogs = async (vendorId, newsletterId = null) => {
+    const where = { vendor_id: vendorId };
+    if (newsletterId) where.campaign_id = newsletterId;
+
     const logs = await VendorNewsletterSentLog.findAll({
-        where: { vendor_id: vendorId },
+        where,
         include: [{
             model: VendorClient,
             as: 'client',
@@ -70,6 +95,7 @@ const getSentLogs = async (vendorId) => {
         }],
         order: [['createdAt', 'DESC']],
     });
+
     return logs.map((log) => {
         const json = log.toJSON();
         json.client_type = json.client?.client_type || null;
@@ -79,8 +105,7 @@ const getSentLogs = async (vendorId) => {
 };
 
 const markAsOpened = async (logId) => {
-    const VendorNewsletterSentLog = require('../models').VendorNewsletterSentLog;
-    return await VendorNewsletterSentLog.update(
+    return VendorNewsletterSentLog.update(
         { opened_at: new Date() },
         { where: { id: logId } }
     );
@@ -92,6 +117,8 @@ module.exports = {
     toggleClientType,
     bulkUpdateClientType,
     bulkUpdateByIds,
+    createSend,
+    getNewsletterSends,
     createSentLog,
     getSentLogs,
     markAsOpened,

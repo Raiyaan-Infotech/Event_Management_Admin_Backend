@@ -15,8 +15,12 @@ module.exports = (sequelize) => {
             type: DataTypes.ENUM('guest', 'client'),
             defaultValue: 'client',
         },
+        subscription_id: {
+            type: DataTypes.INTEGER,
+            allowNull: true,
+        },
         plan: {
-            type: DataTypes.ENUM('silver', 'gold', 'platinum', 'standard'),
+            type: DataTypes.STRING(200),
             allowNull: true,
             defaultValue: null,
         },

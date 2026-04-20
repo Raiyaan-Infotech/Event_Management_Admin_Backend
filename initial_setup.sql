@@ -1469,7 +1469,8 @@ CREATE TABLE IF NOT EXISTS `vendor_clients` (
   `email`                     VARCHAR(255) NOT NULL,
   `profile_pic`               LONGTEXT     DEFAULT NULL,
   `registration_type`         ENUM('guest','client') DEFAULT 'client',
-  `plan`                      ENUM('silver','gold','platinum','standard') DEFAULT NULL,
+  `plan`                      VARCHAR(200)           DEFAULT NULL,
+  `subscription_id`           INT                    DEFAULT NULL,
   `client_type`               ENUM('subscribed','unsubscribed') NOT NULL DEFAULT 'subscribed',
   `is_active`                 TINYINT      DEFAULT 1,
   `address`                   TEXT         DEFAULT NULL,
@@ -1492,7 +1493,8 @@ CREATE TABLE IF NOT EXISTS `vendor_clients` (
 ALTER TABLE `vendor_clients` ADD COLUMN IF NOT EXISTS `login_access`              TINYINT(1) DEFAULT 0;
 ALTER TABLE `vendor_clients` ADD COLUMN IF NOT EXISTS `send_credentials_to_email` TINYINT(1) DEFAULT 0;
 ALTER TABLE `vendor_clients` ADD COLUMN IF NOT EXISTS `client_type`               ENUM('subscribed','unsubscribed') NOT NULL DEFAULT 'subscribed';
-ALTER TABLE `vendor_clients` MODIFY COLUMN `plan`                                  ENUM('silver','gold','platinum','standard') DEFAULT NULL;
+ALTER TABLE `vendor_clients` ADD COLUMN IF NOT EXISTS `subscription_id`           INT DEFAULT NULL;
+ALTER TABLE `vendor_clients` MODIFY COLUMN IF EXISTS `plan`                        VARCHAR(200) DEFAULT NULL;
 
 -- ─── Vendor Pages ─────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS `vendor_pages` (
@@ -1645,6 +1647,23 @@ CREATE TABLE IF NOT EXISTS `vendor_newsletters` (
   KEY `idx_client` (`client_id`),
   FOREIGN KEY (`vendor_id`) REFERENCES `vendors`(`id`) ON DELETE CASCADE,
   FOREIGN KEY (`client_id`) REFERENCES `vendor_clients`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `vendor_newsletter_sends` (
+  `id`            BIGINT        NOT NULL AUTO_INCREMENT,
+  `vendor_id`     INT           NOT NULL,
+  `company_id`    INT           DEFAULT NULL,
+  `template_id`   INT           DEFAULT NULL,
+  `template_name` VARCHAR(255)  NOT NULL,
+  `category_id`   INT           DEFAULT NULL,
+  `user_type`     ENUM('Guest','Registered') NOT NULL DEFAULT 'Registered',
+  `plans`         JSON          DEFAULT NULL,
+  `total_sent`    INT           NOT NULL DEFAULT 0,
+  `created_by`    INT           DEFAULT NULL,
+  `createdAt`     TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updatedAt`     TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_vns_vendor_id` (`vendor_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `vendor_newsletter_sent_logs` (
@@ -1906,6 +1925,7 @@ CREATE TABLE IF NOT EXISTS `subscriptions` (
   `is_custom`   TINYINT(1)     NOT NULL DEFAULT 0 COMMENT '1=custom plan for specific vendor',
   `vendor_id`   INT UNSIGNED   DEFAULT NULL COMMENT 'FK to vendors.id (only when is_custom=1)',
   `discounted_price` DECIMAL(10,2) DEFAULT NULL COMMENT 'Price after discount',
+  `label_color` VARCHAR(20)    DEFAULT NULL COMMENT 'Hex color for plan badge display',
   `company_id`  INT            DEFAULT NULL,
   `created_by`  INT            DEFAULT NULL,
   `updated_by`  INT            DEFAULT NULL,

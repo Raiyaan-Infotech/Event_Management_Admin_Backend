@@ -22,8 +22,7 @@ exports.getUnsubscribers = async (req, res) => {
 
 exports.toggleClientType = async (req, res) => {
   try {
-    const { id } = req.params;
-    const result = await vendorNewsletterService.toggleClientType(req.vendor.id, id);
+    const result = await vendorNewsletterService.toggleClientType(req.vendor.id, req.params.id);
     ApiResponse.success(res, result, 'Subscription toggled', 200);
   } catch (err) {
     ApiResponse.error(res, err.message || 'Failed to toggle subscription', 400);
@@ -50,43 +49,57 @@ exports.bulkUpdateByIds = async (req, res) => {
   }
 };
 
+exports.getNewsletterSends = async (req, res) => {
+  try {
+    const data = await vendorNewsletterService.getNewsletterSends(req.vendor.id);
+    ApiResponse.success(res, data, 'Newsletter sends fetched', 200);
+  } catch (err) {
+    ApiResponse.error(res, err.message || 'Failed to fetch newsletter sends', 400);
+  }
+};
+
 exports.sendNewsletter = async (req, res) => {
   try {
-    const { user_type: userType, plans, category_id: categoryId, template_id: templateId } = req.body;
+    const { user_type: userType, plans, category_id: categoryId, template_id: templateId, send_to: sendTo } = req.body;
     const db = require('../models');
     const { Op } = require('sequelize');
 
     const template = await db.VendorEmailTemplate.findByPk(templateId);
-    if (!template) return ApiResponse.notFound(res, 'Template not found');
+    if (!template) return ApiResponse.error(res, 'Template not found', 404);
 
-    let where = { vendor_id: req.vendor.id, client_type: 'subscribed' };
+    const clientType = sendTo === 'unsubscribers' ? 'unsubscribed' : 'subscribed';
+    let where = { vendor_id: req.vendor.id, client_type: clientType };
     if (userType === 'Registered') {
       where.registration_type = 'client';
-      if (plans && plans.length > 0) {
-        where.plan = { [Op.in]: plans };
-      }
+      if (plans && plans.length > 0) where.plan = { [Op.in]: plans };
     } else if (userType === 'Guest') {
       where.registration_type = 'guest';
     }
 
     const subscribers = await db.VendorClient.findAll({ where });
 
-    const campaignId = Math.floor(Date.now() / 1000);
-    let count = 0;
+    const send = await vendorNewsletterService.createSend(req.vendor.id, req.vendor.company_id, {
+      templateId:   template.id,
+      templateName: template.name,
+      categoryId:   categoryId || template.category_id,
+      userType,
+      plans:        plans || [],
+      totalSent:    subscribers.length,
+    });
+
     for (const client of subscribers) {
       await vendorNewsletterService.createSentLog(
         req.vendor.id,
-        campaignId,
+        send.id,
         client.id,
         client.email,
         client.name,
         client.registration_type === 'guest' ? 'Guest' : (client.plan || 'Standard'),
         template.name
       );
-      count++;
     }
 
-    ApiResponse.success(res, { campaignId, count }, `Newsletter sent to ${count} recipients`, 200);
+    ApiResponse.success(res, { newsletterId: send.id, count: subscribers.length }, `Newsletter sent to ${subscribers.length} recipients`, 200);
   } catch (err) {
     ApiResponse.error(res, err.message || 'Failed to send newsletter', 400);
   }
@@ -94,7 +107,8 @@ exports.sendNewsletter = async (req, res) => {
 
 exports.getSentLogs = async (req, res) => {
   try {
-    const data = await vendorNewsletterService.getSentLogs(req.vendor.id);
+    const { newsletter_id } = req.query;
+    const data = await vendorNewsletterService.getSentLogs(req.vendor.id, newsletter_id || null);
     ApiResponse.success(res, data, 'Sent logs fetched', 200);
   } catch (err) {
     ApiResponse.error(res, err.message || 'Failed to fetch sent logs', 400);

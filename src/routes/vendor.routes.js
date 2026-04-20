@@ -210,6 +210,7 @@ router.delete('/testimonials/:id',       isVendorAuthenticated, vendorTestimonia
 // ─── Vendor Newsletter (vendor JWT) ──────────────────────────────────────────
 router.get('/newsletter/subscribers',          isVendorAuthenticated, vendorNewsletterController.getSubscribers);
 router.get('/newsletter/unsubscribers',        isVendorAuthenticated, vendorNewsletterController.getUnsubscribers);
+router.get('/newsletter/sends',                isVendorAuthenticated, vendorNewsletterController.getNewsletterSends);
 router.get('/newsletter/sent-logs',            isVendorAuthenticated, vendorNewsletterController.getSentLogs);
 router.patch('/newsletter/bulk',               isVendorAuthenticated, vendorNewsletterController.bulkUpdateClientType);
 router.patch('/newsletter/bulk-ids',           isVendorAuthenticated, vendorNewsletterController.bulkUpdateByIds);
