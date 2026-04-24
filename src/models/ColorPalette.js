@@ -1,5 +1,5 @@
 module.exports = (sequelize, DataTypes) => {
-  const Theme = sequelize.define('Theme', {
+  const ColorPalette = sequelize.define('ColorPalette', {
     id: {
       type: DataTypes.INTEGER,
       primaryKey: true,
@@ -9,42 +9,33 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.INTEGER,
       allowNull: true
     },
-    palette_id: {
-      type: DataTypes.INTEGER,
-      allowNull: true,
-      comment: 'FK to color_palettes — tracks which palette was applied'
-    },
     name: {
       type: DataTypes.STRING(255),
       allowNull: false
     },
-    plans: {
-      type: DataTypes.JSON,
-      allowNull: true,
-      defaultValue: []
-    },
-    header_color: {
-      type: DataTypes.STRING(50)
-    },
-    footer_color: {
-      type: DataTypes.STRING(50)
-    },
     primary_color: {
-      type: DataTypes.STRING(50)
+      type: DataTypes.STRING(50),
+      allowNull: true
     },
     secondary_color: {
-      type: DataTypes.STRING(50)
+      type: DataTypes.STRING(50),
+      allowNull: true
     },
-    hover_color: {
-      type: DataTypes.STRING(50)
+    header_color: {
+      type: DataTypes.STRING(50),
+      allowNull: true
+    },
+    footer_color: {
+      type: DataTypes.STRING(50),
+      allowNull: true
     },
     text_color: {
-      type: DataTypes.STRING(50)
+      type: DataTypes.STRING(50),
+      allowNull: true
     },
-    home_blocks: {
-      type: DataTypes.JSON,
-      allowNull: true,
-      defaultValue: []
+    hover_color: {
+      type: DataTypes.STRING(50),
+      allowNull: true
     },
     is_active: {
       type: DataTypes.TINYINT,
@@ -61,7 +52,7 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: true
     }
   }, {
-    tableName: 'themes',
+    tableName: 'color_palettes',
     timestamps: true,
     paranoid: true,
     createdAt: 'created_at',
@@ -69,5 +60,5 @@ module.exports = (sequelize, DataTypes) => {
     deletedAt: 'deleted_at'
   });
 
-  return Theme;
+  return ColorPalette;
 };

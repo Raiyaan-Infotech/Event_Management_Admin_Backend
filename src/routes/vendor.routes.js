@@ -197,7 +197,10 @@ router.delete('/gallery/:id',        isVendorAuthenticated, vendorGalleryControl
 
 // ─── Vendor Subscription (vendor JWT) ───────────────────────────────────────
 const vendorSubscriptionController = require('../controllers/vendorSubscription.controller');
-router.get('/subscription', isVendorAuthenticated, vendorSubscriptionController.getMyPlan);
+router.get('/subscription',                 isVendorAuthenticated, vendorSubscriptionController.getMyPlan);
+router.get('/subscription/themes/:planId', isVendorAuthenticated, vendorSubscriptionController.getThemesByPlan);
+router.put('/subscription/theme',          isVendorAuthenticated, vendorSubscriptionController.selectTheme);
+router.get('/home-blocks',                 isVendorAuthenticated, vendorSubscriptionController.getHomeBlocks);
 
 // ─── Vendor Testimonials (vendor JWT) ────────────────────────────────────────
 router.get('/testimonials',              isVendorAuthenticated, vendorTestimonialController.getAll);
@@ -233,6 +236,11 @@ router.post('/email-templates',              isVendorAuthenticated, vendorEmailT
 router.put('/email-templates/:id',           isVendorAuthenticated, vendorEmailTemplateController.update);
 router.patch('/email-templates/:id/status',  isVendorAuthenticated, vendorEmailTemplateController.updateStatus);
 router.delete('/email-templates/:id',        isVendorAuthenticated, vendorEmailTemplateController.delete);
+
+// ─── Preview endpoints ────────────────────────────────────────────────────────
+const { getPreviewData, getMyPreviewData } = require('../controllers/vendorPreview.controller');
+router.get('/auth/preview-data', isVendorAuthenticated, getMyPreviewData);  // vendor's own data
+router.get('/:id/preview-data',  getPreviewData);                            // public fallback
 
 // ─── Admin CRUD (admin JWT) ───────────────────────────────────────────────────
 router.use(isAuthenticated);

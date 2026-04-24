@@ -1,6 +1,8 @@
 const { Theme } = require('../models');
+const { Sequelize } = require('../models');
+const { Op } = Sequelize;
 const baseService = require('./base.service');
-const logger = require('../utils/logger');
+const ApiError = require('../utils/apiError');
 
 const MODEL_NAME = 'Theme';
 
@@ -31,10 +33,36 @@ const deleteTheme = async (id, userId = null, companyId = undefined) => {
     return baseService.remove(Theme, MODEL_NAME, id, userId, { companyId });
 };
 
+// Find the themes assigned to a specific subscription plan ID
+const getThemesByPlan = async (planId, companyId = undefined) => {
+    const where = { is_active: 1 };
+    if (companyId) where.company_id = companyId;
+
+    // Use JSON_CONTAINS to search within the plans JSON array
+    const themes = await Theme.findAll({
+        where: {
+            ...where,
+            plans: { [Op.ne]: null },
+        },
+        having: Sequelize.literal(`JSON_CONTAINS(plans, '${Number(planId)}')`),
+    });
+
+    // Fallback: JS-level filter if DB-level doesn't work
+    if (!themes || themes.length === 0) {
+        const all = await Theme.findAll({ where });
+        return all.filter(t => {
+            const plans = Array.isArray(t.plans) ? t.plans : (typeof t.plans === 'string' ? JSON.parse(t.plans) : []);
+            return plans.map(Number).includes(Number(planId));
+        });
+    }
+    return themes;
+};
+
 module.exports = {
     getThemes,
     getThemeById,
     createTheme,
     updateTheme,
-    deleteTheme
+    deleteTheme,
+    getThemesByPlan,
 };

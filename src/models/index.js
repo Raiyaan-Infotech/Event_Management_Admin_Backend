@@ -40,6 +40,9 @@ db.ApprovalRequest = require('./ApprovalRequest')(sequelize, Sequelize);
 db.ActivityLog = require('./ActivityLog')(sequelize, Sequelize);
 db.Plugin = require('./Plugin')(sequelize, Sequelize);
 db.Theme = require('./Theme')(sequelize, Sequelize);
+db.ColorPalette = require('./ColorPalette')(sequelize, Sequelize);
+db.UiBlockCategory = require('./UiBlockCategory')(sequelize, Sequelize);
+db.UiBlock = require('./UiBlock')(sequelize, Sequelize);
 
 // Locations
 db.Country = require('./Country')(sequelize, Sequelize);
@@ -138,6 +141,10 @@ db.Permission.belongsToMany(db.Role, {
 db.Module.hasMany(db.Permission, { foreignKey: 'module_id', as: 'permissions' });
 db.Permission.belongsTo(db.Module, { foreignKey: 'module_id', as: 'moduleRef' });
 
+// UI Blocks Relationships
+db.UiBlockCategory.hasMany(db.UiBlock, { foreignKey: 'category_id', as: 'blocks' });
+db.UiBlock.belongsTo(db.UiBlockCategory, { foreignKey: 'category_id', as: 'category' });
+
 // Approval Relationships
 db.User.hasMany(db.ApprovalRequest, { as: 'requestedApprovals', foreignKey: 'requester_id' });
 db.ApprovalRequest.belongsTo(db.User, { as: 'requester', foreignKey: 'requester_id' });
@@ -204,6 +211,8 @@ db.Role.hasMany(db.VendorStaff, { foreignKey: 'role_id', as: 'staffMembers' });
 db.VendorEmailCategory.hasMany(db.VendorEmailTemplate, { foreignKey: 'category_id', as: 'templates' });
 db.VendorEmailTemplate.belongsTo(db.VendorEmailCategory, { foreignKey: 'category_id', as: 'category' });
 
-
+// Theme → Color Palette
+db.Theme.belongsTo(db.ColorPalette, { foreignKey: 'palette_id', as: 'palette' });
+db.ColorPalette.hasMany(db.Theme, { foreignKey: 'palette_id', as: 'themes' });
 
 module.exports = db;

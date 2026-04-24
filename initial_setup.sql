@@ -601,16 +601,39 @@ CREATE TABLE IF NOT EXISTS `faqs` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
+CREATE TABLE IF NOT EXISTS `color_palettes` (
+  `id`               INT          NOT NULL AUTO_INCREMENT,
+  `company_id`       INT          DEFAULT NULL,
+  `name`             VARCHAR(255) NOT NULL,
+  `primary_color`    VARCHAR(50)  DEFAULT NULL,
+  `secondary_color`  VARCHAR(50)  DEFAULT NULL,
+  `header_color`     VARCHAR(50)  DEFAULT NULL,
+  `footer_color`     VARCHAR(50)  DEFAULT NULL,
+  `text_color`       VARCHAR(50)  DEFAULT NULL,
+  `hover_color`      VARCHAR(50)  DEFAULT NULL,
+  `is_active`        TINYINT      NOT NULL DEFAULT 1 COMMENT '0=inactive,1=active',
+  `created_by`       INT          DEFAULT NULL,
+  `updated_by`       INT          DEFAULT NULL,
+  `created_at`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at`       DATETIME     DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_color_palettes_company` (`company_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS `themes` (
   `id`             INT          NOT NULL AUTO_INCREMENT,
   `company_id`     INT          DEFAULT NULL,
+  `palette_id`     INT          DEFAULT NULL COMMENT 'FK to color_palettes — tracks which palette was applied',
   `name`           VARCHAR(255) NOT NULL,
+  `plans`          JSON         DEFAULT NULL,
   `header_color`   VARCHAR(50)  DEFAULT NULL,
   `footer_color`   VARCHAR(50)  DEFAULT NULL,
   `primary_color`  VARCHAR(50)  DEFAULT NULL,
   `secondary_color`VARCHAR(50)  DEFAULT NULL,
   `hover_color`    VARCHAR(50)  DEFAULT NULL,
   `text_color`     VARCHAR(50)  DEFAULT NULL,
+  `home_blocks`    JSON         DEFAULT NULL,
   `is_active`      TINYINT      NOT NULL DEFAULT 1 COMMENT '0=inactive,1=active',
   `created_by`     INT          DEFAULT NULL,
   `updated_by`     INT          DEFAULT NULL,
@@ -618,7 +641,9 @@ CREATE TABLE IF NOT EXISTS `themes` (
   `updated_at`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `deleted_at`     DATETIME     DEFAULT NULL,
   PRIMARY KEY (`id`),
-  KEY `idx_themes_company` (`company_id`)
+  KEY `idx_themes_company` (`company_id`),
+  KEY `idx_themes_palette` (`palette_id`),
+  CONSTRAINT `fk_themes_palette` FOREIGN KEY (`palette_id`) REFERENCES `color_palettes` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
@@ -1402,6 +1427,7 @@ CREATE TABLE IF NOT EXISTS `vendors` (
   `poweredby`       VARCHAR(255) NULL,
   `footer_links`    JSON NULL,
   `nav_menu`        JSON NULL,
+  `theme_id`        INT NULL COMMENT 'FK to themes — vendor active theme selection',
   `status`          ENUM('active','inactive') NOT NULL DEFAULT 'active',
 
   -- Bank Info
@@ -2165,3 +2191,150 @@ INSERT IGNORE INTO permissions (name, slug, module_id, module, description, comp
 -- Footer
 ('View Footer',               'footer.view',             (SELECT id FROM modules WHERE slug='footer'         LIMIT 1), 'footer',         'View website footer',              NULL, NULL, 1, NOW(), NOW()),
 ('Edit Footer',               'footer.edit',             (SELECT id FROM modules WHERE slug='footer'         LIMIT 1), 'footer',         'Edit website footer',              NULL, NULL, 1, NOW(), NOW());
+
+-- =============================================================================
+-- UI BLOCK CATEGORIES TABLE
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS `ui_block_categories` (
+  `id`          INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `name`        VARCHAR(255) NOT NULL,
+  `description` TEXT         NULL,
+  `is_active`   TINYINT      NOT NULL DEFAULT 1,
+  `created_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at`  DATETIME     NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================================================
+-- UI BLOCKS TABLE
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS `ui_blocks` (
+  `id`            INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `block_type`    VARCHAR(255) NOT NULL,
+  `label`         VARCHAR(255) NOT NULL,
+  `icon`          VARCHAR(255) NULL,
+  `description`   TEXT         NULL,
+  `category_id`   INT UNSIGNED NULL,
+  `preview_image` VARCHAR(500) NULL,
+  `variants`      JSON         NULL,
+  `is_active`     TINYINT      NOT NULL DEFAULT 1,
+  `created_by`    INT          NULL,
+  `updated_by`    INT          NULL,
+  `deleted_by`    INT          NULL,
+  `created_at`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at`    DATETIME     NULL,
+  PRIMARY KEY (`id`),
+  KEY `fk_ui_blocks_category` (`category_id`),
+  CONSTRAINT `fk_ui_blocks_category`
+    FOREIGN KEY (`category_id`) REFERENCES `ui_block_categories` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================================================
+-- SEED: UI BLOCK CATEGORIES
+-- =============================================================================
+
+INSERT INTO `ui_block_categories` (`id`, `name`, `description`, `is_active`, `created_at`, `updated_at`) VALUES
+  (1, 'Sliders',      'Rotating banner and image sliders',          1, NOW(), NOW()),
+  (2, 'Content',      'General content blocks like About Us',       1, NOW(), NOW()),
+  (3, 'Portfolio',    'Client, sponsor and event showcase blocks',  1, NOW(), NOW()),
+  (4, 'Media',        'Gallery and media display blocks',           1, NOW(), NOW()),
+  (5, 'Social Proof', 'Testimonials and reviews blocks',            1, NOW(), NOW()),
+  (6, 'Pricing',      'Subscription and pricing plan blocks',       1, NOW(), NOW())
+ON DUPLICATE KEY UPDATE `name` = VALUES(`name`);
+
+-- =============================================================================
+-- SEED: UI BLOCKS
+-- =============================================================================
+
+INSERT INTO `ui_blocks` (`block_type`, `label`, `icon`, `description`, `category_id`, `variants`, `is_active`, `created_at`, `updated_at`) VALUES
+  ('simple_slider',       'Simple Slider',         'Layers',       'Basic auto-play image slider with caption support',                     1, '["Default", "Minimal", "Fullscreen"]', 1, NOW(), NOW()),
+  ('advance_slider',      'Advance Slider',         'GalleryHorizontal', 'Advanced slider with animations and multiple transition effects',   1, '["Fade", "Slide", "Zoom"]',            1, NOW(), NOW()),
+  ('about_us',            'About Us',               'Info',         'Company introduction and brief description section',                   2, '["Classic", "Split", "Centered"]',     1, NOW(), NOW()),
+  ('portfolio_clients',   'Portfolio — Clients',    'Users',        'Showcase logos and names of your key clients',                         3, '["Grid", "Carousel", "List"]',         1, NOW(), NOW()),
+  ('portfolio_sponsors',  'Portfolio — Sponsors',   'Award',        'Display sponsor logos in a grid or carousel layout',                   3, '["Grid", "Carousel"]',                 1, NOW(), NOW()),
+  ('portfolio_events',    'Portfolio — Events',     'CalendarDays', 'Highlight past events with photos and brief descriptions',             3, '["Grid", "Masonry", "List"]',          1, NOW(), NOW()),
+  ('gallery',             'Gallery',                'Image',        'Responsive image gallery with lightbox support',                       4, '["Grid", "Masonry", "Slider"]',        1, NOW(), NOW()),
+  ('testimonial',         'Testimonials',           'Quote',        'Customer and client testimonials with star ratings',                   5, '["Cards", "Carousel", "List"]',        1, NOW(), NOW()),
+  ('subscription',        'Subscription Plans',     'CreditCard',   'Pricing tiers and subscription plan comparison block',                 6, '["Cards", "Table", "Minimal"]',        1, NOW(), NOW())
+ON DUPLICATE KEY UPDATE `label` = VALUES(`label`), `description` = VALUES(`description`);
+
+-- =============================================================================
+-- SEED: COLOR PALETTES
+-- =============================================================================
+
+INSERT INTO `color_palettes` (`id`, `name`, `primary_color`, `secondary_color`, `header_color`, `footer_color`, `text_color`, `hover_color`, `is_active`, `created_at`, `updated_at`) VALUES
+  (1, 'Ocean Blue',     '#3b82f6', '#1e40af', '#ffffff', '#f0f9ff', '#1f2937', '#eff6ff', 1, NOW(), NOW()),
+  (2, 'Forest Green',   '#16a34a', '#14532d', '#ffffff', '#f0fdf4', '#1c1917', '#dcfce7', 1, NOW(), NOW()),
+  (3, 'Sunset Orange',  '#f97316', '#c2410c', '#1c1917', '#292524', '#fafaf9', '#fff7ed', 1, NOW(), NOW()),
+  (4, 'Corporate Dark', '#6366f1', '#4338ca', '#111827', '#1f2937', '#f9fafb', '#eef2ff', 1, NOW(), NOW())
+ON DUPLICATE KEY UPDATE `name` = VALUES(`name`), `primary_color` = VALUES(`primary_color`);
+
+-- =============================================================================
+-- SEED: THEMES  (palette_id references color_palettes above)
+-- =============================================================================
+
+INSERT INTO `themes` (`name`, `palette_id`, `primary_color`, `secondary_color`, `header_color`, `footer_color`, `text_color`, `hover_color`, `plans`, `home_blocks`, `is_active`, `created_at`, `updated_at`) VALUES
+  (
+    'Ocean Blue',
+    1,
+    '#3b82f6', '#1e40af', '#ffffff', '#f0f9ff', '#1f2937', '#eff6ff',
+    JSON_ARRAY(),
+    JSON_ARRAY(
+      JSON_OBJECT('block_type','simple_slider',     'variant','variant_1','is_visible',true),
+      JSON_OBJECT('block_type','about_us',           'variant','variant_1','is_visible',true),
+      JSON_OBJECT('block_type','portfolio_clients',  'variant','variant_1','is_visible',true),
+      JSON_OBJECT('block_type','gallery',            'variant','variant_1','is_visible',true),
+      JSON_OBJECT('block_type','testimonial',        'variant','variant_1','is_visible',true),
+      JSON_OBJECT('block_type','subscription',       'variant','variant_1','is_visible',true)
+    ),
+    1, NOW(), NOW()
+  ),
+  (
+    'Forest Green',
+    2,
+    '#16a34a', '#14532d', '#ffffff', '#f0fdf4', '#1c1917', '#dcfce7',
+    JSON_ARRAY(),
+    JSON_ARRAY(
+      JSON_OBJECT('block_type','advance_slider',     'variant','variant_1','is_visible',true),
+      JSON_OBJECT('block_type','about_us',           'variant','variant_1','is_visible',true),
+      JSON_OBJECT('block_type','portfolio_clients',  'variant','variant_1','is_visible',true),
+      JSON_OBJECT('block_type','portfolio_sponsors', 'variant','variant_1','is_visible',true),
+      JSON_OBJECT('block_type','gallery',            'variant','variant_1','is_visible',true),
+      JSON_OBJECT('block_type','testimonial',        'variant','variant_1','is_visible',true)
+    ),
+    1, NOW(), NOW()
+  ),
+  (
+    'Sunset Orange',
+    3,
+    '#f97316', '#c2410c', '#1c1917', '#292524', '#fafaf9', '#fff7ed',
+    JSON_ARRAY(),
+    JSON_ARRAY(
+      JSON_OBJECT('block_type','advance_slider',     'variant','variant_1','is_visible',true),
+      JSON_OBJECT('block_type','about_us',           'variant','variant_1','is_visible',true),
+      JSON_OBJECT('block_type','portfolio_events',   'variant','variant_1','is_visible',true),
+      JSON_OBJECT('block_type','portfolio_sponsors', 'variant','variant_1','is_visible',true),
+      JSON_OBJECT('block_type','gallery',            'variant','variant_1','is_visible',true),
+      JSON_OBJECT('block_type','testimonial',        'variant','variant_1','is_visible',true)
+    ),
+    1, NOW(), NOW()
+  ),
+  (
+    'Corporate Dark',
+    4,
+    '#6366f1', '#4338ca', '#111827', '#1f2937', '#f9fafb', '#eef2ff',
+    JSON_ARRAY(),
+    JSON_ARRAY(
+      JSON_OBJECT('block_type','simple_slider',      'variant','variant_1','is_visible',true),
+      JSON_OBJECT('block_type','about_us',           'variant','variant_1','is_visible',true),
+      JSON_OBJECT('block_type','portfolio_events',   'variant','variant_1','is_visible',true),
+      JSON_OBJECT('block_type','testimonial',        'variant','variant_1','is_visible',true),
+      JSON_OBJECT('block_type','subscription',       'variant','variant_1','is_visible',true)
+    ),
+    1, NOW(), NOW()
+  )
+ON DUPLICATE KEY UPDATE `name` = VALUES(`name`);

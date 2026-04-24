@@ -62,7 +62,7 @@ module.exports = (sequelize) => {
         poweredby:     { type: DataTypes.STRING(255), allowNull: true },
         footer_links:  { type: DataTypes.JSON, allowNull: true, defaultValue: null },
         nav_menu:      { type: DataTypes.JSON, allowNull: true, defaultValue: null },
-
+        theme_id:      { type: DataTypes.INTEGER, allowNull: true },
         // Bank Info
         bank_name: { type: DataTypes.STRING(200), allowNull: true },
         acc_no:    { type: DataTypes.STRING(100), allowNull: true },

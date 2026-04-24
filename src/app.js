@@ -13,9 +13,16 @@ const app = express();
 // Middleware
 app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(cookieParser());
+const ALLOWED_ORIGINS = (process.env.FRONTEND_URL || 'http://localhost:3000,http://localhost:3001')
+  .split(',')
+  .map(o => o.trim());
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-  credentials: true
+  origin: (origin, cb) => {
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    cb(new Error(`CORS blocked: ${origin}`));
+  },
+  credentials: true,
 }));
 app.use(morgan('dev'));
 app.use(express.json({ limit: '50mb' }));
@@ -53,6 +60,9 @@ app.use('/api/v1/subscriptions', require('./routes/subscription.routes'));
 app.use('/api/v1/payments', require('./routes/payment.routes'));
 app.use('/api/v1/setup', require('./routes/setup.routes'));
 app.use('/api/v1/themes', require('./routes/theme.routes'));
+app.use('/api/v1/color-palettes', require('./routes/colorPalette.routes'));
+app.use('/api/v1/ui-blocks', require('./routes/uiBlock.routes'));
+app.use('/api/v1/ui-block-categories', require('./routes/uiBlockCategory.routes'));
 app.use('/api/v1/timezones', require('./routes/timezone.routes'));
 
 // Basic health check

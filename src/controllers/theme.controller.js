@@ -33,10 +33,17 @@ const deleteTheme = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, null, 'Theme deleted successfully');
 });
 
+const getThemeByPlan = asyncHandler(async (req, res) => {
+    const theme = await themeService.getThemeByPlan(req.params.planId, req.company?.id);
+    logger.logRequest(req, 'Get theme by plan');
+    return ApiResponse.success(res, { theme });
+});
+
 module.exports = {
     getThemes,
     getThemeById,
     createTheme,
     updateTheme,
-    deleteTheme
+    deleteTheme,
+    getThemeByPlan
 };
