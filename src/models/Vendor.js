@@ -24,24 +24,6 @@ module.exports = (sequelize) => {
         landline:        { type: DataTypes.STRING(20),  allowNull: true },
         company_email:   { type: DataTypes.STRING(255), allowNull: true },
         website:         { type: DataTypes.STRING(500), allowNull: true },
-        youtube:         { type: DataTypes.STRING(500), allowNull: true },
-        facebook:        { type: DataTypes.STRING(500), allowNull: true },
-        instagram:       { type: DataTypes.STRING(500), allowNull: true },
-        twitter:         { type: DataTypes.STRING(500), allowNull: true },
-        linkedin:        { type: DataTypes.STRING(500), allowNull: true },
-        whatsapp:        { type: DataTypes.STRING(100), allowNull: true },
-        tiktok:          { type: DataTypes.STRING(500), allowNull: true },
-        telegram:        { type: DataTypes.STRING(500), allowNull: true },
-        pinterest:       { type: DataTypes.STRING(500), allowNull: true },
-        social_visibility: {
-            type: DataTypes.JSON,
-            allowNull: true,
-            defaultValue: {
-                website: true, youtube: true, facebook: true, instagram: true,
-                twitter: true, linkedin: true, whatsapp: true, tiktok: true,
-                telegram: true, pinterest: true,
-            },
-        },
 
         // Vendor (Person) Info
         name:        { type: DataTypes.STRING(200), allowNull: false },
@@ -63,6 +45,7 @@ module.exports = (sequelize) => {
         footer_links:  { type: DataTypes.JSON, allowNull: true, defaultValue: null },
         nav_menu:      { type: DataTypes.JSON, allowNull: true, defaultValue: null },
         theme_id:      { type: DataTypes.INTEGER, allowNull: true },
+        custom_colors: { type: DataTypes.JSON, allowNull: true, defaultValue: null },
         // Bank Info
         bank_name: { type: DataTypes.STRING(200), allowNull: true },
         acc_no:    { type: DataTypes.STRING(100), allowNull: true },

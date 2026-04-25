@@ -1,5 +1,8 @@
 const themeService = require('../services/theme.service');
+const mediaService = require('../services/media.service');
+const { Theme } = require('../models');
 const ApiResponse = require('../utils/apiResponse');
+const ApiError = require('../utils/apiError');
 const logger = require('../utils/logger');
 const { asyncHandler } = require('../utils/helpers');
 
@@ -39,11 +42,25 @@ const getThemeByPlan = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, { theme });
 });
 
+const uploadPreviewImage = asyncHandler(async (req, res) => {
+    const theme = await Theme.findByPk(req.params.id);
+    if (!theme) throw ApiError.notFound('Theme not found');
+
+    if (!req.file) throw ApiError.badRequest('No file provided');
+
+    const result = await mediaService.upload(req.file, { folder: 'themes' }, req.company?.id);
+    await theme.update({ preview_image: result.url });
+
+    logger.logRequest(req, 'Upload theme preview image');
+    return ApiResponse.success(res, { preview_image: result.url }, 'Preview image uploaded');
+});
+
 module.exports = {
     getThemes,
     getThemeById,
     createTheme,
     updateTheme,
     deleteTheme,
-    getThemeByPlan
+    getThemeByPlan,
+    uploadPreviewImage,
 };

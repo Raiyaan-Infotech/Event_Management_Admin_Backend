@@ -1,10 +1,11 @@
-const { VendorPortfolioItem } = require('../models');
+const { VendorPortfolioItem, sequelize } = require('../models');
+const { Op } = require('sequelize');
 const ApiError = require('../utils/apiError');
 
 const getAll = async (type, vendorId) => {
     return VendorPortfolioItem.findAll({
         where: { type, vendor_id: vendorId },
-        order: [['created_at', 'DESC']],
+        order: [['sort_order', 'ASC'], ['id', 'ASC']],
     });
 };
 
@@ -15,12 +16,73 @@ const getById = async (id, vendorId) => {
 };
 
 const create = async (type, data, vendorId, companyId) => {
-    return VendorPortfolioItem.create({ ...data, type, vendor_id: vendorId, company_id: companyId });
+    return sequelize.transaction(async (t) => {
+        let order = data.sort_order || 0;
+
+        if (order === 0) {
+            const maxOrder = await VendorPortfolioItem.max('sort_order', {
+                where: { type, vendor_id: vendorId },
+                transaction: t
+            });
+            order = (maxOrder || 0) + 1;
+        } else {
+            // Shift existing
+            await VendorPortfolioItem.increment('sort_order', {
+                by: 1,
+                where: { type, vendor_id: vendorId, sort_order: { [Op.gte]: order } },
+                transaction: t
+            });
+        }
+
+        return VendorPortfolioItem.create({
+            ...data,
+            type,
+            vendor_id:  vendorId,
+            company_id: companyId,
+            sort_order: order
+        }, { transaction: t });
+    });
 };
 
 const update = async (id, data, vendorId) => {
     const item = await VendorPortfolioItem.findOne({ where: { id, vendor_id: vendorId } });
     if (!item) throw ApiError.notFound('Item not found');
+
+    if (data.sort_order !== undefined && data.sort_order !== item.sort_order) {
+        return sequelize.transaction(async (t) => {
+            const oldOrder = item.sort_order;
+            const newOrder = data.sort_order;
+            const type = item.type;
+
+            if (newOrder > oldOrder) {
+                await VendorPortfolioItem.decrement('sort_order', {
+                    by: 1,
+                    where: {
+                        type,
+                        vendor_id: vendorId,
+                        sort_order: { [Op.gt]: oldOrder, [Op.lte]: newOrder },
+                        id: { [Op.ne]: id }
+                    },
+                    transaction: t
+                });
+            } else {
+                await VendorPortfolioItem.increment('sort_order', {
+                    by: 1,
+                    where: {
+                        type,
+                        vendor_id: vendorId,
+                        sort_order: { [Op.gte]: newOrder, [Op.lt]: oldOrder },
+                        id: { [Op.ne]: id }
+                    },
+                    transaction: t
+                });
+            }
+
+            await item.update(data, { transaction: t });
+            return item;
+        });
+    }
+
     await item.update(data);
     return item;
 };

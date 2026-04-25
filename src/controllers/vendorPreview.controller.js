@@ -4,6 +4,7 @@ const {
     VendorPortfolioItem,
     VendorGallery,
     VendorTestimonial,
+    VendorSocialLink,
 } = require('../models');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError    = require('../utils/apiError');
@@ -12,18 +13,16 @@ const { asyncHandler } = require('../utils/helpers');
 async function buildPreviewData(vendorId) {
     const vendor = await Vendor.findByPk(vendorId, {
         attributes: [
-            'id', 'company_name', 'company_logo', 'short_description',
+            'id', 'company_name', 'company_logo', 'short_description', 'website',
             'about_us', 'company_information', 'company_contact', 'company_email',
-            'company_address', 'facebook', 'instagram', 'twitter', 'linkedin',
-            'youtube', 'whatsapp', 'social_visibility', 'nav_menu', 'footer_links',
-            'copywrite', 'poweredby',
+            'company_address', 'nav_menu', 'footer_links', 'copywrite', 'poweredby',
         ],
     });
 
     if (!vendor) throw ApiError.notFound('Vendor not found');
 
     const { Subscription } = require('../models');
-    const [sliders, portfolioItems, gallery, testimonials, plans] = await Promise.all([
+    const [sliders, portfolioItems, gallery, testimonials, plans, socialLinks] = await Promise.all([
         VendorSlider.findAll({
             where: { vendor_id: vendorId },
             order: [['id', 'ASC']],
@@ -45,6 +44,10 @@ async function buildPreviewData(vendorId) {
             order: [['sort_order', 'ASC']],
             attributes: ['id', 'name', 'price', 'discounted_price', 'features', 'label_color'],
         }),
+        VendorSocialLink.findAll({
+            where: { vendor_id: vendorId, is_active: 1 },
+            order: [['sort_order', 'ASC'], ['id', 'ASC']],
+        }),
     ]);
 
     return {
@@ -58,6 +61,7 @@ async function buildPreviewData(vendorId) {
         gallery,
         testimonials,
         plans,
+        socialLinks,
     };
 }
 

@@ -41,6 +41,10 @@ module.exports = (sequelize, DataTypes) => {
     text_color: {
       type: DataTypes.STRING(50)
     },
+    preview_image: {
+      type: DataTypes.STRING(500),
+      allowNull: true
+    },
     home_blocks: {
       type: DataTypes.JSON,
       allowNull: true,

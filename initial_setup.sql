@@ -633,6 +633,7 @@ CREATE TABLE IF NOT EXISTS `themes` (
   `secondary_color`VARCHAR(50)  DEFAULT NULL,
   `hover_color`    VARCHAR(50)  DEFAULT NULL,
   `text_color`     VARCHAR(50)  DEFAULT NULL,
+  `preview_image`  VARCHAR(500) DEFAULT NULL,
   `home_blocks`    JSON         DEFAULT NULL,
   `is_active`      TINYINT      NOT NULL DEFAULT 1 COMMENT '0=inactive,1=active',
   `created_by`     INT          DEFAULT NULL,
@@ -1400,16 +1401,6 @@ CREATE TABLE IF NOT EXISTS `vendors` (
   `landline`        VARCHAR(50)  NULL,
   `company_email`   VARCHAR(255) NULL,
   `website`         VARCHAR(500) NULL,
-  `youtube`         VARCHAR(500) NULL,
-  `facebook`        VARCHAR(500) NULL,
-  `instagram`       VARCHAR(500) NULL,
-  `twitter`         VARCHAR(500) NULL,
-  `linkedin`        VARCHAR(500) NULL,
-  `whatsapp`        VARCHAR(100) NULL,
-  `tiktok`          VARCHAR(500) NULL,
-  `telegram`        VARCHAR(500) NULL,
-  `pinterest`       VARCHAR(500) NULL,
-  `social_visibility` JSON NULL DEFAULT ('{"website":true,"youtube":true,"facebook":true,"instagram":true,"twitter":true,"linkedin":true,"whatsapp":true,"tiktok":true,"telegram":true,"pinterest":true}'),
 
   -- Vendor / Login Info
   `name`            VARCHAR(255) NOT NULL,
@@ -1428,6 +1419,7 @@ CREATE TABLE IF NOT EXISTS `vendors` (
   `footer_links`    JSON NULL,
   `nav_menu`        JSON NULL,
   `theme_id`        INT NULL COMMENT 'FK to themes — vendor active theme selection',
+  `custom_colors`   JSON NULL COMMENT 'Vendor color overrides for their active theme',
   `status`          ENUM('active','inactive') NOT NULL DEFAULT 'active',
 
   -- Bank Info
@@ -1709,6 +1701,24 @@ CREATE TABLE IF NOT EXISTS `vendor_newsletter_sent_logs` (
   PRIMARY KEY (`id`),
   KEY `idx_vendor_campaign` (`vendor_id`, `campaign_id`),
   KEY `idx_status` (`status`),
+  FOREIGN KEY (`vendor_id`) REFERENCES `vendors`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Vendor Social Links
+CREATE TABLE IF NOT EXISTS `vendor_social_links` (
+  `id`         INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `vendor_id`  INT UNSIGNED NOT NULL,
+  `icon`       VARCHAR(200) NULL,
+  `icon_color` VARCHAR(20)  NULL,
+  `label`      VARCHAR(100) NOT NULL,
+  `url`        VARCHAR(500) NOT NULL,
+  `is_active`  TINYINT(1)   NOT NULL DEFAULT 1,
+  `sort_order` INT          NOT NULL DEFAULT 0,
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` DATETIME     NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_vendor_social_links_vendor` (`vendor_id`),
   FOREIGN KEY (`vendor_id`) REFERENCES `vendors`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -2259,7 +2269,8 @@ INSERT INTO `ui_blocks` (`block_type`, `label`, `icon`, `description`, `category
   ('portfolio_events',    'Portfolio — Events',     'CalendarDays', 'Highlight past events with photos and brief descriptions',             3, '["Grid", "Masonry", "List"]',          1, NOW(), NOW()),
   ('gallery',             'Gallery',                'Image',        'Responsive image gallery with lightbox support',                       4, '["Grid", "Masonry", "Slider"]',        1, NOW(), NOW()),
   ('testimonial',         'Testimonials',           'Quote',        'Customer and client testimonials with star ratings',                   5, '["Cards", "Carousel", "List"]',        1, NOW(), NOW()),
-  ('subscription',        'Subscription Plans',     'CreditCard',   'Pricing tiers and subscription plan comparison block',                 6, '["Cards", "Table", "Minimal"]',        1, NOW(), NOW())
+  ('subscription',        'Subscription Plans',     'CreditCard',   'Pricing tiers and subscription plan comparison block',                 6, '["Cards", "Table", "Minimal"]',        1, NOW(), NOW()),
+  ('social_media',        'Social Media',           'Share2',       'Social media links from Website → Social Links',                       2, '["Icon Row", "Icon + Label List"]',    1, NOW(), NOW())
 ON DUPLICATE KEY UPDATE `label` = VALUES(`label`), `description` = VALUES(`description`);
 
 -- =============================================================================

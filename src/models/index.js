@@ -93,6 +93,7 @@ db.VendorEmailTemplate = require('./VendorEmailTemplate')(sequelize, Sequelize);
 db.VendorNewsletter = require('./VendorNewsletter')(sequelize, Sequelize);
 db.VendorNewsletterSend = require('./VendorNewsletterSend')(sequelize, Sequelize);
 db.VendorNewsletterSentLog = require('./VendorNewsletterSentLog')(sequelize, Sequelize);
+db.VendorSocialLink = require('./vendorSocialLink')(sequelize, Sequelize);
 
 // Vendor Slider → Page
 db.VendorSlider.belongsTo(db.VendorPage, { foreignKey: 'page_id', as: 'page' });

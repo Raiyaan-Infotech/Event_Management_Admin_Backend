@@ -13,6 +13,7 @@ const vendorSliderController = require('../controllers/vendorSlider.controller')
 const vendorGalleryController = require('../controllers/vendorGallery.controller');
 const vendorTestimonialController = require('../controllers/vendorTestimonial.controller');
 const vendorNewsletterController = require('../controllers/vendorNewsletter.controller');
+const vendorSocialLinkController = require('../controllers/vendorSocialLink.controller');
 const { makeController, getEvents: portfolioGetEvents, replaceEvents: portfolioReplaceEvents } = require('../controllers/vendorPortfolioItem.controller');
 const portfolioClientCtrl = makeController('client');
 const portfolioSponsorCtrl = makeController('sponsor');
@@ -33,6 +34,18 @@ const upload = multer({
         else cb(new Error('Only image files are allowed'), false);
     },
 });
+
+// ─── Public — UI blocks catalog (no auth, metadata only) ─────────────────────
+router.get('/ui-blocks', asyncHandler(async (req, res) => {
+    const { UiBlock } = require('../models');
+    const blocks = await UiBlock.findAll({
+        where: { is_active: 1 },
+        attributes: ['block_type', 'label', 'icon', 'description', 'variants'],
+        order: [['id', 'ASC']],
+        raw: true,
+    });
+    ApiResponse.success(res, blocks, 'UI blocks catalog retrieved');
+}));
 
 // ─── Staff Auth (public) ──────────────────────────────────────────────────────
 router.post('/staff/auth/login',             vendorStaffAuthController.staffLogin);
@@ -58,6 +71,14 @@ router.post('/auth/change-password', isVendorAuthenticated, vendorController.cha
 router.get('/auth/activity',         isVendorAuthenticated, vendorController.getMyActivity);
 router.get('/auth/about',            isVendorAuthenticated, vendorController.getAbout);
 router.put('/auth/about',            isVendorAuthenticated, vendorController.updateAbout);
+
+// ─── Vendor Social Links (vendor JWT) ────────────────────────────────────────
+router.get('/social-links',              isVendorAuthenticated, vendorSocialLinkController.getAll);
+router.get('/social-links/:id',          isVendorAuthenticated, vendorSocialLinkController.getById);
+router.post('/social-links',             isVendorAuthenticated, vendorSocialLinkController.create);
+router.put('/social-links/:id',          isVendorAuthenticated, vendorSocialLinkController.update);
+router.put('/social-links/:id/toggle',   isVendorAuthenticated, vendorSocialLinkController.toggleActive);
+router.delete('/social-links/:id',       isVendorAuthenticated, vendorSocialLinkController.remove);
 
 // ─── Vendor Media Upload (vendor JWT) ────────────────────────────────────────
 router.post('/auth/upload', isVendorAuthenticated, (req, res, next) => {
@@ -200,6 +221,8 @@ const vendorSubscriptionController = require('../controllers/vendorSubscription.
 router.get('/subscription',                 isVendorAuthenticated, vendorSubscriptionController.getMyPlan);
 router.get('/subscription/themes/:planId', isVendorAuthenticated, vendorSubscriptionController.getThemesByPlan);
 router.put('/subscription/theme',          isVendorAuthenticated, vendorSubscriptionController.selectTheme);
+router.get('/subscription/colors',         isVendorAuthenticated, vendorSubscriptionController.getColors);
+router.put('/subscription/colors',         isVendorAuthenticated, vendorSubscriptionController.saveColors);
 router.get('/home-blocks',                 isVendorAuthenticated, vendorSubscriptionController.getHomeBlocks);
 
 // ─── Vendor Testimonials (vendor JWT) ────────────────────────────────────────
