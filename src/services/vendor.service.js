@@ -77,7 +77,7 @@ const updateProfile = async (vendorId, data) => {
         'company_name', 'company_logo', 'company_contact', 'company_address', 'about_us', 'short_description',
         'company_email', 'website',
         'bank_name', 'acc_no', 'ifsc_code', 'acc_type', 'branch',
-        'copywrite', 'poweredby', 'footer_links', 'nav_menu', 'contact_mode',
+        'copywrite', 'poweredby', 'newsletter_status', 'footer_links', 'nav_menu', 'contact_mode',
     ];
     const filtered = {};
     for (const key of allowed) {

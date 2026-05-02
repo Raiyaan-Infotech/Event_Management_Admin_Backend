@@ -45,4 +45,38 @@ const remove = asyncHandler(async (req, res) => {
     ApiResponse.success(res, null, 'Page deleted successfully');
 });
 
-module.exports = { getAll, getById, create, update, updateStatus, remove };
+const getTerms = asyncHandler(async (req, res) => {
+    const { VendorPage } = require('../models');
+    const page = await VendorPage.findOne({ where: { vendor_id: req.vendor.id, name: 'Terms & Conditions' } });
+    ApiResponse.success(res, page || { content: '' }, 'Terms retrieved');
+});
+
+const updateTerms = asyncHandler(async (req, res) => {
+    const { VendorPage } = require('../models');
+    const [page] = await VendorPage.findOrCreate({
+        where: { vendor_id: req.vendor.id, name: 'Terms & Conditions' },
+        defaults: { content: '', company_id: req.vendor.company_id, is_active: 1 },
+    });
+    await page.update({ content: req.body.content });
+    logVendorActivity(req.vendor.id, 'update_terms', 'vendor_pages', 'Terms & Conditions updated', req);
+    ApiResponse.success(res, page, 'Terms updated');
+});
+
+const getPrivacy = asyncHandler(async (req, res) => {
+    const { VendorPage } = require('../models');
+    const page = await VendorPage.findOne({ where: { vendor_id: req.vendor.id, name: 'Privacy Policy' } });
+    ApiResponse.success(res, page || { content: '' }, 'Privacy policy retrieved');
+});
+
+const updatePrivacy = asyncHandler(async (req, res) => {
+    const { VendorPage } = require('../models');
+    const [page] = await VendorPage.findOrCreate({
+        where: { vendor_id: req.vendor.id, name: 'Privacy Policy' },
+        defaults: { content: '', company_id: req.vendor.company_id, is_active: 1 },
+    });
+    await page.update({ content: req.body.content });
+    logVendorActivity(req.vendor.id, 'update_privacy', 'vendor_pages', 'Privacy Policy updated', req);
+    ApiResponse.success(res, page, 'Privacy policy updated');
+});
+
+module.exports = { getAll, getById, create, update, updateStatus, remove, getTerms, updateTerms, getPrivacy, updatePrivacy };

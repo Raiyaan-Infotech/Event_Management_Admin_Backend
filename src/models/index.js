@@ -94,6 +94,7 @@ db.VendorNewsletter = require('./VendorNewsletter')(sequelize, Sequelize);
 db.VendorNewsletterSend = require('./VendorNewsletterSend')(sequelize, Sequelize);
 db.VendorNewsletterSentLog = require('./VendorNewsletterSentLog')(sequelize, Sequelize);
 db.VendorSocialLink = require('./vendorSocialLink')(sequelize, Sequelize);
+db.VendorThemeColor = require('./VendorThemeColor')(sequelize, Sequelize);
 
 // Vendor Slider → Page
 db.VendorSlider.belongsTo(db.VendorPage, { foreignKey: 'page_id', as: 'page' });
@@ -215,5 +216,15 @@ db.VendorEmailTemplate.belongsTo(db.VendorEmailCategory, { foreignKey: 'category
 // Theme → Color Palette
 db.Theme.belongsTo(db.ColorPalette, { foreignKey: 'palette_id', as: 'palette' });
 db.ColorPalette.hasMany(db.Theme, { foreignKey: 'palette_id', as: 'themes' });
+
+// Vendor → ColorPalette (vendor's selected palette)
+db.Vendor.belongsTo(db.ColorPalette, { foreignKey: 'palette_id', as: 'selectedPalette' });
+db.ColorPalette.hasMany(db.Vendor, { foreignKey: 'palette_id', as: 'vendors' });
+
+// Vendor Theme Colors — per (vendor, theme) override
+db.Vendor.hasMany(db.VendorThemeColor, { foreignKey: 'vendor_id', as: 'themeColors' });
+db.VendorThemeColor.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
+db.Theme.hasMany(db.VendorThemeColor, { foreignKey: 'theme_id', as: 'vendorOverrides' });
+db.VendorThemeColor.belongsTo(db.Theme, { foreignKey: 'theme_id', as: 'theme' });
 
 module.exports = db;

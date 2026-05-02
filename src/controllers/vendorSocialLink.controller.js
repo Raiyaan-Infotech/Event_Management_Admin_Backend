@@ -38,4 +38,32 @@ const remove = asyncHandler(async (req, res) => {
     ApiResponse.success(res, null, 'Social link deleted');
 });
 
-module.exports = { getAll, getById, create, update, toggleActive, remove };
+// ─── Admin-scoped methods (uses req.params.vendorId instead of req.vendor.id) ──
+
+const getAllByVendor = asyncHandler(async (req, res) => {
+    const links = await vendorSocialLinkService.getAll(req.params.vendorId);
+    ApiResponse.success(res, links, 'Social links retrieved');
+});
+
+const createForVendor = asyncHandler(async (req, res) => {
+    const { icon, icon_color, label, url, is_active, sort_order } = req.body;
+    const link = await vendorSocialLinkService.create(req.params.vendorId, {
+        icon, icon_color, label, url, is_active, sort_order,
+    });
+    ApiResponse.success(res, link, 'Social link created', 201);
+});
+
+const updateForVendor = asyncHandler(async (req, res) => {
+    const { icon, icon_color, label, url, is_active, sort_order } = req.body;
+    const link = await vendorSocialLinkService.update(req.params.vendorId, req.params.id, {
+        icon, icon_color, label, url, is_active, sort_order,
+    });
+    ApiResponse.success(res, link, 'Social link updated');
+});
+
+const deleteForVendor = asyncHandler(async (req, res) => {
+    await vendorSocialLinkService.remove(req.params.vendorId, req.params.id);
+    ApiResponse.success(res, null, 'Social link deleted');
+});
+
+module.exports = { getAll, getById, create, update, toggleActive, remove, getAllByVendor, createForVendor, updateForVendor, deleteForVendor };

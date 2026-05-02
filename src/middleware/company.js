@@ -16,13 +16,16 @@ const extractCompanyContext = (req, res, next) => {
 
   const roleSlug = req.user.role?.slug;
 
-  // Developer can switch company context via header or query param
-  if (roleSlug === 'developer') {
-    req.isDeveloper = true;
+  // Developer and super admin can work without a bound company
+  // and may optionally switch context via header or query param.
+  if (roleSlug === 'developer' || roleSlug === 'super_admin') {
+    req.isDeveloper = roleSlug === 'developer';
+    req.isSuperAdmin = roleSlug === 'super_admin';
     const companyId = req.headers['x-company-id'] || req.query.company_id;
     req.companyId = companyId ? parseInt(companyId, 10) : null;
   } else {
     req.isDeveloper = false;
+    req.isSuperAdmin = false;
     req.companyId = req.user.company_id || null;
 
     if (!req.companyId) {

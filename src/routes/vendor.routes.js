@@ -38,6 +38,19 @@ const upload = multer({
 // ─── Public — UI blocks catalog (no auth, metadata only) ─────────────────────
 router.get('/ui-blocks', asyncHandler(async (req, res) => {
     const { UiBlock } = require('../models');
+    await UiBlock.findOrCreate({
+        where: { block_type: 'register' },
+        defaults: {
+            block_type: 'register',
+            label: 'Register',
+            icon: 'UserPlus',
+            category_id: 1,
+            description: 'Controls whether the register action appears in the website header.',
+            variants: [{ key: 'variant_1', label: 'Standard' }],
+            plan_ids: [1, 2, 3],
+            is_active: 1,
+        },
+    });
     const blocks = await UiBlock.findAll({
         where: { is_active: 1 },
         attributes: ['block_type', 'label', 'icon', 'description', 'variants'],
@@ -172,7 +185,13 @@ router.put('/staff/:id/role',     isVendorAuthenticated, vendorStaffController.r
 router.patch('/staff/:id/status', isVendorAuthenticated, vendorStaffController.updateStatus);
 router.delete('/staff/:id',       isVendorAuthenticated, vendorStaffController.remove);
 
-// ─── Vendor Pages (vendor JWT) ───────────────────────────────────────────────
+// ─── Vendor Pages — T&C + Privacy (MUST be before /:id) ──────────────────────
+router.get('/pages/terms-conditions',  isVendorAuthenticated, vendorPageController.getTerms);
+router.put('/pages/terms-conditions',  isVendorAuthenticated, vendorPageController.updateTerms);
+router.get('/pages/privacy-policy',    isVendorAuthenticated, vendorPageController.getPrivacy);
+router.put('/pages/privacy-policy',    isVendorAuthenticated, vendorPageController.updatePrivacy);
+
+// ─── Vendor Pages CRUD (vendor JWT) ─────────────────────────────────────────
 router.get('/pages',               isVendorAuthenticated, vendorPageController.getAll);
 router.get('/pages/:id',           isVendorAuthenticated, vendorPageController.getById);
 router.post('/pages',              isVendorAuthenticated, vendorPageController.create);
@@ -218,12 +237,15 @@ router.delete('/gallery/:id',        isVendorAuthenticated, vendorGalleryControl
 
 // ─── Vendor Subscription (vendor JWT) ───────────────────────────────────────
 const vendorSubscriptionController = require('../controllers/vendorSubscription.controller');
-router.get('/subscription',                 isVendorAuthenticated, vendorSubscriptionController.getMyPlan);
-router.get('/subscription/themes/:planId', isVendorAuthenticated, vendorSubscriptionController.getThemesByPlan);
-router.put('/subscription/theme',          isVendorAuthenticated, vendorSubscriptionController.selectTheme);
-router.get('/subscription/colors',         isVendorAuthenticated, vendorSubscriptionController.getColors);
-router.put('/subscription/colors',         isVendorAuthenticated, vendorSubscriptionController.saveColors);
-router.get('/home-blocks',                 isVendorAuthenticated, vendorSubscriptionController.getHomeBlocks);
+router.get('/subscription',                  isVendorAuthenticated, vendorSubscriptionController.getMyPlan);
+router.get('/subscription/themes/:planId',   isVendorAuthenticated, vendorSubscriptionController.getThemesByPlan);
+router.put('/subscription/theme',            isVendorAuthenticated, vendorSubscriptionController.selectTheme);
+router.get('/subscription/colors',           isVendorAuthenticated, vendorSubscriptionController.getColors);
+router.put('/subscription/colors',           isVendorAuthenticated, vendorSubscriptionController.saveColors);
+router.put('/subscription/colors/reset',     isVendorAuthenticated, vendorSubscriptionController.resetCustomColors);
+router.put('/subscription/palette',          isVendorAuthenticated, vendorSubscriptionController.selectPalette);
+router.get('/color-palettes',               isVendorAuthenticated, vendorSubscriptionController.getAllPalettes);
+router.get('/home-blocks',                  isVendorAuthenticated, vendorSubscriptionController.getHomeBlocks);
 
 // ─── Vendor Testimonials (vendor JWT) ────────────────────────────────────────
 router.get('/testimonials',              isVendorAuthenticated, vendorTestimonialController.getAll);
@@ -265,6 +287,8 @@ const { getPreviewData, getMyPreviewData } = require('../controllers/vendorPrevi
 router.get('/auth/preview-data', isVendorAuthenticated, getMyPreviewData);  // vendor's own data
 router.get('/:id/preview-data',  getPreviewData);                            // public fallback
 
+
+
 // ─── Admin CRUD (admin JWT) ───────────────────────────────────────────────────
 router.use(isAuthenticated);
 router.use(extractCompanyContext);
@@ -287,5 +311,11 @@ router.delete('/:id',
     checkApprovalRequired('vendors', 'delete', 'vendors'),
     vendorController.remove
 );
+
+// ─── Admin — vendor social links management ───────────────────────────────────
+router.get('/:vendorId/social-links',        hasPermission('vendors.view'),   vendorSocialLinkController.getAllByVendor);
+router.post('/:vendorId/social-links',       hasPermission('vendors.edit'),   vendorSocialLinkController.createForVendor);
+router.put('/:vendorId/social-links/:id',    hasPermission('vendors.edit'),   vendorSocialLinkController.updateForVendor);
+router.delete('/:vendorId/social-links/:id', hasPermission('vendors.delete'), vendorSocialLinkController.deleteForVendor);
 
 module.exports = router;

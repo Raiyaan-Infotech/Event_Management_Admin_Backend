@@ -64,6 +64,7 @@ app.use('/api/v1/color-palettes', require('./routes/colorPalette.routes'));
 app.use('/api/v1/ui-blocks', require('./routes/uiBlock.routes'));
 app.use('/api/v1/ui-block-categories', require('./routes/uiBlockCategory.routes'));
 app.use('/api/v1/timezones', require('./routes/timezone.routes'));
+app.use('/api/v1/public', require('./routes/public.routes'));
 
 // Basic health check
 app.get('/health', (req, res) => {

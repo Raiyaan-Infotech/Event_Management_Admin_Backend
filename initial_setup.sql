@@ -1415,11 +1415,12 @@ CREATE TABLE IF NOT EXISTS `vendors` (
   `password`        VARCHAR(255) NOT NULL,
   `membership`      ENUM('basic','silver','gold','platinum') NOT NULL DEFAULT 'basic',
   `copywrite`       VARCHAR(255) NULL,
-  `poweredby`       VARCHAR(255) NULL,
-  `footer_links`    JSON NULL,
-  `nav_menu`        JSON NULL,
+  `poweredby`            VARCHAR(255) NULL,
+  `newsletter_status`    TINYINT      NOT NULL DEFAULT 0 COMMENT '0=disabled,1=enabled',
+  `footer_links`         JSON NULL,
+  `nav_menu`        JSON NULL COMMENT 'Fixed 4-item nav: home/about/contact/pages types',
   `theme_id`        INT NULL COMMENT 'FK to themes — vendor active theme selection',
-  `custom_colors`   JSON NULL COMMENT 'Vendor color overrides for their active theme',
+  `palette_id`      INT NULL COMMENT 'FK to color_palettes — vendor selected palette',
   `status`          ENUM('active','inactive') NOT NULL DEFAULT 'active',
 
   -- Bank Info
@@ -1440,6 +1441,16 @@ CREATE TABLE IF NOT EXISTS `vendors` (
   UNIQUE KEY `vendors_email_unique` (`email`),
   INDEX `vendors_company_id` (`company_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Default nav_menu for any vendor whose nav_menu is NULL (fresh installs / seeding)
+UPDATE `vendors`
+SET `nav_menu` = '[
+  {"label":"Home",       "type":"home",    "page_ids":[],"children":[],"order":0},
+  {"label":"About Us",   "type":"about",   "page_ids":[],"children":[],"order":1},
+  {"label":"Contact Us", "type":"contact", "page_ids":[],"children":[],"order":2},
+  {"label":"Pages",      "type":"pages",   "page_ids":[],"children":[],"order":3}
+]'
+WHERE `nav_menu` IS NULL AND `deleted_at` IS NULL;
 
 -- Vendor Staff
 CREATE TABLE IF NOT EXISTS `vendor_staff` (
@@ -1720,6 +1731,27 @@ CREATE TABLE IF NOT EXISTS `vendor_social_links` (
   PRIMARY KEY (`id`),
   KEY `idx_vendor_social_links_vendor` (`vendor_id`),
   FOREIGN KEY (`vendor_id`) REFERENCES `vendors`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Vendor Theme Colors — per (vendor, theme) color overrides
+CREATE TABLE IF NOT EXISTS `vendor_theme_colors` (
+  `id`              INT NOT NULL AUTO_INCREMENT,
+  `vendor_id`       INT UNSIGNED NOT NULL,
+  `theme_id`        INT NOT NULL,
+  `primary_color`   VARCHAR(50) DEFAULT NULL,
+  `secondary_color` VARCHAR(50) DEFAULT NULL,
+  `header_color`    VARCHAR(50) DEFAULT NULL,
+  `footer_color`    VARCHAR(50) DEFAULT NULL,
+  `text_color`      VARCHAR(50) DEFAULT NULL,
+  `hover_color`     VARCHAR(50) DEFAULT NULL,
+  `is_active`       TINYINT NOT NULL DEFAULT 0 COMMENT '0=palette active, 1=custom override active',
+  `created_at`      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_vendor_theme` (`vendor_id`, `theme_id`),
+  KEY `idx_vtc_theme` (`theme_id`),
+  CONSTRAINT `fk_vtc_vendor` FOREIGN KEY (`vendor_id`) REFERENCES `vendors`(`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_vtc_theme`  FOREIGN KEY (`theme_id`)  REFERENCES `themes`(`id`)  ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT IGNORE INTO `modules` (`name`, `slug`, `description`, `company_id`, `is_active`) VALUES
@@ -2297,6 +2329,8 @@ INSERT INTO `themes` (`name`, `palette_id`, `primary_color`, `secondary_color`, 
     JSON_ARRAY(
       JSON_OBJECT('block_type','simple_slider',     'variant','variant_1','is_visible',true),
       JSON_OBJECT('block_type','about_us',           'variant','variant_1','is_visible',true),
+      JSON_OBJECT('block_type','terms_conditions',   'variant','variant_1','is_visible',true),
+      JSON_OBJECT('block_type','privacy_policy',     'variant','variant_1','is_visible',true),
       JSON_OBJECT('block_type','portfolio_clients',  'variant','variant_1','is_visible',true),
       JSON_OBJECT('block_type','gallery',            'variant','variant_1','is_visible',true),
       JSON_OBJECT('block_type','testimonial',        'variant','variant_1','is_visible',true),
@@ -2312,6 +2346,8 @@ INSERT INTO `themes` (`name`, `palette_id`, `primary_color`, `secondary_color`, 
     JSON_ARRAY(
       JSON_OBJECT('block_type','advance_slider',     'variant','variant_1','is_visible',true),
       JSON_OBJECT('block_type','about_us',           'variant','variant_1','is_visible',true),
+      JSON_OBJECT('block_type','terms_conditions',   'variant','variant_1','is_visible',true),
+      JSON_OBJECT('block_type','privacy_policy',     'variant','variant_1','is_visible',true),
       JSON_OBJECT('block_type','portfolio_clients',  'variant','variant_1','is_visible',true),
       JSON_OBJECT('block_type','portfolio_sponsors', 'variant','variant_1','is_visible',true),
       JSON_OBJECT('block_type','gallery',            'variant','variant_1','is_visible',true),
@@ -2327,6 +2363,8 @@ INSERT INTO `themes` (`name`, `palette_id`, `primary_color`, `secondary_color`, 
     JSON_ARRAY(
       JSON_OBJECT('block_type','advance_slider',     'variant','variant_1','is_visible',true),
       JSON_OBJECT('block_type','about_us',           'variant','variant_1','is_visible',true),
+      JSON_OBJECT('block_type','terms_conditions',   'variant','variant_1','is_visible',true),
+      JSON_OBJECT('block_type','privacy_policy',     'variant','variant_1','is_visible',true),
       JSON_OBJECT('block_type','portfolio_events',   'variant','variant_1','is_visible',true),
       JSON_OBJECT('block_type','portfolio_sponsors', 'variant','variant_1','is_visible',true),
       JSON_OBJECT('block_type','gallery',            'variant','variant_1','is_visible',true),
@@ -2342,6 +2380,8 @@ INSERT INTO `themes` (`name`, `palette_id`, `primary_color`, `secondary_color`, 
     JSON_ARRAY(
       JSON_OBJECT('block_type','simple_slider',      'variant','variant_1','is_visible',true),
       JSON_OBJECT('block_type','about_us',           'variant','variant_1','is_visible',true),
+      JSON_OBJECT('block_type','terms_conditions',   'variant','variant_1','is_visible',true),
+      JSON_OBJECT('block_type','privacy_policy',     'variant','variant_1','is_visible',true),
       JSON_OBJECT('block_type','portfolio_events',   'variant','variant_1','is_visible',true),
       JSON_OBJECT('block_type','testimonial',        'variant','variant_1','is_visible',true),
       JSON_OBJECT('block_type','subscription',       'variant','variant_1','is_visible',true)
@@ -2349,3 +2389,167 @@ INSERT INTO `themes` (`name`, `palette_id`, `primary_color`, `secondary_color`, 
     1, NOW(), NOW()
   )
 ON DUPLICATE KEY UPDATE `name` = VALUES(`name`);
+
+-- =============================================================================
+-- SCHEMA RECONCILIATION WITH CURRENT APPLICATION MODELS
+-- =============================================================================
+
+-- Current app structure uses a city -> locality -> pincode path in addition to
+-- the legacy cities table. Keep these bootstrap tables aligned with Sequelize.
+CREATE TABLE IF NOT EXISTS `localities` (
+  `id`         INT          NOT NULL AUTO_INCREMENT,
+  `city_id`    INT          NOT NULL,
+  `name`       VARCHAR(200) NOT NULL,
+  `pincode`    VARCHAR(20)  NOT NULL,
+  `is_default` TINYINT(1)   NOT NULL DEFAULT 0,
+  `is_active`  TINYINT      NOT NULL DEFAULT 1 COMMENT '0=inactive,1=active,2=pending',
+  `created_by` INT          DEFAULT NULL,
+  `updated_by` INT          DEFAULT NULL,
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` DATETIME     DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_localities_city` (`city_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `pincodes` (
+  `id`         INT          NOT NULL AUTO_INCREMENT,
+  `city_id`    INT          NOT NULL,
+  `pincode`    VARCHAR(20)  NOT NULL,
+  `area_name`  VARCHAR(200) DEFAULT NULL,
+  `is_active`  TINYINT      NOT NULL DEFAULT 1 COMMENT '0=inactive,1=active,2=pending',
+  `created_by` INT          DEFAULT NULL,
+  `updated_by` INT          DEFAULT NULL,
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` DATETIME     DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_pincodes_city` (`city_id`),
+  KEY `idx_pincodes_code` (`pincode`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Bring old databases forward for palette/block metadata that newer code expects.
+ALTER TABLE `vendors`
+  ADD COLUMN IF NOT EXISTS `palette_id` INT NULL AFTER `theme_id`;
+
+ALTER TABLE `vendor_theme_colors`
+  ADD COLUMN IF NOT EXISTS `is_active` TINYINT NOT NULL DEFAULT 0 COMMENT '1=custom active, 0=use palette' AFTER `hover_color`;
+
+ALTER TABLE `ui_blocks`
+  ADD COLUMN IF NOT EXISTS `plan_ids` JSON NULL AFTER `variants`;
+
+-- Seed missing UI blocks used by the current vendor/public website flow.
+INSERT INTO `ui_blocks`
+  (`block_type`, `label`, `icon`, `description`, `category_id`, `variants`, `plan_ids`, `is_active`, `created_at`, `updated_at`)
+SELECT * FROM (
+  SELECT
+    'header',
+    'Header',
+    'LayoutTemplate',
+    'Website header and navigation block',
+    2,
+    JSON_ARRAY(JSON_OBJECT('key','variant_1','label','Classic'), JSON_OBJECT('key','variant_2','label','Split')),
+    JSON_ARRAY(1, 2, 3),
+    1,
+    NOW(),
+    NOW()
+) AS tmp
+WHERE NOT EXISTS (
+  SELECT 1 FROM `ui_blocks` WHERE `block_type` = 'header'
+);
+
+INSERT INTO `ui_blocks`
+  (`block_type`, `label`, `icon`, `description`, `category_id`, `variants`, `plan_ids`, `is_active`, `created_at`, `updated_at`)
+SELECT * FROM (
+  SELECT
+    'footer',
+    'Footer',
+    'PanelBottom',
+    'Website footer with quick links and newsletter area',
+    2,
+    JSON_ARRAY(JSON_OBJECT('key','variant_1','label','Grid'), JSON_OBJECT('key','variant_2','label','Centered')),
+    JSON_ARRAY(1, 2, 3),
+    1,
+    NOW(),
+    NOW()
+) AS tmp
+WHERE NOT EXISTS (
+  SELECT 1 FROM `ui_blocks` WHERE `block_type` = 'footer'
+);
+
+INSERT INTO `ui_blocks`
+  (`block_type`, `label`, `icon`, `description`, `category_id`, `variants`, `plan_ids`, `is_active`, `created_at`, `updated_at`)
+SELECT * FROM (
+  SELECT
+    'contact_us',
+    'Contact Us',
+    'Mail',
+    'Contact page block for the public website',
+    2,
+    JSON_ARRAY(JSON_OBJECT('key','variant_1','label','Standard')),
+    JSON_ARRAY(1, 2, 3),
+    1,
+    NOW(),
+    NOW()
+) AS tmp
+WHERE NOT EXISTS (
+  SELECT 1 FROM `ui_blocks` WHERE `block_type` = 'contact_us'
+);
+
+INSERT INTO `ui_blocks`
+  (`block_type`, `label`, `icon`, `description`, `category_id`, `variants`, `plan_ids`, `is_active`, `created_at`, `updated_at`)
+SELECT * FROM (
+  SELECT
+    'terms_conditions',
+    'Terms & Conditions',
+    'FileText',
+    'Terms and conditions legal content block',
+    2,
+    JSON_ARRAY(JSON_OBJECT('key','variant_1','label','Standard')),
+    JSON_ARRAY(1, 2, 3),
+    1,
+    NOW(),
+    NOW()
+) AS tmp
+WHERE NOT EXISTS (
+  SELECT 1 FROM `ui_blocks` WHERE `block_type` = 'terms_conditions'
+);
+
+INSERT INTO `ui_blocks`
+  (`block_type`, `label`, `icon`, `description`, `category_id`, `variants`, `plan_ids`, `is_active`, `created_at`, `updated_at`)
+SELECT * FROM (
+  SELECT
+    'privacy_policy',
+    'Privacy Policy',
+    'Shield',
+    'Privacy policy legal content block',
+    2,
+    JSON_ARRAY(JSON_OBJECT('key','variant_1','label','Standard')),
+    JSON_ARRAY(1, 2, 3),
+    1,
+    NOW(),
+    NOW()
+) AS tmp
+WHERE NOT EXISTS (
+  SELECT 1 FROM `ui_blocks` WHERE `block_type` = 'privacy_policy'
+);
+
+INSERT INTO `ui_blocks`
+  (`block_type`, `label`, `icon`, `description`, `category_id`, `variants`, `plan_ids`, `is_active`, `created_at`, `updated_at`)
+SELECT * FROM (
+  SELECT
+    'register',
+    'Register',
+    'UserPlus',
+    'Controls whether the register action appears in the website header.',
+    2,
+    JSON_ARRAY(JSON_OBJECT('key','variant_1','label','Standard')),
+    JSON_ARRAY(1, 2, 3),
+    1,
+    NOW(),
+    NOW()
+) AS tmp
+WHERE NOT EXISTS (
+  SELECT 1 FROM `ui_blocks` WHERE `block_type` = 'register'
+);
+

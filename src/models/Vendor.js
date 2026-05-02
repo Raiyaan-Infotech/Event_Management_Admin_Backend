@@ -40,12 +40,13 @@ module.exports = (sequelize) => {
             type: DataTypes.ENUM('basic', 'silver', 'gold', 'platinum'),
             defaultValue: 'basic',
         },
-        copywrite:     { type: DataTypes.STRING(255), allowNull: true },
-        poweredby:     { type: DataTypes.STRING(255), allowNull: true },
-        footer_links:  { type: DataTypes.JSON, allowNull: true, defaultValue: null },
+        copywrite:          { type: DataTypes.STRING(255), allowNull: true },
+        poweredby:          { type: DataTypes.STRING(255), allowNull: true },
+        newsletter_status:  { type: DataTypes.TINYINT, allowNull: false, defaultValue: 0 },
+        footer_links:       { type: DataTypes.JSON, allowNull: true, defaultValue: null },
         nav_menu:      { type: DataTypes.JSON, allowNull: true, defaultValue: null },
         theme_id:      { type: DataTypes.INTEGER, allowNull: true },
-        custom_colors: { type: DataTypes.JSON, allowNull: true, defaultValue: null },
+        palette_id:    { type: DataTypes.INTEGER, allowNull: true },  // FK → color_palettes
         // Bank Info
         bank_name: { type: DataTypes.STRING(200), allowNull: true },
         acc_no:    { type: DataTypes.STRING(100), allowNull: true },

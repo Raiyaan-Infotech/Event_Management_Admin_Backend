@@ -29,8 +29,8 @@ const update = asyncHandler(async (req, res) => {
 });
 
 const updateStatus = asyncHandler(async (req, res) => {
-    const page = await vendorPageService.updateStatus(req.params.id, req.vendor.id);
-    ApiResponse.success(res, page, 'Vendor status updated successfully');
+    const vendor = await vendorService.updateStatus(req.params.id, req.body.status, req.companyId);
+    ApiResponse.success(res, vendor, 'Vendor status updated successfully');
 });
 
 const remove = asyncHandler(async (req, res) => {

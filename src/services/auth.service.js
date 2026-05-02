@@ -99,9 +99,6 @@ const login = async (email, password, req) => {
         },
       ],
     });
-    console.log('LOGIN_DEBUG user_found:', !!user);
-    console.log('LOGIN_DEBUG is_active:', user?.is_active);
-    console.log('LOGIN_DEBUG pw_valid:', user ? await user.validatePassword(password) : 'no_user');
     if (!user) {
       throw ApiError.unauthorized("Invalid email or password");
     }

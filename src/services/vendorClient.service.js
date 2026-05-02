@@ -1,8 +1,10 @@
 const { VendorClient } = require('../models');
 const baseService = require('./base.service');
 const ApiError = require('../utils/apiError');
+const { v4: uuidv4 } = require('uuid');
 
 const MODEL_NAME = 'VendorClient';
+const generateClientId = () => `CLI-${uuidv4().replace(/-/g, '').slice(0, 10).toUpperCase()}`;
 
 // Fields allowed when creating a client — prevents setting vendor_id, company_id, client_id internally
 const CLIENT_CREATABLE_FIELDS = [
@@ -38,9 +40,6 @@ const getById = async (id, vendorId) => {
 };
 
 const create = async (data, vendorId, companyId) => {
-    const count = await VendorClient.count({ where: { vendor_id: vendorId } });
-    const clientId = `CLI-${String(count + 1).padStart(4, '0')}`;
-
     const safeData = {};
     for (const field of CLIENT_CREATABLE_FIELDS) {
         if (data[field] !== undefined) safeData[field] = data[field];
@@ -49,7 +48,7 @@ const create = async (data, vendorId, companyId) => {
     return baseService.create(VendorClient, MODEL_NAME, {
         ...safeData,
         vendor_id: vendorId,
-        client_id: clientId,
+        client_id: generateClientId(),
         is_active: 1,
     }, null, companyId);
 };

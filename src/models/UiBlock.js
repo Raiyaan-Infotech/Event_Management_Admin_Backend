@@ -29,7 +29,13 @@ module.exports = (sequelize, DataTypes) => {
         variants: {
             type: DataTypes.JSON,
             allowNull: true,
-            comment: 'Array of strings or objects representing block variants'
+            comment: 'Array of {key, label, preview_image} objects representing block variants'
+        },
+        plan_ids: {
+            type: DataTypes.JSON,
+            allowNull: true,
+            defaultValue: null,
+            comment: 'Must assign plan IDs explicitly — null = not available to any plan'
         },
         preview_image: {
             type: DataTypes.STRING(500),

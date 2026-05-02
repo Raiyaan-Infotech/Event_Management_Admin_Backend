@@ -3,6 +3,15 @@ const baseService = require('./base.service');
 const ApiError = require('../utils/apiError');
 
 const MODEL_NAME = 'VendorPage';
+const PAGE_NAME_MAX_LENGTH = 25;
+
+const normalizePageData = (data = {}) => {
+    const next = { ...data };
+    if (typeof next.name === 'string') {
+        next.name = next.name.trim().slice(0, PAGE_NAME_MAX_LENGTH);
+    }
+    return next;
+};
 
 const getAll = async (query = {}, vendorId, companyId = undefined) => {
     return baseService.getAll(VendorPage, MODEL_NAME, query, {
@@ -21,24 +30,26 @@ const getById = async (id, vendorId, companyId = undefined) => {
 };
 
 const create = async (data, vendorId, companyId = undefined) => {
-    const existing = await VendorPage.findOne({ where: { name: data.name, vendor_id: vendorId } });
+    const pageData = normalizePageData(data);
+    const existing = await VendorPage.findOne({ where: { name: pageData.name, vendor_id: vendorId } });
     if (existing) throw ApiError.conflict('A page with this name already exists');
-    return VendorPage.create({ ...data, vendor_id: vendorId, company_id: companyId });
+    return VendorPage.create({ ...pageData, vendor_id: vendorId, company_id: companyId });
 };
 
 const update = async (id, data, vendorId, companyId = undefined) => {
     const page = await VendorPage.findOne({ where: { id, vendor_id: vendorId } });
     if (!page) throw ApiError.notFound('Page not found');
+    const pageData = normalizePageData(data);
 
-    if (data.name && data.name !== page.name) {
+    if (pageData.name && pageData.name !== page.name) {
         const { Op } = require('sequelize');
         const existing = await VendorPage.findOne({
-            where: { name: data.name, vendor_id: vendorId, id: { [Op.ne]: id } },
+            where: { name: pageData.name, vendor_id: vendorId, id: { [Op.ne]: id } },
         });
         if (existing) throw ApiError.conflict('A page with this name already exists');
     }
 
-    await page.update(data);
+    await page.update(pageData);
     return page;
 };
 
