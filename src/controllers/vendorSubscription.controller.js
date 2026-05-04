@@ -11,6 +11,11 @@ const COLOR_KEYS = ['primary_color', 'secondary_color', 'header_color', 'footer_
 // GET /vendors/subscription
 const getMyPlan = asyncHandler(async (req, res) => {
     const vendorId = req.vendor.id;
+    const vendor = await Vendor.findByPk(vendorId, {
+        attributes: ['id', 'membership'],
+    });
+
+    if (!vendor) throw ApiError.notFound('Vendor not found');
 
     const customPlan = await Subscription.findOne({
         where: { is_custom: 1, vendor_id: vendorId, is_active: 1 },
@@ -24,6 +29,15 @@ const getMyPlan = asyncHandler(async (req, res) => {
         where: { is_custom: 0, is_active: 1 },
         order: [['sort_order', 'ASC'], ['price', 'ASC']],
     });
+
+    const normalizedMembership = (vendor.membership || '').trim().toLowerCase();
+    const matchedPlan = commonPlans.find((plan) =>
+        typeof plan.name === 'string' && plan.name.trim().toLowerCase() === normalizedMembership
+    );
+
+    if (matchedPlan) {
+        return ApiResponse.success(res, { type: 'common', plans: [matchedPlan] }, 'Subscription retrieved');
+    }
 
     ApiResponse.success(res, { type: 'common', plans: commonPlans }, 'Subscription plans retrieved');
 });
