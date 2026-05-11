@@ -90,6 +90,11 @@ db.VendorGallery = require('./VendorGallery')(sequelize, Sequelize);
 db.VendorTestimonial = require('./VendorTestimonial')(sequelize, Sequelize);
 db.VendorEmailCategory = require('./VendorEmailCategory')(sequelize, Sequelize);
 db.VendorEmailTemplate = require('./VendorEmailTemplate')(sequelize, Sequelize);
+// Unified mail system
+db.Mail = require('./Mail')(sequelize, Sequelize);
+db.MailRecipient = require('./MailRecipient')(sequelize, Sequelize);
+db.MailFolder = require('./MailFolder')(sequelize, Sequelize);
+db.MailNotification = require('./MailNotification')(sequelize, Sequelize);
 db.VendorNewsletter = require('./VendorNewsletter')(sequelize, Sequelize);
 db.VendorNewsletterSend = require('./VendorNewsletterSend')(sequelize, Sequelize);
 db.VendorNewsletterSentLog = require('./VendorNewsletterSentLog')(sequelize, Sequelize);
@@ -212,6 +217,16 @@ db.Role.hasMany(db.VendorStaff, { foreignKey: 'role_id', as: 'staffMembers' });
 // Vendor Email Category → Email Template
 db.VendorEmailCategory.hasMany(db.VendorEmailTemplate, { foreignKey: 'category_id', as: 'templates' });
 db.VendorEmailTemplate.belongsTo(db.VendorEmailCategory, { foreignKey: 'category_id', as: 'category' });
+
+// Unified Mail System
+db.Mail.hasMany(db.MailRecipient, { foreignKey: 'mail_id', as: 'recipients' });
+db.MailRecipient.belongsTo(db.Mail, { foreignKey: 'mail_id', as: 'mail' });
+
+db.Mail.hasMany(db.MailNotification, { foreignKey: 'mail_id', as: 'notifications' });
+db.MailNotification.belongsTo(db.Mail, { foreignKey: 'mail_id', as: 'mail' });
+
+db.MailFolder.hasMany(db.MailRecipient, { foreignKey: 'custom_folder_id', as: 'mails' });
+db.MailRecipient.belongsTo(db.MailFolder, { foreignKey: 'custom_folder_id', as: 'folder' });
 
 // Theme → Color Palette
 db.Theme.belongsTo(db.ColorPalette, { foreignKey: 'palette_id', as: 'palette' });

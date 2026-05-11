@@ -23,6 +23,7 @@ router.get('/:id', hasPermission('themes.view'), themeController.getThemeById);
 router.post('/', hasPermission('themes.create'), themeController.createTheme);
 router.put('/:id', hasPermission('themes.edit'), themeController.updateTheme);
 router.delete('/:id', hasPermission('themes.delete'), themeController.deleteTheme);
+router.post('/:id/duplicate', hasPermission('themes.create'), themeController.duplicateTheme);
 router.post('/:id/preview-image', hasPermission('themes.edit'), (req, res, next) => {
     upload.single('file')(req, res, (err) => {
         if (err) return res.status(400).json({ success: false, message: err.message || 'Upload failed' });

@@ -55,6 +55,29 @@ const uploadPreviewImage = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, { preview_image: result.url }, 'Preview image uploaded');
 });
 
+const duplicateTheme = asyncHandler(async (req, res) => {
+    const original = await themeService.getThemeById(req.params.id, req.companyId);
+    if (!original) throw ApiError.notFound('Theme not found');
+
+    const copy = await themeService.createTheme({
+        name:            `${original.name} (Copy)`,
+        plans:           original.plans,
+        palette_id:      original.palette_id ?? null,
+        home_blocks:     original.home_blocks,
+        primary_color:   original.primary_color,
+        secondary_color: original.secondary_color,
+        header_color:    original.header_color,
+        footer_color:    original.footer_color,
+        text_color:      original.text_color,
+        hover_color:     original.hover_color,
+        preview_image:   original.preview_image ?? null,
+        is_active:       0,
+    }, req.user.id, req.companyId);
+
+    logger.logRequest(req, 'Duplicate theme');
+    return ApiResponse.created(res, { theme: copy }, 'Theme duplicated successfully');
+});
+
 module.exports = {
     getThemes,
     getThemeById,
@@ -63,4 +86,5 @@ module.exports = {
     deleteTheme,
     getThemeByPlan,
     uploadPreviewImage,
+    duplicateTheme,
 };

@@ -1,0 +1,47 @@
+const { verifyAccessToken, verifyRefreshToken, generateClientAccessToken, COOKIE_OPTIONS } = require('../utils/jwt');
+const { VendorClient, Vendor } = require('../models');
+
+const isClientAuthenticated = async (req, res, next) => {
+    try {
+        const accessToken = req.cookies.client_access_token;
+        const refreshToken = req.cookies.client_refresh_token;
+
+        let decoded = null;
+        if (accessToken) decoded = verifyAccessToken(accessToken);
+
+        if (!decoded && refreshToken) {
+            const refreshDecoded = verifyRefreshToken(refreshToken);
+            if (refreshDecoded && refreshDecoded.type === 'client') {
+                const clientForRefresh = await VendorClient.findByPk(refreshDecoded.id);
+                if (clientForRefresh && clientForRefresh.is_active === 1 && clientForRefresh.login_access === 1) {
+                    const newAccessToken = generateClientAccessToken(clientForRefresh);
+                    res.cookie('client_access_token', newAccessToken, {
+                        ...COOKIE_OPTIONS,
+                        maxAge: 15 * 60 * 1000,
+                    });
+                    decoded = verifyAccessToken(newAccessToken);
+                }
+            }
+        }
+
+        if (!decoded || decoded.type !== 'client') {
+            return res.status(401).json({ success: false, message: 'Client authentication required.' });
+        }
+
+        const client = await VendorClient.findByPk(decoded.id, {
+            include: [{ model: Vendor, as: 'vendor', attributes: ['id', 'status'] }],
+        });
+
+        if (!client) return res.status(401).json({ success: false, message: 'Client account not found.' });
+        if (client.is_active !== 1) return res.status(403).json({ success: false, message: 'Your account is inactive. Please contact the vendor.' });
+        if (client.login_access !== 1) return res.status(403).json({ success: false, message: 'Your login access has been revoked.' });
+        if (client.vendor && client.vendor.status !== 'active') return res.status(403).json({ success: false, message: 'Vendor account is suspended. Please contact support.' });
+
+        req.client = client;
+        next();
+    } catch (error) {
+        return res.status(401).json({ success: false, message: 'Client authentication required.' });
+    }
+};
+
+module.exports = { isClientAuthenticated };

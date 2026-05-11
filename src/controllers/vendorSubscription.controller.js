@@ -42,6 +42,31 @@ const getMyPlan = asyncHandler(async (req, res) => {
     ApiResponse.success(res, { type: 'common', plans: commonPlans }, 'Subscription plans retrieved');
 });
 
+// GET /vendors/client/subscription/plans
+// Client portal sees global common plans plus custom plans for the client's vendor.
+const getClientPlans = asyncHandler(async (req, res) => {
+    const vendorId = req.client.vendor_id;
+
+    const [commonPlans, customPlans] = await Promise.all([
+        Subscription.findAll({
+            where: { is_custom: 0, is_active: 1 },
+            order: [['sort_order', 'ASC'], ['price', 'ASC']],
+        }),
+        Subscription.findAll({
+            where: { is_custom: 1, vendor_id: vendorId, is_active: 1 },
+            order: [['sort_order', 'ASC'], ['price', 'ASC']],
+        }),
+    ]);
+
+    ApiResponse.success(res, {
+        type: customPlans.length > 0 ? 'custom_plus_common' : 'common',
+        vendor_id: vendorId,
+        custom_plans: customPlans,
+        common_plans: commonPlans,
+        plans: [...customPlans, ...commonPlans],
+    }, 'Client subscription plans retrieved');
+});
+
 // GET /vendors/subscription/themes/:planId
 const getThemesByPlan = asyncHandler(async (req, res) => {
     const { planId } = req.params;
@@ -59,7 +84,8 @@ const selectTheme = asyncHandler(async (req, res) => {
     const theme = await Theme.findByPk(theme_id);
     if (!theme || !theme.is_active) throw ApiError.notFound('Theme not found or inactive');
 
-    await Vendor.update({ theme_id }, { where: { id: vendorId } });
+    // Clear vendor's custom block order when switching themes so they get the new theme's defaults
+    await Vendor.update({ theme_id, home_blocks: null }, { where: { id: vendorId } });
 
     ApiResponse.success(res, { theme_id }, 'Theme saved successfully');
 });
@@ -186,24 +212,54 @@ const resetCustomColors = asyncHandler(async (req, res) => {
 
 // GET /vendors/home-blocks
 const getHomeBlocks = asyncHandler(async (req, res) => {
-    const vendor = await Vendor.findByPk(req.vendor.id, { attributes: ['theme_id'] });
+    const vendor = await Vendor.findByPk(req.vendor.id, { attributes: ['theme_id', 'home_blocks'] });
     if (!vendor?.theme_id) return ApiResponse.success(res, [], 'No active theme set');
+
+    // Use vendor's custom order if saved, otherwise fall back to theme defaults
+    if (vendor.home_blocks) {
+        const raw = safeParseArray(vendor.home_blocks);
+        if (raw.length > 0) {
+            const blocks = raw.map(b => ({
+                block_type: b.block_type,
+                variant:    b.variant || 'variant_1',
+                is_visible: b.is_visible !== false ? 1 : 0,
+            }));
+            return ApiResponse.success(res, blocks, 'Home blocks retrieved');
+        }
+    }
 
     const theme = await Theme.findByPk(vendor.theme_id, { attributes: ['home_blocks'] });
     if (!theme) return ApiResponse.success(res, [], 'Theme not found');
 
     const raw = safeParseArray(theme.home_blocks);
-
     const blocks = raw.map(b => ({
         block_type: b.block_type,
+        variant:    b.variant || 'variant_1',
         is_visible: b.is_visible !== false ? 1 : 0,
     }));
 
     ApiResponse.success(res, blocks, 'Home blocks retrieved');
 });
 
+// PUT /vendors/home-blocks
+const saveHomeBlocks = asyncHandler(async (req, res) => {
+    const { blocks } = req.body;
+    if (!Array.isArray(blocks)) throw ApiError.badRequest('blocks must be an array');
+
+    const normalized = blocks.map(b => ({
+        block_type: b.block_type,
+        variant:    b.variant || 'variant_1',
+        is_visible: b.is_visible !== false,
+    }));
+
+    await Vendor.update({ home_blocks: JSON.stringify(normalized) }, { where: { id: req.vendor.id } });
+
+    ApiResponse.success(res, normalized, 'Home blocks saved');
+});
+
 module.exports = {
     getMyPlan,
+    getClientPlans,
     getThemesByPlan,
     selectTheme,
     getAllPalettes,
@@ -212,4 +268,5 @@ module.exports = {
     saveColors,
     resetCustomColors,
     getHomeBlocks,
+    saveHomeBlocks,
 };

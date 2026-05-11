@@ -18,13 +18,13 @@ const { safeParseArray } = require('../utils/json');
 
 const COLOR_KEYS = ['primary_color', 'secondary_color', 'header_color', 'footer_color', 'text_color', 'hover_color'];
 
-async function buildPreviewData(vendorId) {
+async function buildPreviewData(vendorId, themeIdOverride = null) {
     const vendor = await Vendor.findByPk(vendorId, {
         attributes: [
             'id', 'company_name', 'company_logo', 'short_description', 'website',
             'about_us', 'company_information', 'company_contact', 'company_email',
             'company_address', 'nav_menu', 'footer_links', 'copywrite', 'poweredby',
-            'newsletter_status', 'theme_id', 'palette_id',
+            'newsletter_status', 'theme_id', 'palette_id', 'home_blocks',
         ],
         include: [
                     { model: District, as: 'district', attributes: ['id', 'name'] },
@@ -98,15 +98,24 @@ async function buildPreviewData(vendorId) {
                 : (palette_defaults?.[k] || theme_defaults[k] || null);
         }
 
-        // Home blocks
-        if (theme?.home_blocks) {
-            const raw = safeParseArray(theme.home_blocks);
-            home_blocks = raw.map(b => ({
-                block_type: b.block_type,
-                variant:    b.variant || 'variant_1',
-                is_visible: b.is_visible !== false,
-            }));
+        // Home blocks — when themeIdOverride is set (previewing a non-active theme),
+        // fetch that theme's blocks directly. Otherwise use vendor's custom order first,
+        // falling back to the active theme's defaults.
+        let rawBlocks = [];
+        if (themeIdOverride && themeIdOverride !== vendor.theme_id) {
+            const overrideTheme = await Theme.findByPk(themeIdOverride, { attributes: ['home_blocks'] });
+            rawBlocks = safeParseArray(overrideTheme?.home_blocks);
+        } else {
+            const vendorCustomBlocks = safeParseArray(vendor.home_blocks);
+            rawBlocks = vendorCustomBlocks.length > 0
+                ? vendorCustomBlocks
+                : safeParseArray(theme?.home_blocks);
         }
+        home_blocks = rawBlocks.map(b => ({
+            block_type: b.block_type,
+            variant:    b.variant || 'variant_1',
+            is_visible: b.is_visible !== false,
+        }));
     }
 
     return {
@@ -133,14 +142,16 @@ async function buildPreviewData(vendorId) {
 // Public — for backward compat (admin with explicit id)
 const getPreviewData = asyncHandler(async (req, res) => {
     const vendorId = parseInt(req.params.id, 10);
-    const data = await buildPreviewData(vendorId);
+    const themeIdOverride = req.query.theme_id ? parseInt(req.query.theme_id, 10) : null;
+    const data = await buildPreviewData(vendorId, themeIdOverride);
     ApiResponse.success(res, data, 'Preview data retrieved');
 });
 
 // Authenticated — uses logged-in vendor's own ID
 const getMyPreviewData = asyncHandler(async (req, res) => {
     const vendorId = req.vendor.id;
-    const data = await buildPreviewData(vendorId);
+    const themeIdOverride = req.query.theme_id ? parseInt(req.query.theme_id, 10) : null;
+    const data = await buildPreviewData(vendorId, themeIdOverride);
     ApiResponse.success(res, data, 'Preview data retrieved');
 });
 

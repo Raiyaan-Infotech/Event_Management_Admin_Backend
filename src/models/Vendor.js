@@ -37,7 +37,7 @@ module.exports = (sequelize) => {
         email:       { type: DataTypes.STRING(255), allowNull: false, unique: true },
         password:   { type: DataTypes.STRING(255), allowNull: false },
         membership: {
-            type: DataTypes.ENUM('basic', 'silver', 'gold', 'platinum'),
+            type: DataTypes.STRING(100),
             defaultValue: 'basic',
         },
         copywrite:          { type: DataTypes.STRING(255), allowNull: true },
@@ -47,6 +47,7 @@ module.exports = (sequelize) => {
         nav_menu:      { type: DataTypes.JSON, allowNull: true, defaultValue: null },
         theme_id:      { type: DataTypes.INTEGER, allowNull: true },
         palette_id:    { type: DataTypes.INTEGER, allowNull: true },  // FK → color_palettes
+        home_blocks:   { type: DataTypes.JSON,    allowNull: true, defaultValue: null }, // vendor's custom block order
         // Bank Info
         bank_name: { type: DataTypes.STRING(200), allowNull: true },
         acc_no:    { type: DataTypes.STRING(100), allowNull: true },

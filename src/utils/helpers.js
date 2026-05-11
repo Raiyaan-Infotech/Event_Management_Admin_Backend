@@ -33,6 +33,7 @@ const getPaginationMeta = (totalItems, page, limit) => {
   return {
     page,
     limit,
+    total: totalItems,
     totalItems,
     totalPages,
   };

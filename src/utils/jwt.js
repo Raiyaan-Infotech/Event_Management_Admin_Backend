@@ -101,6 +101,23 @@ const generateStaffRefreshToken = (staff) => {
   );
 };
 
+// Client-specific token generators - separate from vendor, staff, and admin
+const generateClientAccessToken = (client) => {
+  return jwt.sign(
+    { id: client.id, email: client.email, vendorId: client.vendor_id, companyId: client.company_id || null, type: 'client' },
+    getAccessSecret(),
+    { expiresIn: '15m' }
+  );
+};
+
+const generateClientRefreshToken = (client) => {
+  return jwt.sign(
+    { id: client.id, type: 'client' },
+    getRefreshSecret(),
+    { expiresIn: '7d' }
+  );
+};
+
 module.exports = {
   generateAccessToken,
   generateRefreshToken,
@@ -113,4 +130,6 @@ module.exports = {
   generateVendorRefreshToken,
   generateStaffAccessToken,
   generateStaffRefreshToken,
+  generateClientAccessToken,
+  generateClientRefreshToken,
 };

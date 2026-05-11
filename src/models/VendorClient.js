@@ -1,4 +1,5 @@
 const { DataTypes } = require('sequelize');
+const bcrypt = require('bcryptjs');
 
 module.exports = (sequelize) => {
     const VendorClient = sequelize.define('VendorClient', {
@@ -8,6 +9,7 @@ module.exports = (sequelize) => {
         name:             { type: DataTypes.STRING(200), allowNull: false },
         mobile:           { type: DataTypes.STRING(20),  allowNull: false },
         email:            { type: DataTypes.STRING(255), allowNull: false },
+        password:         { type: DataTypes.STRING(255), allowNull: true },
         profile_pic:      { type: DataTypes.TEXT('long'), allowNull: true },
         login_access:     { type: DataTypes.TINYINT, defaultValue: 0 },
         send_credentials_to_email: { type: DataTypes.TINYINT, defaultValue: 0 },
@@ -43,7 +45,30 @@ module.exports = (sequelize) => {
         timestamps: true,
         paranoid: true,
         underscored: true,
+        hooks: {
+            beforeCreate: async (client) => {
+                if (client.password) {
+                    client.password = await bcrypt.hash(client.password, 12);
+                }
+            },
+            beforeUpdate: async (client) => {
+                if (client.changed('password') && client.password) {
+                    client.password = await bcrypt.hash(client.password, 12);
+                }
+            },
+        },
     });
+
+    VendorClient.prototype.validatePassword = async function (password) {
+        if (!this.password) return false;
+        return bcrypt.compare(password, this.password);
+    };
+
+    VendorClient.prototype.toJSON = function () {
+        const values = { ...this.get() };
+        delete values.password;
+        return values;
+    };
 
     return VendorClient;
 };

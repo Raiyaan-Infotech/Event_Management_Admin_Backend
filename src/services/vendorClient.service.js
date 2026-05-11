@@ -19,6 +19,7 @@ const CLIENT_EDITABLE_FIELDS = [
     'name', 'email', 'mobile', 'profile_pic',
     'address', 'country', 'state', 'district', 'city', 'locality', 'pincode',
     'subscription_id', 'plan', 'registration_type', 'client_type', 'login_access', 'send_credentials_to_email',
+    'password',
 ];
 
 const getAll = async (query = {}, vendorId) => {

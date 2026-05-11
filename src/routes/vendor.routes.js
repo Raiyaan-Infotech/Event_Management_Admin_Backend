@@ -3,6 +3,7 @@ const router = express.Router();
 const multer = require('multer');
 const vendorController = require('../controllers/vendor.controller');
 const vendorClientController = require('../controllers/vendorClient.controller');
+const vendorClientAuthController = require('../controllers/vendorClientAuth.controller');
 const vendorStaffController = require('../controllers/vendorStaff.controller');
 const vendorStaffAuthController = require('../controllers/vendorStaffAuth.controller');
 const vendorRoleController = require('../controllers/vendorRole.controller');
@@ -14,6 +15,7 @@ const vendorGalleryController = require('../controllers/vendorGallery.controller
 const vendorTestimonialController = require('../controllers/vendorTestimonial.controller');
 const vendorNewsletterController = require('../controllers/vendorNewsletter.controller');
 const vendorSocialLinkController = require('../controllers/vendorSocialLink.controller');
+const vendorSubscriptionController = require('../controllers/vendorSubscription.controller');
 const { makeController, getEvents: portfolioGetEvents, replaceEvents: portfolioReplaceEvents } = require('../controllers/vendorPortfolioItem.controller');
 const portfolioClientCtrl = makeController('client');
 const portfolioSponsorCtrl = makeController('sponsor');
@@ -23,6 +25,7 @@ const { isAuthenticated, hasPermission } = require('../middleware/auth');
 const { extractCompanyContext } = require('../middleware/company');
 const { isVendorAuthenticated } = require('../middleware/vendorAuth');
 const { isStaffAuthenticated, hasStaffPermission } = require('../middleware/staffAuth');
+const { isClientAuthenticated } = require('../middleware/clientAuth');
 const { checkApprovalRequired } = require('../middleware/approval');
 const { asyncHandler } = require('../utils/helpers');
 
@@ -66,11 +69,20 @@ router.post('/staff/auth/forgot-password',   vendorStaffAuthController.staffForg
 router.post('/staff/auth/verify-reset-otp',  vendorStaffAuthController.staffVerifyResetOTP);
 router.post('/staff/auth/reset-password',    vendorStaffAuthController.staffResetPassword);
 
+// ─── Client Portal Auth (public) ──────────────────────────────────────────────
+router.post('/client/auth/login', vendorClientAuthController.clientLogin);
+
 // ─── Staff Auth (protected — staff JWT) ───────────────────────────────────────
 router.post('/staff/auth/logout',           isStaffAuthenticated, vendorStaffAuthController.staffLogout);
 router.get('/staff/auth/me',               isStaffAuthenticated, vendorStaffAuthController.staffMe);
 router.put('/staff/auth/change-password',  isStaffAuthenticated, vendorStaffAuthController.staffChangePassword);
 
+// ─── Client Portal Auth (protected — client JWT) ──────────────────────────────
+router.post('/client/auth/logout',          isClientAuthenticated, vendorClientAuthController.clientLogout);
+router.get('/client/auth/me',               isClientAuthenticated, vendorClientAuthController.clientMe);
+router.put('/client/auth/profile',          isClientAuthenticated, vendorClientAuthController.updateClientProfile);
+router.put('/client/auth/change-password',  isClientAuthenticated, vendorClientAuthController.changeClientPassword);
+router.get('/client/subscription/plans',    isClientAuthenticated, vendorSubscriptionController.getClientPlans);
 // ─── Vendor Portal Auth (public) ─────────────────────────────────────────────
 router.post('/auth/login',           vendorController.login);
 router.post('/auth/logout',          vendorController.logout);
@@ -236,7 +248,6 @@ router.patch('/gallery/:id/status',  isVendorAuthenticated, vendorGalleryControl
 router.delete('/gallery/:id',        isVendorAuthenticated, vendorGalleryController.remove);
 
 // ─── Vendor Subscription (vendor JWT) ───────────────────────────────────────
-const vendorSubscriptionController = require('../controllers/vendorSubscription.controller');
 router.get('/subscription',                  isVendorAuthenticated, vendorSubscriptionController.getMyPlan);
 router.get('/subscription/themes/:planId',   isVendorAuthenticated, vendorSubscriptionController.getThemesByPlan);
 router.put('/subscription/theme',            isVendorAuthenticated, vendorSubscriptionController.selectTheme);
@@ -246,6 +257,7 @@ router.put('/subscription/colors/reset',     isVendorAuthenticated, vendorSubscr
 router.put('/subscription/palette',          isVendorAuthenticated, vendorSubscriptionController.selectPalette);
 router.get('/color-palettes',               isVendorAuthenticated, vendorSubscriptionController.getAllPalettes);
 router.get('/home-blocks',                  isVendorAuthenticated, vendorSubscriptionController.getHomeBlocks);
+router.put('/home-blocks',                  isVendorAuthenticated, vendorSubscriptionController.saveHomeBlocks);
 
 // ─── Vendor Testimonials (vendor JWT) ────────────────────────────────────────
 router.get('/testimonials',              isVendorAuthenticated, vendorTestimonialController.getAll);

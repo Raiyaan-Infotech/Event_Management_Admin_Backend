@@ -1413,7 +1413,7 @@ CREATE TABLE IF NOT EXISTS `vendors` (
   `contact_mode`    ENUM('default','alternative') NULL DEFAULT 'default',
   `email`           VARCHAR(255) NOT NULL,
   `password`        VARCHAR(255) NOT NULL,
-  `membership`      ENUM('basic','silver','gold','platinum') NOT NULL DEFAULT 'basic',
+  `membership`      VARCHAR(100) NOT NULL DEFAULT 'basic',
   `copywrite`       VARCHAR(255) NULL,
   `poweredby`            VARCHAR(255) NULL,
   `newsletter_status`    TINYINT      NOT NULL DEFAULT 0 COMMENT '0=disabled,1=enabled',
@@ -1421,6 +1421,7 @@ CREATE TABLE IF NOT EXISTS `vendors` (
   `nav_menu`        JSON NULL COMMENT 'Fixed 4-item nav: home/about/contact/pages types',
   `theme_id`        INT NULL COMMENT 'FK to themes — vendor active theme selection',
   `palette_id`      INT NULL COMMENT 'FK to color_palettes — vendor selected palette',
+  `home_blocks`     JSON NULL COMMENT 'Vendor custom block order/visibility — overrides theme defaults',
   `status`          ENUM('active','inactive') NOT NULL DEFAULT 'active',
 
   -- Bank Info
@@ -1496,6 +1497,7 @@ CREATE TABLE IF NOT EXISTS `vendor_clients` (
   `name`                      VARCHAR(200) NOT NULL,
   `mobile`                    VARCHAR(20)  NOT NULL,
   `email`                     VARCHAR(255) NOT NULL,
+  `password`                  VARCHAR(255) DEFAULT NULL,
   `profile_pic`               LONGTEXT     DEFAULT NULL,
   `registration_type`         ENUM('guest','client') DEFAULT 'client',
   `plan`                      VARCHAR(200)           DEFAULT NULL,
@@ -1521,6 +1523,7 @@ CREATE TABLE IF NOT EXISTS `vendor_clients` (
 -- Add new client columns if table already exists (for live DB upgrades)
 ALTER TABLE `vendor_clients` ADD COLUMN IF NOT EXISTS `login_access`              TINYINT(1) DEFAULT 0;
 ALTER TABLE `vendor_clients` ADD COLUMN IF NOT EXISTS `send_credentials_to_email` TINYINT(1) DEFAULT 0;
+ALTER TABLE `vendor_clients` ADD COLUMN IF NOT EXISTS `password`                  VARCHAR(255) DEFAULT NULL;
 ALTER TABLE `vendor_clients` ADD COLUMN IF NOT EXISTS `client_type`               ENUM('subscribed','unsubscribed') NOT NULL DEFAULT 'subscribed';
 ALTER TABLE `vendor_clients` ADD COLUMN IF NOT EXISTS `subscription_id`           INT DEFAULT NULL;
 ALTER TABLE `vendor_clients` MODIFY COLUMN IF EXISTS `plan`                        VARCHAR(200) DEFAULT NULL;
@@ -2432,6 +2435,12 @@ CREATE TABLE IF NOT EXISTS `pincodes` (
 ALTER TABLE `vendors`
   ADD COLUMN IF NOT EXISTS `palette_id` INT NULL AFTER `theme_id`;
 
+ALTER TABLE `vendors`
+  ADD COLUMN IF NOT EXISTS `home_blocks` JSON NULL AFTER `palette_id`;
+
+ALTER TABLE `vendors`
+  MODIFY COLUMN `membership` VARCHAR(100) NOT NULL DEFAULT 'basic';
+
 ALTER TABLE `vendor_theme_colors`
   ADD COLUMN IF NOT EXISTS `is_active` TINYINT NOT NULL DEFAULT 0 COMMENT '1=custom active, 0=use palette' AFTER `hover_color`;
 
@@ -2553,3 +2562,73 @@ WHERE NOT EXISTS (
   SELECT 1 FROM `ui_blocks` WHERE `block_type` = 'register'
 );
 
+-- ============================================================
+-- UNIFIED INTERNAL MAIL SYSTEM
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS `mails` (
+  `id`            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id`    INT UNSIGNED DEFAULT NULL,
+  `sender_type`   ENUM('admin','vendor','client') NOT NULL,
+  `sender_id`     INT UNSIGNED NOT NULL,
+  `subject`       VARCHAR(500) NOT NULL,
+  `body`          LONGTEXT NOT NULL,
+  `status`        ENUM('draft','sent','failed') NOT NULL DEFAULT 'draft',
+  `sent_at`       DATETIME DEFAULT NULL,
+  `error_message` TEXT DEFAULT NULL,
+  `sender_is_active` TINYINT NOT NULL DEFAULT 1,
+  `sender_label` VARCHAR(50) DEFAULT NULL,
+  `sender_custom_folder_id` INT UNSIGNED DEFAULT NULL,
+  `created_at`    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_mails_sender` (`sender_type`, `sender_id`),
+  KEY `idx_mails_status` (`status`),
+  KEY `idx_mails_sender_state` (`sender_type`, `sender_id`, `sender_is_active`),
+  KEY `idx_mails_sender_folder` (`sender_type`, `sender_id`, `sender_custom_folder_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `mail_recipients` (
+  `id`               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `mail_id`          BIGINT UNSIGNED NOT NULL,
+  `recipient_type`   ENUM('admin','vendor','client') NOT NULL,
+  `recipient_id`     INT UNSIGNED NOT NULL,
+  `role`             ENUM('to','cc','bcc') NOT NULL DEFAULT 'to',
+  `is_read`          TINYINT NOT NULL DEFAULT 0,
+  `is_active`        TINYINT NOT NULL DEFAULT 1,
+  `label`            VARCHAR(50) DEFAULT NULL,
+  `custom_folder_id` INT UNSIGNED DEFAULT NULL,
+  `created_at`       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_mr_mail` (`mail_id`),
+  KEY `idx_mr_recipient` (`recipient_type`, `recipient_id`),
+  KEY `idx_mr_folder` (`custom_folder_id`),
+  CONSTRAINT `fk_mr_mail` FOREIGN KEY (`mail_id`) REFERENCES `mails`(`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_mr_folder` FOREIGN KEY (`custom_folder_id`) REFERENCES `mail_folders`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `mail_folders` (
+  `id`         INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `owner_type` ENUM('admin','vendor','client') NOT NULL,
+  `owner_id`   INT UNSIGNED NOT NULL,
+  `name`       VARCHAR(100) NOT NULL,
+  `is_active`  TINYINT NOT NULL DEFAULT 1,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` DATETIME DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_mf_owner` (`owner_type`, `owner_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `mail_notifications` (
+  `id`             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `mail_id`        BIGINT UNSIGNED NOT NULL,
+  `recipient_type` ENUM('admin','vendor','client') NOT NULL,
+  `recipient_id`   INT UNSIGNED NOT NULL,
+  `is_read`        TINYINT NOT NULL DEFAULT 0,
+  `created_at`     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_mn_recipient` (`recipient_type`, `recipient_id`, `is_read`),
+  CONSTRAINT `fk_mn_mail` FOREIGN KEY (`mail_id`) REFERENCES `mails`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
