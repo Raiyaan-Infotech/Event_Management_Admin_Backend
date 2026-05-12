@@ -65,15 +65,19 @@ async function buildPreviewData(vendorId, themeIdOverride = null) {
     let home_blocks = [];
 
     if (vendor.theme_id) {
+        // When previewing a different theme, resolve colors + blocks from that theme
+        const isOverride = themeIdOverride && themeIdOverride !== vendor.theme_id;
+        const colorThemeId = isOverride ? themeIdOverride : vendor.theme_id;
+
         const [theme, palette, override] = await Promise.all([
-            Theme.findByPk(vendor.theme_id, {
+            Theme.findByPk(colorThemeId, {
                 attributes: [...COLOR_KEYS, 'home_blocks'],
             }),
             vendor.palette_id
                 ? ColorPalette.findByPk(vendor.palette_id, { attributes: COLOR_KEYS })
                 : Promise.resolve(null),
             VendorThemeColor.findOne({
-                where: { vendor_id: vendorId, theme_id: vendor.theme_id },
+                where: { vendor_id: vendorId, theme_id: colorThemeId },
             }),
         ]);
 
@@ -98,13 +102,11 @@ async function buildPreviewData(vendorId, themeIdOverride = null) {
                 : (palette_defaults?.[k] || theme_defaults[k] || null);
         }
 
-        // Home blocks — when themeIdOverride is set (previewing a non-active theme),
-        // fetch that theme's blocks directly. Otherwise use vendor's custom order first,
-        // falling back to the active theme's defaults.
+        // Home blocks — override theme uses its own blocks directly;
+        // active theme uses vendor's custom order first, then theme defaults.
         let rawBlocks = [];
-        if (themeIdOverride && themeIdOverride !== vendor.theme_id) {
-            const overrideTheme = await Theme.findByPk(themeIdOverride, { attributes: ['home_blocks'] });
-            rawBlocks = safeParseArray(overrideTheme?.home_blocks);
+        if (isOverride) {
+            rawBlocks = safeParseArray(theme?.home_blocks);
         } else {
             const vendorCustomBlocks = safeParseArray(vendor.home_blocks);
             rawBlocks = vendorCustomBlocks.length > 0
