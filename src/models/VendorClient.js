@@ -39,7 +39,8 @@ module.exports = (sequelize) => {
         city:     { type: DataTypes.STRING(100), allowNull: true },
         locality: { type: DataTypes.STRING(100), allowNull: true },
         pincode:  { type: DataTypes.STRING(20),  allowNull: true },
-        company_id: { type: DataTypes.INTEGER, allowNull: true },
+        company_id:          { type: DataTypes.INTEGER, allowNull: true },
+        password_changed_at: { type: DataTypes.DATE,    allowNull: true },
     }, {
         tableName: 'vendor_clients',
         timestamps: true,
@@ -54,6 +55,7 @@ module.exports = (sequelize) => {
             beforeUpdate: async (client) => {
                 if (client.changed('password') && client.password) {
                     client.password = await bcrypt.hash(client.password, 12);
+                    client.password_changed_at = new Date();
                 }
             },
         },

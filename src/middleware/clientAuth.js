@@ -37,6 +37,12 @@ const isClientAuthenticated = async (req, res, next) => {
         if (client.login_access !== 1) return res.status(403).json({ success: false, message: 'Your login access has been revoked.' });
         if (client.vendor && client.vendor.status !== 'active') return res.status(403).json({ success: false, message: 'Vendor account is suspended. Please contact support.' });
 
+        if (client.password_changed_at && decoded.iat) {
+            if (client.password_changed_at.getTime() > decoded.iat * 1000) {
+                return res.status(401).json({ success: false, message: 'Your password was changed. Please login again.' });
+            }
+        }
+
         req.client = client;
         next();
     } catch (error) {

@@ -59,6 +59,7 @@ module.exports = (sequelize) => {
         // Password reset
         password_reset_token:   { type: DataTypes.STRING(10), allowNull: true },
         password_reset_expires: { type: DataTypes.DATE,       allowNull: true },
+        password_changed_at:    { type: DataTypes.DATE,       allowNull: true },
 
         // Meta
         status:     { type: DataTypes.ENUM('active', 'inactive'), defaultValue: 'active' },
@@ -76,6 +77,7 @@ module.exports = (sequelize) => {
             beforeUpdate: async (vendor) => {
                 if (vendor.changed('password')) {
                     vendor.password = await bcrypt.hash(vendor.password, 12);
+                    vendor.password_changed_at = new Date();
                 }
             },
         },

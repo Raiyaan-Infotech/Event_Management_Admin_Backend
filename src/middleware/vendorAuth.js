@@ -36,6 +36,12 @@ const isVendorAuthenticated = async (req, res, next) => {
             return res.status(403).json({ success: false, message: 'Vendor account is inactive.' });
         }
 
+        if (vendor.password_changed_at && decoded.iat) {
+            if (vendor.password_changed_at.getTime() > decoded.iat * 1000) {
+                return res.status(401).json({ success: false, message: 'Your password was changed. Please login again.' });
+            }
+        }
+
         req.vendor = vendor;
         next();
     } catch (error) {

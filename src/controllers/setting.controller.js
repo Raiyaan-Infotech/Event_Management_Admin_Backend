@@ -2,6 +2,7 @@ const settingService = require('../services/setting.service');
 const ApiResponse = require('../utils/apiResponse');
 const logger = require('../utils/logger');
 const { asyncHandler } = require('../utils/helpers');
+const { Company } = require('../models');
 
 /**
  * Get public settings (for frontend)
@@ -10,8 +11,16 @@ const { asyncHandler } = require('../utils/helpers');
 const getPublic = asyncHandler(async (req, res) => {
   const settings = await settingService.getPublic(req.companyId);
 
+  // Include company branding so login pages can show the correct logo
+  const company = req.companyId
+    ? await Company.findByPk(req.companyId, { attributes: ['name', 'logo', 'favicon'] })
+    : await Company.findOne({ attributes: ['name', 'logo', 'favicon'] });
+
   logger.logRequest(req, 'Get public settings');
-  return ApiResponse.success(res, { settings });
+  return ApiResponse.success(res, {
+    settings,
+    company: company ? { name: company.name, logo: company.logo, favicon: company.favicon } : null,
+  });
 });
 
 /**
