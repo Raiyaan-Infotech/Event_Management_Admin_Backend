@@ -85,6 +85,7 @@ const updateProfile = async (vendorId, data) => {
     }
 
     if (filtered.acc_type === '') delete filtered.acc_type;
+    if (filtered.contact_mode === '') delete filtered.contact_mode;
 
     await vendor.update(filtered);
     return vendor.toJSON();

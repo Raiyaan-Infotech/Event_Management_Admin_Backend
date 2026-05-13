@@ -331,11 +331,20 @@ const permanentDelete = async (caller, id) => {
 };
 
 const toggleRead = async (caller, id) => {
+  const { MailNotification } = require('../models');
   const row = await MailRecipient.findOne({
     where: { mail_id: id, ...callerRecipientWhere(caller) },
   });
   if (!row) return null;
-  return row.update({ is_read: row.is_read ? 0 : 1 });
+  const newValue = row.is_read ? 0 : 1;
+  await row.update({ is_read: newValue });
+  if (newValue === 1) {
+    await MailNotification.update(
+      { is_read: 1 },
+      { where: { mail_id: id, recipient_type: caller.type, recipient_id: caller.id } }
+    );
+  }
+  return row;
 };
 
 const bulkMarkRead = async (caller, ids, isRead) => {

@@ -9,7 +9,7 @@ const MODEL_NAME = 'Theme';
 
 // header + footer are structural (always rendered by PublicNavbar/PublicFooter),
 // so they are NOT required in home_blocks.
-const REQUIRED_BLOCKS = ['slider', 'about_us', 'terms_conditions', 'privacy_policy'];
+const REQUIRED_BLOCKS = ['about_us', 'terms_conditions', 'privacy_policy'];
 
 const getThemes = async (query = {}, companyId = undefined) => {
     if (query.plan_id) {
@@ -44,7 +44,7 @@ const validateRequiredBlocks = (data) => {
     const missingCore = coreRequired.filter(r => !present.includes(r));
     
     // Check for at least one slider type
-    const hasSlider = present.some(t => ['slider', 'simple_slider', 'advance_slider'].includes(t));
+    const hasSlider = present.some(t => ['simple_slider', 'advance_slider'].includes(t));
     
     const missing = [...missingCore];
     if (!hasSlider) missing.push('slider');
