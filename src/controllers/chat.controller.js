@@ -1,5 +1,19 @@
+const jwt = require('jsonwebtoken');
 const ApiResponse = require('../utils/apiResponse');
 const chatService = require('../services/chat.service');
+
+const getSocketToken = async (req, res, next) => {
+  try {
+    const token = jwt.sign(
+      { actor: req.chatActor },
+      process.env.ACCESS_TOKEN_SECRET,
+      { expiresIn: '10m' }
+    );
+    return ApiResponse.success(res, { token }, 'Socket token issued');
+  } catch (error) {
+    return next(error);
+  }
+};
 
 const getContacts = async (req, res, next) => {
   try {
@@ -60,6 +74,7 @@ const markRead = async (req, res, next) => {
 };
 
 module.exports = {
+  getSocketToken,
   getContacts,
   getConversations,
   getOrCreateDirectConversation,

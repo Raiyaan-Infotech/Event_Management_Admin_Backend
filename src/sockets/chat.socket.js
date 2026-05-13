@@ -1,4 +1,5 @@
 const cookie = require('cookie');
+const jwt = require('jsonwebtoken');
 const { authenticateChatRequest } = require('../middleware/chatAuth');
 const chatService = require('../services/chat.service');
 
@@ -39,6 +40,22 @@ const markOffline = (io, actor) => {
 const attachChatSocket = (io) => {
   io.use(async (socket, next) => {
     try {
+      // Token-based auth (for proxy-fronted portals where cookies are on Vercel domain)
+      const authToken = socket.handshake.auth?.token;
+      if (authToken) {
+        try {
+          const decoded = jwt.verify(authToken, process.env.ACCESS_TOKEN_SECRET);
+          if (decoded?.actor) {
+            socket.chatActor = decoded.actor;
+            socket.join(`actor:${decoded.actor.type}:${decoded.actor.id}`);
+            return next();
+          }
+        } catch (_) {
+          // fall through to cookie auth
+        }
+      }
+
+      // Cookie-based auth fallback
       const cookies = parseCookieHeader(socket);
       const portalType = String(socket.handshake.auth?.portalType || socket.handshake.headers['x-portal-type'] || '').toLowerCase();
 

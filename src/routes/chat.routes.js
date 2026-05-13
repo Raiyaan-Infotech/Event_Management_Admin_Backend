@@ -4,6 +4,7 @@ const ctrl = require('../controllers/chat.controller');
 
 router.use(isChatAuthenticated);
 
+router.get('/token', ctrl.getSocketToken);
 router.get('/contacts', ctrl.getContacts);
 router.get('/conversations', ctrl.getConversations);
 router.post('/conversations/direct', ctrl.getOrCreateDirectConversation);
