@@ -1,5 +1,6 @@
 const { VendorTestimonial } = require('../models');
 const ApiError = require('../utils/apiError');
+const mediaService = require('./media.service');
 
 const getAll = async (vendorId) => {
     return VendorTestimonial.findAll({
@@ -15,8 +16,9 @@ const getById = async (id, vendorId) => {
 };
 
 const create = async (data, vendorId, companyId) => {
+    const normalized = await mediaService.uploadDataUriFields(data, ['customer_portrait'], { folder: 'testimonials' }, companyId);
     return VendorTestimonial.create({
-        ...data,
+        ...normalized,
         vendor_id:  vendorId,
         company_id: companyId,
     });
@@ -25,7 +27,8 @@ const create = async (data, vendorId, companyId) => {
 const update = async (id, data, vendorId) => {
     const item = await VendorTestimonial.findOne({ where: { id, vendor_id: vendorId } });
     if (!item) throw ApiError.notFound('Testimonial not found');
-    await item.update(data);
+    const normalized = await mediaService.uploadDataUriFields(data, ['customer_portrait'], { folder: 'testimonials' }, item.company_id);
+    await item.update(normalized);
     return item;
 };
 

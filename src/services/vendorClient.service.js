@@ -2,6 +2,7 @@ const { VendorClient } = require('../models');
 const baseService = require('./base.service');
 const ApiError = require('../utils/apiError');
 const { v4: uuidv4 } = require('uuid');
+const mediaService = require('./media.service');
 
 const MODEL_NAME = 'VendorClient';
 const generateClientId = () => `CLI-${uuidv4().replace(/-/g, '').slice(0, 10).toUpperCase()}`;
@@ -46,8 +47,10 @@ const create = async (data, vendorId, companyId) => {
         if (data[field] !== undefined) safeData[field] = data[field];
     }
 
+    const normalized = await mediaService.uploadDataUriFields(safeData, ['profile_pic'], { folder: 'clients' }, companyId);
+
     return baseService.create(VendorClient, MODEL_NAME, {
-        ...safeData,
+        ...normalized,
         vendor_id: vendorId,
         client_id: generateClientId(),
         is_active: 1,
@@ -63,7 +66,8 @@ const update = async (id, data, vendorId) => {
         if (data[field] !== undefined) safeData[field] = data[field];
     }
 
-    await record.update(safeData);
+    const normalized = await mediaService.uploadDataUriFields(safeData, ['profile_pic'], { folder: 'clients' }, record.company_id);
+    await record.update(normalized);
     return record;
 };
 

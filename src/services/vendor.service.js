@@ -2,6 +2,7 @@ const { Vendor, District, City } = require('../models');
 const baseService = require('./base.service');
 const ApiError = require('../utils/apiError');
 const emailSenderService = require('./emailSender.service');
+const mediaService = require('./media.service');
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
 
@@ -39,10 +40,15 @@ const getByEmailWithPassword = async (email) => {
     return Vendor.findOne({ where: { email }, attributes: { include: ['password'] } });
 };
 
+const normalizeMedia = (data, companyId) => {
+    return mediaService.uploadDataUriFields(data, ['company_logo'], { folder: 'vendors' }, companyId);
+};
+
 const create = async (data, companyId = undefined) => {
     const existing = await Vendor.findOne({ where: { email: data.email } });
     if (existing) throw ApiError.conflict('A vendor with this email already exists');
-    return baseService.create(Vendor, MODEL_NAME, data, null, companyId);
+    const normalized = await normalizeMedia(data, companyId);
+    return baseService.create(Vendor, MODEL_NAME, normalized, null, companyId);
 };
 
 const update = async (id, data, companyId = undefined) => {
@@ -55,7 +61,8 @@ const update = async (id, data, companyId = undefined) => {
         const existing = await Vendor.findOne({ where: { email: data.email, id: { [Op.ne]: id } } });
         if (existing) throw ApiError.conflict('A vendor with this email already exists');
     }
-    return baseService.update(Vendor, MODEL_NAME, id, data, null, companyId);
+    const normalized = await normalizeMedia(data, companyId);
+    return baseService.update(Vendor, MODEL_NAME, id, normalized, null, companyId);
 };
 
 const updateStatus = async (id, status, companyId = undefined) => {
@@ -87,7 +94,8 @@ const updateProfile = async (vendorId, data) => {
     if (filtered.acc_type === '') delete filtered.acc_type;
     if (filtered.contact_mode === '') delete filtered.contact_mode;
 
-    await vendor.update(filtered);
+    const normalized = await normalizeMedia(filtered, vendor.company_id);
+    await vendor.update(normalized);
     return vendor.toJSON();
 };
 
@@ -132,6 +140,7 @@ const forgotPassword = async (email) => {
                 otp_code: otp,
                 expiry_time: '10 minutes',
             },
+            companyId: vendor.company_id || null,
         });
     } catch (_) { /* email errors are non-fatal */ }
 
@@ -157,6 +166,7 @@ const resetPassword = async (email, otp, newPassword) => {
         await emailSenderService.sendEmail('password_changed', {
             to: vendor.email,
             variables: { user_name: vendor.name || 'Vendor' },
+            companyId: vendor.company_id || null,
         });
     } catch (_) { /* email errors are non-fatal */ }
 

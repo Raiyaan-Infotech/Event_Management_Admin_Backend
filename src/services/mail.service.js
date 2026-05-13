@@ -1,6 +1,7 @@
 const { Mail, MailRecipient, MailFolder, User, Vendor, VendorClient } = require('../models');
 const { Op } = require('sequelize');
 const notificationService = require('./mailNotification.service');
+const mediaService = require('./media.service');
 
 const VALID_LABELS = ['social', 'promotions', 'updates'];
 
@@ -109,13 +110,14 @@ const saveDraft = async (caller, data) => {
   const draftId = data.id || data.draft_id;
   await assertRecipientsAllowed(caller, data.recipients || []);
   if (draftId) return updateDraft(caller, draftId, data);
+  const body = await mediaService.uploadDataUrisInHtml(data.body || '', { folder: 'mail', originalName: 'mail-image' }, caller.companyId);
 
   const mail = await Mail.create({
     company_id: caller.companyId || null,
     sender_type: caller.type,
     sender_id: caller.id,
     subject: data.subject,
-    body: data.body || '',
+    body,
     status: 'draft',
     sender_is_active: 1,
   });
@@ -130,9 +132,10 @@ const updateDraft = async (caller, id, data) => {
   if (!mail) throw new Error('Draft not found.');
   await assertRecipientsAllowed(caller, data.recipients || []);
 
+  const body = await mediaService.uploadDataUrisInHtml(data.body || '', { folder: 'mail', originalName: 'mail-image' }, caller.companyId);
   await mail.update({
     subject: data.subject,
-    body: data.body || '',
+    body,
     sender_is_active: 1,
   });
   await syncRecipients(mail.id, data.recipients || []);
@@ -144,13 +147,14 @@ const sendMail = async (caller, data) => {
   await assertRecipientsAllowed(caller, data.recipients || []);
   const draftId = data.id || data.draft_id;
   if (draftId) return sendDraft(caller, draftId, data);
+  const body = await mediaService.uploadDataUrisInHtml(data.body, { folder: 'mail', originalName: 'mail-image' }, caller.companyId);
 
   const mail = await Mail.create({
     company_id: caller.companyId || null,
     sender_type: caller.type,
     sender_id: caller.id,
     subject: data.subject,
-    body: data.body,
+    body,
     status: 'sent',
     sent_at: new Date(),
     sender_is_active: 1,
@@ -172,6 +176,8 @@ const sendDraft = async (caller, id, data = {}) => {
   };
   validateSendPayload(payload);
   await assertRecipientsAllowed(caller, payload.recipients || []);
+
+  payload.body = await mediaService.uploadDataUrisInHtml(payload.body, { folder: 'mail', originalName: 'mail-image' }, caller.companyId);
 
   await mail.update({
     subject: payload.subject,

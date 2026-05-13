@@ -70,7 +70,7 @@ const clearTokenCookies = (res) => {
 // Vendor-specific token generators — completely separate from admin role system
 const generateVendorAccessToken = (vendor) => {
   return jwt.sign(
-    { id: vendor.id, email: vendor.email, type: 'vendor' },
+    { id: vendor.id, email: vendor.email, companyId: vendor.company_id || null, type: 'vendor' },
     getAccessSecret(),
     { expiresIn: '15m' }
   );

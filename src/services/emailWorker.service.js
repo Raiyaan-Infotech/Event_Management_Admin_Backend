@@ -91,8 +91,12 @@ const sendQueuedEmail = async (queueItem) => {
     }
     if (!config) {
       // Get default config
+      const where = { is_default: true, is_active: true };
+      if (queueItem.company_id) {
+        where.company_id = queueItem.company_id;
+      }
       config = await EmailConfig.findOne({
-        where: { is_default: true, is_active: true },
+        where,
       });
     }
 

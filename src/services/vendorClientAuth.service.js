@@ -1,5 +1,6 @@
 const { VendorClient, Vendor } = require('../models');
 const ApiError = require('../utils/apiError');
+const mediaService = require('./media.service');
 
 const login = async (email, password) => {
     const client = await VendorClient.findOne({
@@ -46,7 +47,8 @@ const updateProfile = async (clientId, data) => {
         if (data[field] !== undefined) safeData[field] = data[field];
     }
 
-    await client.update(safeData);
+    const normalized = await mediaService.uploadDataUriFields(safeData, ['profile_pic'], { folder: 'clients' }, client.company_id);
+    await client.update(normalized);
     return getProfile(clientId);
 };
 

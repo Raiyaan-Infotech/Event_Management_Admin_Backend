@@ -95,6 +95,10 @@ db.Mail = require('./Mail')(sequelize, Sequelize);
 db.MailRecipient = require('./MailRecipient')(sequelize, Sequelize);
 db.MailFolder = require('./MailFolder')(sequelize, Sequelize);
 db.MailNotification = require('./MailNotification')(sequelize, Sequelize);
+db.ChatConversation = require('./ChatConversation')(sequelize, Sequelize);
+db.ChatParticipant = require('./ChatParticipant')(sequelize, Sequelize);
+db.ChatMessage = require('./ChatMessage')(sequelize, Sequelize);
+db.ChatReadState = require('./ChatReadState')(sequelize, Sequelize);
 db.VendorNewsletter = require('./VendorNewsletter')(sequelize, Sequelize);
 db.VendorNewsletterSend = require('./VendorNewsletterSend')(sequelize, Sequelize);
 db.VendorNewsletterSentLog = require('./VendorNewsletterSentLog')(sequelize, Sequelize);
@@ -227,6 +231,15 @@ db.MailNotification.belongsTo(db.Mail, { foreignKey: 'mail_id', as: 'mail' });
 
 db.MailFolder.hasMany(db.MailRecipient, { foreignKey: 'custom_folder_id', as: 'mails' });
 db.MailRecipient.belongsTo(db.MailFolder, { foreignKey: 'custom_folder_id', as: 'folder' });
+
+// Common Chat System
+db.ChatConversation.hasMany(db.ChatParticipant, { foreignKey: 'conversation_id', as: 'participants' });
+db.ChatParticipant.belongsTo(db.ChatConversation, { foreignKey: 'conversation_id', as: 'conversation' });
+db.ChatConversation.hasMany(db.ChatMessage, { foreignKey: 'conversation_id', as: 'messages' });
+db.ChatMessage.belongsTo(db.ChatConversation, { foreignKey: 'conversation_id', as: 'conversation' });
+db.ChatConversation.belongsTo(db.ChatMessage, { foreignKey: 'last_message_id', as: 'lastMessage' });
+db.ChatConversation.hasMany(db.ChatReadState, { foreignKey: 'conversation_id', as: 'readStates' });
+db.ChatReadState.belongsTo(db.ChatConversation, { foreignKey: 'conversation_id', as: 'conversation' });
 
 // Theme → Color Palette
 db.Theme.belongsTo(db.ColorPalette, { foreignKey: 'palette_id', as: 'palette' });

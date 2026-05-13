@@ -1,5 +1,6 @@
 const { VendorGallery } = require('../models');
 const ApiError = require('../utils/apiError');
+const mediaService = require('./media.service');
 
 const MAX_IMAGES = 10;
 
@@ -20,10 +21,11 @@ const create = async (data, vendorId, companyId) => {
     const images = Array.isArray(data.images) ? data.images : [];
     if (images.length < 2)          throw ApiError.badRequest('Minimum 2 images required');
     if (images.length > MAX_IMAGES) throw ApiError.badRequest(`Maximum ${MAX_IMAGES} images allowed`);
+    const uploadedImages = await mediaService.uploadDataUriArray(images, { folder: 'gallery', originalName: 'gallery' }, companyId);
     return VendorGallery.create({
         event_name: data.event_name,
         city:       data.city,
-        images,
+        images:     uploadedImages,
         img_view:   data.img_view || 'public',
         is_active:  data.is_active !== undefined ? data.is_active : 1,
         created_by: data.created_by,
@@ -39,7 +41,7 @@ const update = async (id, data, vendorId) => {
         const images = Array.isArray(data.images) ? data.images : [];
         if (images.length < 2)          throw ApiError.badRequest('Minimum 2 images required');
         if (images.length > MAX_IMAGES) throw ApiError.badRequest(`Maximum ${MAX_IMAGES} images allowed`);
-        data.images = images;
+        data.images = await mediaService.uploadDataUriArray(images, { folder: 'gallery', originalName: 'gallery' }, item.company_id);
     }
     await item.update(data);
     return item;

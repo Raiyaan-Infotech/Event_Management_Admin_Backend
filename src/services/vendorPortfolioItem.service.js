@@ -1,6 +1,7 @@
 const { VendorPortfolioItem, sequelize } = require('../models');
 const { Op } = require('sequelize');
 const ApiError = require('../utils/apiError');
+const mediaService = require('./media.service');
 
 const getAll = async (type, vendorId) => {
     return VendorPortfolioItem.findAll({
@@ -16,8 +17,9 @@ const getById = async (id, vendorId) => {
 };
 
 const create = async (type, data, vendorId, companyId) => {
+    const normalized = await mediaService.uploadDataUriFields(data, ['image_path'], { folder: 'portfolio' }, companyId);
     return sequelize.transaction(async (t) => {
-        let order = data.sort_order || 0;
+        let order = normalized.sort_order || 0;
 
         if (order === 0) {
             const maxOrder = await VendorPortfolioItem.max('sort_order', {
@@ -35,7 +37,7 @@ const create = async (type, data, vendorId, companyId) => {
         }
 
         return VendorPortfolioItem.create({
-            ...data,
+            ...normalized,
             type,
             vendor_id:  vendorId,
             company_id: companyId,
@@ -47,11 +49,12 @@ const create = async (type, data, vendorId, companyId) => {
 const update = async (id, data, vendorId) => {
     const item = await VendorPortfolioItem.findOne({ where: { id, vendor_id: vendorId } });
     if (!item) throw ApiError.notFound('Item not found');
+    const normalized = await mediaService.uploadDataUriFields(data, ['image_path'], { folder: 'portfolio' }, item.company_id);
 
-    if (data.sort_order !== undefined && data.sort_order !== item.sort_order) {
+    if (normalized.sort_order !== undefined && normalized.sort_order !== item.sort_order) {
         return sequelize.transaction(async (t) => {
             const oldOrder = item.sort_order;
-            const newOrder = data.sort_order;
+            const newOrder = normalized.sort_order;
             const type = item.type;
 
             if (newOrder > oldOrder) {
@@ -78,12 +81,12 @@ const update = async (id, data, vendorId) => {
                 });
             }
 
-            await item.update(data, { transaction: t });
+            await item.update(normalized, { transaction: t });
             return item;
         });
     }
 
-    await item.update(data);
+    await item.update(normalized);
     return item;
 };
 

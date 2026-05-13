@@ -1,7 +1,8 @@
-const { User, Role, Permission, Company, RefreshToken } = require("../models");
+const { User, Role, Permission, Company, RefreshToken, Setting } = require("../models");
 const logger = require("../utils/logger");
 const ApiError = require("../utils/apiError");
 const emailSenderService = require("./emailSender.service");
+const mediaService = require("./media.service");
 
 /**
  * Generate 6-digit OTP
@@ -45,12 +46,16 @@ const register = async (data) => {
 
     // Send welcome email
     try {
-      const [settings] = await sequelize.query(
-        "SELECT `value` FROM settings WHERE `key` = 'admin_title' AND is_active = 1 LIMIT 1",
-        { type: sequelize.QueryTypes.SELECT },
-      );
+      const setting = await Setting.findOne({
+        where: {
+          key: "admin_title",
+          is_active: 1,
+          ...(user.company_id ? { company_id: user.company_id } : {}),
+        },
+        attributes: ["value"],
+      });
 
-      const appName = settings?.[0]?.value || "Our Platform";
+      const appName = setting?.value || "Our Platform";
 
       await emailSenderService.sendEmail("welcome", {
         to: user.email,
@@ -58,6 +63,7 @@ const register = async (data) => {
           user_name: user.full_name || "User",
           app_name: appName, // ← Pass it explicitly
         },
+        companyId: user.company_id || null,
       });
     } catch (emailError) {
       logger.logError(emailError);
@@ -232,6 +238,10 @@ const updateProfile = async (userId, data) => {
       updateData.timezone = data.timezone;
     }
 
+    if (updateData.avatar !== undefined) {
+      updateData.avatar = await mediaService.uploadDataUri(updateData.avatar, { folder: "avatars", originalName: "avatar" }, user.company_id);
+    }
+
     // Update user
     await user.update(updateData);
 
@@ -287,6 +297,7 @@ const changePassword = async (userId, currentPassword, newPassword) => {
         variables: {
           user_name: user.full_name || "User",
         },
+        companyId: user.company_id || null,
       });
     } catch (emailError) {
       logger.logError(emailError);
@@ -336,6 +347,7 @@ const forgotPassword = async (email) => {
           otp_code: otp,
           expiry_time: "10 minutes",
         },
+        companyId: user.company_id || null,
       });
     } catch (emailError) {
       logger.logError(emailError);
@@ -413,6 +425,7 @@ const resetPassword = async (email, otp, newPassword) => {
         variables: {
           user_name: user.full_name || "User",
         },
+        companyId: user.company_id || null,
       });
     } catch (emailError) {
       logger.logError(emailError);

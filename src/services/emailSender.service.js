@@ -4,6 +4,13 @@ const logger = require("../utils/logger");
 const ApiError = require("../utils/apiError");
 const { wrapWithBaseTemplate } = require("../utils/baseEmailTemplate");
 
+const withCompany = (where = {}, companyId = undefined) => {
+  if (companyId !== undefined && companyId !== null) {
+    return { ...where, company_id: companyId };
+  }
+  return where;
+};
+
 const createTransporter = (config) => {
   console.log("EMAIL DRIVER =", config.driver);
   
@@ -60,10 +67,13 @@ const replaceVariables = (text, variables = {}) => {
 };
 
 const buildFullBody = async (template, options = {}) => {
+  const companyId = options.companyId ?? template.company_id ?? undefined;
   let contentBody = "";
 
   if (template.header_id) {
-    const header = await EmailTemplate.findByPk(template.header_id);
+    const header = await EmailTemplate.findOne({
+      where: withCompany({ id: template.header_id }, companyId),
+    });
     if (header && header.is_active) {
       contentBody += header.body + "\n";
     }
@@ -72,7 +82,9 @@ const buildFullBody = async (template, options = {}) => {
   contentBody += template.body;
 
   if (template.footer_id) {
-    const footer = await EmailTemplate.findByPk(template.footer_id);
+    const footer = await EmailTemplate.findOne({
+      where: withCompany({ id: template.footer_id }, companyId),
+    });
     if (footer && footer.is_active) {
       contentBody += "\n" + footer.body;
     }
@@ -85,10 +97,10 @@ const buildFullBody = async (template, options = {}) => {
   return contentBody;
 };
 
-const getEmailSettings = async () => {
+const getEmailSettings = async (companyId = undefined) => {
   try {
     const settings = await Setting.findAll({
-      where: {
+      where: withCompany({
         key: [
           "admin_title",
           "support_email",
@@ -98,7 +110,7 @@ const getEmailSettings = async () => {
           "site_url",
         ],
         is_active: 1,
-      },
+      }, companyId),
       attributes: ["key", "value"],
     });
 
@@ -116,14 +128,14 @@ const getEmailSettings = async () => {
 
 const sendEmail = async (templateSlug, options = {}) => {
   try {
-    const { to, variables = {}, configId, userId = null } = options;
+    const { to, variables = {}, configId, userId = null, companyId = undefined } = options;
 
     if (!to) {
       throw ApiError.badRequest("Recipient email (to) is required");
     }
 
     const template = await EmailTemplate.findOne({
-      where: { slug: templateSlug, is_active: true, type: "template" },
+      where: withCompany({ slug: templateSlug, is_active: true, type: "template" }, companyId),
     });
 
     if (!template) {
@@ -134,12 +146,12 @@ const sendEmail = async (templateSlug, options = {}) => {
 
     let config;
     if (configId) {
-      config = await EmailConfig.findByPk(configId);
+      config = await EmailConfig.findOne({ where: withCompany({ id: configId }, companyId) });
     } else if (template.email_config_id) {
-      config = await EmailConfig.findByPk(template.email_config_id);
+      config = await EmailConfig.findOne({ where: withCompany({ id: template.email_config_id }, companyId) });
     } else {
       config = await EmailConfig.findOne({
-        where: { is_default: true, is_active: true },
+        where: withCompany({ is_default: true, is_active: true }, companyId),
       });
     }
 
@@ -149,8 +161,8 @@ const sendEmail = async (templateSlug, options = {}) => {
       );
     }
 
-    const fullBody = await buildFullBody(template);
-    const dbSettings = await getEmailSettings();
+    const fullBody = await buildFullBody(template, { companyId });
+    const dbSettings = await getEmailSettings(companyId);
     const defaultVariables = {
       app_name:
         dbSettings.admin_title || process.env.APP_NAME || "Admin Dashboard",
@@ -210,7 +222,7 @@ const sendEmail = async (templateSlug, options = {}) => {
 
 const sendDirect = async (options = {}) => {
   try {
-    const { to, subject, body, configId } = options;
+    const { to, subject, body, configId, companyId = undefined } = options;
 
     if (!to || !subject || !body) {
       throw ApiError.badRequest("to, subject, and body are required");
@@ -218,10 +230,10 @@ const sendDirect = async (options = {}) => {
 
     let config;
     if (configId) {
-      config = await EmailConfig.findByPk(configId);
+      config = await EmailConfig.findOne({ where: withCompany({ id: configId }, companyId) });
     } else {
       config = await EmailConfig.findOne({
-        where: { is_default: true, is_active: true },
+        where: withCompany({ is_default: true, is_active: true }, companyId),
       });
     }
 
@@ -250,14 +262,14 @@ const sendDirect = async (options = {}) => {
   }
 };
 
-const testConfig = async (configId, testEmail, templateId = null) => {
+const testConfig = async (configId, testEmail, templateId = null, companyId = undefined) => {
   try {
     console.log("\n🧪 Testing Email Configuration:");
     console.log("  Config ID:", configId);
     console.log("  Test Email:", testEmail || "none (connection test only)");
     console.log("  Template ID:", templateId || "none (basic test)");
     
-    const config = await EmailConfig.findByPk(configId);
+    const config = await EmailConfig.findOne({ where: withCompany({ id: configId }, companyId) });
     if (!config) {
       throw ApiError.notFound("Email configuration not found");
     }
@@ -279,7 +291,7 @@ const testConfig = async (configId, testEmail, templateId = null) => {
       // If template ID is provided, use the template
       if (templateId) {
         console.log("  Loading template...");
-        const template = await EmailTemplate.findByPk(templateId);
+        const template = await EmailTemplate.findOne({ where: withCompany({ id: templateId }, companyId) });
         
         if (!template) {
           throw ApiError.notFound("Email template not found");
@@ -292,10 +304,10 @@ const testConfig = async (configId, testEmail, templateId = null) => {
         console.log("  Using Template:", template.name);
 
         // Build full body with header/footer if applicable
-        const fullBody = await buildFullBody(template);
+        const fullBody = await buildFullBody(template, { companyId });
 
         // Get email settings for default variables
-        const dbSettings = await getEmailSettings();
+        const dbSettings = await getEmailSettings(companyId);
         const defaultVariables = {
           app_name: dbSettings.admin_title || process.env.APP_NAME || "Admin Dashboard",
           support_email: dbSettings.support_email || process.env.SUPPORT_EMAIL || "support@example.com",

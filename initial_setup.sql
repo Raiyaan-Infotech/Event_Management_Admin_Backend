@@ -2632,3 +2632,84 @@ CREATE TABLE IF NOT EXISTS `mail_notifications` (
   KEY `idx_mn_recipient` (`recipient_type`, `recipient_id`, `is_read`),
   CONSTRAINT `fk_mn_mail` FOREIGN KEY (`mail_id`) REFERENCES `mails`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- COMMON REAL-TIME CHAT SYSTEM
+-- Reusable actor model: admin/vendor/client can be mapped in other projects.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS `chat_conversations` (
+  `id`                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id`        INT UNSIGNED DEFAULT NULL,
+  `vendor_id`         INT UNSIGNED DEFAULT NULL,
+  `conversation_type` ENUM('direct','group') NOT NULL DEFAULT 'direct',
+  `context_type`      VARCHAR(80) DEFAULT 'general',
+  `context_id`        BIGINT UNSIGNED DEFAULT NULL,
+  `title`             VARCHAR(255) DEFAULT NULL,
+  `last_message_id`   BIGINT UNSIGNED DEFAULT NULL,
+  `last_message_at`   DATETIME DEFAULT NULL,
+  `is_active`         TINYINT NOT NULL DEFAULT 1,
+  `created_at`        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at`        DATETIME DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_chat_conversations_vendor` (`vendor_id`),
+  KEY `idx_chat_conversations_company` (`company_id`),
+  KEY `idx_chat_conversations_last` (`last_message_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `chat_participants` (
+  `id`                   BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `conversation_id`      BIGINT UNSIGNED NOT NULL,
+  `actor_type`           ENUM('admin','vendor','client') NOT NULL,
+  `actor_id`             INT UNSIGNED NOT NULL,
+  `display_name`         VARCHAR(255) DEFAULT NULL,
+  `avatar`               VARCHAR(500) DEFAULT NULL,
+  `last_read_message_id` BIGINT UNSIGNED DEFAULT NULL,
+  `last_read_at`         DATETIME DEFAULT NULL,
+  `is_muted`             TINYINT NOT NULL DEFAULT 0,
+  `is_active`            TINYINT NOT NULL DEFAULT 1,
+  `created_at`           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at`           DATETIME DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_chat_participant_actor` (`conversation_id`, `actor_type`, `actor_id`),
+  KEY `idx_chat_participant_actor` (`actor_type`, `actor_id`),
+  CONSTRAINT `fk_chat_participants_conversation`
+    FOREIGN KEY (`conversation_id`) REFERENCES `chat_conversations`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `chat_messages` (
+  `id`              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `conversation_id` BIGINT UNSIGNED NOT NULL,
+  `sender_type`     ENUM('admin','vendor','client') NOT NULL,
+  `sender_id`       INT UNSIGNED NOT NULL,
+  `message`         TEXT NOT NULL,
+  `message_type`    ENUM('text','system') NOT NULL DEFAULT 'text',
+  `metadata`        JSON DEFAULT NULL,
+  `edited_at`       DATETIME DEFAULT NULL,
+  `deleted_at`      DATETIME DEFAULT NULL,
+  `created_at`      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_chat_messages_conversation` (`conversation_id`, `id`),
+  KEY `idx_chat_messages_sender` (`sender_type`, `sender_id`),
+  CONSTRAINT `fk_chat_messages_conversation`
+    FOREIGN KEY (`conversation_id`) REFERENCES `chat_conversations`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `chat_read_states` (
+  `id`                   BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `conversation_id`      BIGINT UNSIGNED NOT NULL,
+  `actor_type`           ENUM('admin','vendor','client') NOT NULL,
+  `actor_id`             INT UNSIGNED NOT NULL,
+  `last_read_message_id` BIGINT UNSIGNED DEFAULT NULL,
+  `last_read_at`         DATETIME DEFAULT NULL,
+  `created_at`           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_chat_read_actor` (`conversation_id`, `actor_type`, `actor_id`),
+  KEY `idx_chat_read_actor` (`actor_type`, `actor_id`),
+  CONSTRAINT `fk_chat_read_conversation`
+    FOREIGN KEY (`conversation_id`) REFERENCES `chat_conversations`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -4,6 +4,7 @@ const logger = require('../utils/logger');
 const ApiError = require('../utils/apiError');
 const { Op } = require('sequelize');
 const bcrypt = require('bcryptjs');
+const mediaService = require('./media.service');
 
 const MODEL_NAME = 'Company';
 
@@ -101,6 +102,13 @@ const create = async (data, userId = null) => {
 
     // Create company
     const company = await Company.create(companyData, { transaction });
+    const normalizedCompanyMedia = await mediaService.uploadDataUriFields(companyData, ['logo', 'favicon'], { folder: 'companies' }, company.id);
+    if (normalizedCompanyMedia.logo !== companyData.logo || normalizedCompanyMedia.favicon !== companyData.favicon) {
+      await company.update({
+        logo: normalizedCompanyMedia.logo,
+        favicon: normalizedCompanyMedia.favicon,
+      }, { transaction });
+    }
 
     // Copy system-level modules and permissions
     const systemModules = await Module.findAll({ where: { company_id: null } });
@@ -214,13 +222,14 @@ const update = async (id, data, userId = null) => {
       data.updated_by = userId;
     }
 
-    await company.update(data);
+    const normalized = await mediaService.uploadDataUriFields(data, ['logo', 'favicon'], { folder: 'companies' }, company.id);
+    await company.update(normalized);
 
     logger.logDB('update', MODEL_NAME, id);
     logger.logActivity(userId, 'update', MODEL_NAME, `Updated company: ${company.name}`, {
       recordId: id,
       oldValues,
-      newValues: data,
+      newValues: normalized,
     });
 
     return getById(id);

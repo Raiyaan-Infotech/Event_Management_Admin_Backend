@@ -122,7 +122,7 @@ const remove = async (id, userId = null, companyId = undefined) => {
 /**
  * Test email config connection (verifies transporter)
  */
-const testConnection = async (id, testEmail = null, templateId = null) => {
+const testConnection = async (id, testEmail = null, templateId = null, companyId = undefined) => {
   console.log("Service testConnection called with:", {
     id,
     testEmail,
@@ -130,7 +130,7 @@ const testConnection = async (id, testEmail = null, templateId = null) => {
   });
 
   const emailSenderService = require("./emailSender.service");
-  return emailSenderService.testConfig(id, testEmail, templateId);
+  return emailSenderService.testConfig(id, testEmail, templateId, companyId);
 };
 
 /**
@@ -149,12 +149,15 @@ const getDefault = async (companyId = undefined) => {
 /**
  * Debug SMTP connectivity - tests raw socket connection
  */
-const debugSmtpConnection = async (id) => {
+const debugSmtpConnection = async (id, companyId = undefined) => {
   const net = require("net");
   const tls = require("tls");
 
   const config = await EmailConfig.findByPk(id);
   if (!config) {
+    throw ApiError.notFound("Email configuration not found");
+  }
+  if (companyId !== undefined && companyId !== null && config.company_id !== companyId) {
     throw ApiError.notFound("Email configuration not found");
   }
 

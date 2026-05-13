@@ -4,6 +4,7 @@ const logger = require('../utils/logger');
 const ApiError = require('../utils/apiError');
 const { generateSlug } = require('../utils/helpers');
 const emailSenderService = require('./emailSender.service');
+const mediaService = require('./media.service');
 
 const MODEL_NAME = 'EmailTemplate';
 
@@ -128,6 +129,11 @@ const create = async (data, userId = null, companyId = undefined) => {
     }
 
     // Extract variables from body and subject
+    if (data.body) {
+      data.body = await mediaService.uploadDataUrisInHtml(data.body, { folder: 'email', originalName: 'email-image' }, companyId);
+    }
+
+    // Extract variables from body and subject
     if (!data.variables) {
       data.variables = extractVariables(data.body, data.subject);
     }
@@ -166,6 +172,11 @@ const update = async (id, data, userId = null, companyId = undefined) => {
       if (existing) {
         throw ApiError.conflict('Email template with this slug already exists');
       }
+    }
+
+    // Auto-extract variables if body or subject changed
+    if (data.body) {
+      data.body = await mediaService.uploadDataUrisInHtml(data.body, { folder: 'email', originalName: 'email-image' }, template.company_id || companyId);
     }
 
     // Auto-extract variables if body or subject changed
@@ -219,14 +230,18 @@ const remove = async (id, userId = null, companyId = undefined) => {
 /**
  * Preview email template with sample data (includes header/footer)
  */
-const preview = async (id, sampleData = {}) => {
+const preview = async (id, sampleData = {}, companyId = undefined) => {
   try {
-    const template = await EmailTemplate.findByPk(id);
+    const where = { id };
+    if (companyId !== undefined && companyId !== null) {
+      where.company_id = companyId;
+    }
+    const template = await EmailTemplate.findOne({ where });
     if (!template) {
       throw ApiError.notFound('Email template not found');
     }
 
-    const fullBody = await emailSenderService.buildFullBody(template);
+    const fullBody = await emailSenderService.buildFullBody(template, { companyId });
 
     const defaultVariables = {
       app_name: process.env.APP_NAME || 'Admin Dashboard',
@@ -260,9 +275,13 @@ const preview = async (id, sampleData = {}) => {
 /**
  * Send email using template
  */
-const send = async (id, options = {}, userId = null) => {
+const send = async (id, options = {}, userId = null, companyId = undefined) => {
   try {
-    const template = await EmailTemplate.findByPk(id);
+    const where = { id };
+    if (companyId !== undefined && companyId !== null) {
+      where.company_id = companyId;
+    }
+    const template = await EmailTemplate.findOne({ where });
     if (!template) {
       throw ApiError.notFound('Email template not found');
     }
@@ -270,6 +289,7 @@ const send = async (id, options = {}, userId = null) => {
     return emailSenderService.sendEmail(template.slug, {
       ...options,
       userId,
+      companyId,
     });
   } catch (error) {
     logger.logError(error);
@@ -280,11 +300,11 @@ const send = async (id, options = {}, userId = null) => {
 /**
  * Render email template (for internal use)
  */
-const render = async (slug, data = {}) => {
+const render = async (slug, data = {}, companyId = undefined) => {
   try {
-    const template = await getBySlug(slug);
+    const template = await getBySlug(slug, companyId);
 
-    const fullBody = await emailSenderService.buildFullBody(template);
+    const fullBody = await emailSenderService.buildFullBody(template, { companyId });
 
     const defaultVariables = {
       app_name: process.env.APP_NAME || 'Admin Dashboard',

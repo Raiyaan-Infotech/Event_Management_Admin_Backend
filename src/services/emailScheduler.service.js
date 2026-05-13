@@ -54,6 +54,9 @@ const getTargetUsers = async (campaign) => {
   const where = {
     is_active: true,
   };
+  if (campaign.company_id) {
+    where.company_id = campaign.company_id;
+  }
 
   switch (campaign.target_audience) {
     case 'all_users':
@@ -86,8 +89,12 @@ const getTargetUsers = async (campaign) => {
 /**
  * Get setting value by key
  */
-const getSettingValue = async (key, defaultValue = '') => {
-  const setting = await Setting.findOne({ where: { key } });
+const getSettingValue = async (key, defaultValue = '', companyId = undefined) => {
+  const where = { key };
+  if (companyId !== undefined && companyId !== null) {
+    where.company_id = companyId;
+  }
+  const setting = await Setting.findOne({ where });
   return setting?.value || defaultValue;
 };
 
@@ -105,7 +112,7 @@ const buildUserVariables = async (user, campaign) => {
         break;
 
       case 'setting':
-        variables[varName] = await getSettingValue(mapping.key, mapping.default || '');
+        variables[varName] = await getSettingValue(mapping.key, mapping.default || '', campaign.company_id);
         break;
 
       case 'computed':
@@ -130,8 +137,8 @@ const buildUserVariables = async (user, campaign) => {
   // Always include these basic variables
   variables.user_name = variables.user_name || user.full_name || 'User';
   variables.user_email = variables.user_email || user.email;
-  variables.app_name = variables.app_name || await getSettingValue('app_name', 'Our App');
-  variables.app_url = variables.app_url || await getSettingValue('app_url', process.env.APP_URL || 'http://localhost:3000');
+  variables.app_name = variables.app_name || await getSettingValue('app_name', 'Our App', campaign.company_id);
+  variables.app_url = variables.app_url || await getSettingValue('app_url', process.env.APP_URL || 'http://localhost:3000', campaign.company_id);
   variables.current_year = new Date().getFullYear().toString();
 
   return variables;
@@ -156,10 +163,15 @@ const replaceVariables = (text, variables) => {
  */
 const buildFullBody = async (template) => {
   let fullBody = '';
+  const companyId = template.company_id || undefined;
 
   // Get header if assigned
   if (template.header_id) {
-    const header = await EmailTemplate.findByPk(template.header_id);
+    const headerWhere = { id: template.header_id };
+    if (companyId !== undefined && companyId !== null) {
+      headerWhere.company_id = companyId;
+    }
+    const header = await EmailTemplate.findOne({ where: headerWhere });
     if (header && header.is_active) {
       fullBody += header.body + '\n';
     }
@@ -170,7 +182,11 @@ const buildFullBody = async (template) => {
 
   // Get footer if assigned
   if (template.footer_id) {
-    const footer = await EmailTemplate.findByPk(template.footer_id);
+    const footerWhere = { id: template.footer_id };
+    if (companyId !== undefined && companyId !== null) {
+      footerWhere.company_id = companyId;
+    }
+    const footer = await EmailTemplate.findOne({ where: footerWhere });
     if (footer && footer.is_active) {
       fullBody += '\n' + footer.body;
     }
@@ -194,7 +210,12 @@ const queueCampaignEmails = async (campaign) => {
 
   try {
     // Get template with full body
-    const template = await EmailTemplate.findByPk(campaign.email_template_id, {
+    const templateWhere = { id: campaign.email_template_id };
+    if (campaign.company_id) {
+      templateWhere.company_id = campaign.company_id;
+    }
+    const template = await EmailTemplate.findOne({
+      where: templateWhere,
       include: [
         { model: EmailTemplate, as: 'header' },
         { model: EmailTemplate, as: 'footer' },
@@ -266,6 +287,7 @@ const queueCampaignEmails = async (campaign) => {
 
           // Add to queue
           await EmailQueue.create({
+            company_id: campaign.company_id || null,
             campaign_id: campaign.id,
             user_id: user.id,
             email: user.email,

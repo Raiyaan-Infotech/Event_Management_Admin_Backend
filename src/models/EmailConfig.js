@@ -92,6 +92,7 @@ module.exports = (sequelize) => {
             { 
               where: { 
                 is_default: true,
+                company_id: instance.company_id || null,
                 id: { [sequelize.Sequelize.Op.ne]: instance.id }
               } 
             }

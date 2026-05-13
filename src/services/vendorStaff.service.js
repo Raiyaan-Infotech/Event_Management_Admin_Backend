@@ -1,6 +1,7 @@
 const { VendorStaff, Role } = require('../models');
 const baseService = require('./base.service');
 const ApiError = require('../utils/apiError');
+const mediaService = require('./media.service');
 
 const MODEL_NAME = 'VendorStaff';
 
@@ -73,7 +74,7 @@ const create = async (data, vendorId, companyId) => {
     }
 
     // Sanitize date fields
-    const sanitized = sanitizeDateFields(safeData);
+    const sanitized = sanitizeDateFields(await mediaService.uploadDataUriFields(safeData, ['profile_pic'], { folder: 'staff' }, companyId));
 
     const count = await VendorStaff.count({ where: { vendor_id: vendorId } });
     const empId = `EMP-${String(count + 1).padStart(4, '0')}`;
@@ -102,7 +103,7 @@ const update = async (id, data, vendorId, byVendor = false) => {
     }
 
     // Sanitize date fields
-    const sanitized = sanitizeDateFields(safeData);
+    const sanitized = sanitizeDateFields(await mediaService.uploadDataUriFields(safeData, ['profile_pic'], { folder: 'staff' }, record.company_id));
 
     await record.update(sanitized);
     return record;

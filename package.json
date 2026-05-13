@@ -20,6 +20,7 @@
     "axios": "^1.7.9",
     "bcryptjs": "^2.4.3",
     "compression": "^1.7.5",
+    "cookie": "^1.0.2",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "country-state-city": "^3.2.1",
@@ -40,6 +41,7 @@
     "nodemailer": "^6.9.16",
     "sequelize": "^6.37.5",
     "sharp": "^0.34.5",
+    "socket.io": "^4.8.1",
     "uuid": "^11.0.4",
     "winston": "^3.17.0",
     "winston-daily-rotate-file": "^5.0.0"

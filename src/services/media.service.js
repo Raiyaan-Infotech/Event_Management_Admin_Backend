@@ -174,6 +174,24 @@ const generateFilename = (originalName) => {
   return `${name}-${timestamp}-${random}${ext}`;
 };
 
+const isDataUri = (value) => typeof value === 'string' && /^data:[^;]+;base64,/.test(value);
+
+const dataUriToFile = (value, originalName = 'upload') => {
+  const match = String(value || '').match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) return null;
+
+  const mimetype = match[1];
+  const buffer = Buffer.from(match[2], 'base64');
+  const ext = mimetype.split('/')[1]?.replace('jpeg', 'jpg') || 'bin';
+
+  return {
+    buffer,
+    mimetype,
+    size: buffer.length,
+    originalname: `${originalName}.${ext}`,
+  };
+};
+
 /**
  * Upload file to configured storage
  */
@@ -221,6 +239,60 @@ const upload = async (file, options = {}, companyId = 1) => {
     logger.logError(error);
     throw ApiError.internal('File upload failed: ' + error.message);
   }
+};
+
+const uploadDataUri = async (value, options = {}, companyId = 1) => {
+  if (!isDataUri(value)) return value || null;
+  const file = dataUriToFile(value, options.originalName || 'upload');
+  if (!file) return null;
+  const result = await upload(file, options, companyId);
+  return result.url;
+};
+
+const uploadDataUriFields = async (data, fields = [], options = {}, companyId = 1) => {
+  const next = { ...data };
+  for (const field of fields) {
+    if (isDataUri(next[field])) {
+      next[field] = await uploadDataUri(next[field], {
+        ...options,
+        originalName: options.originalName || field,
+      }, companyId);
+    }
+  }
+  return next;
+};
+
+const uploadDataUriArray = async (values = [], options = {}, companyId = 1) => {
+  const rows = Array.isArray(values) ? values : [];
+  const uploaded = [];
+  for (let index = 0; index < rows.length; index += 1) {
+    uploaded.push(await uploadDataUri(rows[index], {
+      ...options,
+      originalName: `${options.originalName || 'image'}-${index + 1}`,
+    }, companyId));
+  }
+  return uploaded;
+};
+
+const uploadDataUrisInHtml = async (html = '', options = {}, companyId = 1) => {
+  if (typeof html !== 'string' || !html.includes('data:')) return html;
+
+  const regex = /src=(["'])(data:[^"']+;base64,[^"']+)\1/g;
+  let result = html;
+  const matches = [...html.matchAll(regex)];
+
+  for (let index = 0; index < matches.length; index += 1) {
+    const [fullMatch, quote, dataUri] = matches[index];
+    const url = await uploadDataUri(dataUri, {
+      ...options,
+      originalName: `${options.originalName || 'embedded'}-${index + 1}`,
+    }, companyId);
+    if (url) {
+      result = result.replace(fullMatch, `src=${quote}${url}${quote}`);
+    }
+  }
+
+  return result;
 };
 
 /**
@@ -572,6 +644,10 @@ const renameFile = async (pathStr, newName, companyId = 1) => {
 
 module.exports = {
   upload,
+  uploadDataUri,
+  uploadDataUriFields,
+  uploadDataUriArray,
+  uploadDataUrisInHtml,
   uploadMultiple,
   deleteFile,
   listFiles,

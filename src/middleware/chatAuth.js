@@ -37,7 +37,7 @@ const authenticateAdmin = async (req, res) => {
   }
 
   if (decoded && !decoded.type) {
-    return { type: 'admin', id: decoded.userId, companyId: decoded.companyId };
+    return { type: 'admin', id: decoded.userId, companyId: decoded.companyId || null };
   }
   return null;
 };
@@ -58,11 +58,7 @@ const authenticateVendor = async (req, res) => {
   }
 
   if (decoded && decoded.type === 'vendor') {
-    if (decoded.companyId) {
-      return { type: 'vendor', id: decoded.id, vendorId: decoded.id, companyId: decoded.companyId };
-    }
-    const vendor = await Vendor.findByPk(decoded.id, { attributes: ['id', 'company_id'] });
-    return { type: 'vendor', id: decoded.id, vendorId: decoded.id, companyId: vendor?.company_id || null };
+    return { type: 'vendor', id: decoded.id, vendorId: decoded.id, companyId: decoded.companyId || null };
   }
   return null;
 };
@@ -83,19 +79,7 @@ const authenticateClient = async (req, res) => {
   }
 
   if (decoded && decoded.type === 'client') {
-    if (decoded.companyId) {
-      return { type: 'client', id: decoded.id, vendorId: decoded.vendorId, companyId: decoded.companyId };
-    }
-    const client = await VendorClient.findByPk(decoded.id, { attributes: ['id', 'company_id', 'vendor_id'] });
-    const vendor = client?.company_id
-      ? null
-      : await Vendor.findByPk(client?.vendor_id || decoded.vendorId, { attributes: ['id', 'company_id'] });
-    return {
-      type: 'client',
-      id: decoded.id,
-      vendorId: decoded.vendorId || client?.vendor_id || null,
-      companyId: client?.company_id || vendor?.company_id || null,
-    };
+    return { type: 'client', id: decoded.id, vendorId: decoded.vendorId, companyId: decoded.companyId || null };
   }
   return null;
 };
@@ -106,35 +90,31 @@ const byPortal = {
   client: authenticateClient,
 };
 
-const isMailAuthenticated = async (req, res, next) => {
+const authenticateChatRequest = async (req, res) => {
+  const portal = String(req.headers['x-portal-type'] || '').toLowerCase();
+
+  if (byPortal[portal]) {
+    return byPortal[portal](req, res);
+  }
+
+  return (
+    (await authenticateVendor(req, res)) ||
+    (await authenticateClient(req, res)) ||
+    (await authenticateAdmin(req, res))
+  );
+};
+
+const isChatAuthenticated = async (req, res, next) => {
   try {
-    const portal = String(req.headers['x-portal-type'] || '').toLowerCase();
-
-    if (byPortal[portal]) {
-      const caller = await byPortal[portal](req, res);
-      if (!caller) {
-        return res.status(401).json({ success: false, message: `${portal} authentication required.` });
-      }
-      req.mailCaller = caller;
-      return next();
+    const actor = await authenticateChatRequest(req, res);
+    if (!actor) {
+      return res.status(401).json({ success: false, message: 'Authentication required.' });
     }
-
-    // Fallback for older clients. Prefer the more specific portal cookies first
-    // because localhost shares cookies across admin/vendor/client development ports.
-    const caller =
-      (await authenticateVendor(req, res)) ||
-      (await authenticateClient(req, res)) ||
-      (await authenticateAdmin(req, res));
-
-    if (caller) {
-      req.mailCaller = caller;
-      return next();
-    }
-
-    return res.status(401).json({ success: false, message: 'Authentication required.' });
+    req.chatActor = actor;
+    return next();
   } catch (error) {
     return res.status(401).json({ success: false, message: 'Authentication required.' });
   }
 };
 
-module.exports = { isMailAuthenticated };
+module.exports = { isChatAuthenticated, authenticateChatRequest };
