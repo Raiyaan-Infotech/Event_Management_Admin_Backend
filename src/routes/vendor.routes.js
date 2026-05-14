@@ -6,7 +6,8 @@ const vendorClientController = require('../controllers/vendorClient.controller')
 const vendorClientAuthController = require('../controllers/vendorClientAuth.controller');
 const vendorStaffController = require('../controllers/vendorStaff.controller');
 const vendorStaffAuthController = require('../controllers/vendorStaffAuth.controller');
-const vendorRoleController = require('../controllers/vendorRole.controller');
+const vendorRoleController       = require('../controllers/vendorRole.controller');
+const vendorDepartmentController  = require('../controllers/vendorDepartment.controller');
 const vendorPermissionController = require('../controllers/vendorPermission.controller');
 const staffPortalController = require('../controllers/staffPortal.controller');
 const vendorPageController = require('../controllers/vendorPage.controller');
@@ -126,6 +127,13 @@ router.post('/roles',                 isVendorAuthenticated, vendorRoleControlle
 router.put('/roles/:id',              isVendorAuthenticated, vendorRoleController.update);
 router.delete('/roles/:id',           isVendorAuthenticated, vendorRoleController.delete);
 router.put('/roles/:id/permissions',  isVendorAuthenticated, vendorRoleController.assignPermissions);
+
+// ─── Departments ──────────────────────────────────────────────────────────────
+router.get('/departments',     isVendorAuthenticated, vendorDepartmentController.getAll);
+router.get('/departments/:id', isVendorAuthenticated, vendorDepartmentController.getById);
+router.post('/departments',    isVendorAuthenticated, vendorDepartmentController.create);
+router.put('/departments/:id', isVendorAuthenticated, vendorDepartmentController.update);
+router.delete('/departments/:id', isVendorAuthenticated, vendorDepartmentController.delete);
 
 // ─── Vendor RBAC — Modules & Permissions (vendor JWT, view only) ─────────────
 router.get('/modules',                isVendorAuthenticated, vendorPermissionController.getModules);

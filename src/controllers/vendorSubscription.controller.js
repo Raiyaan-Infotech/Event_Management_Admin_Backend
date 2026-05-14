@@ -8,6 +8,18 @@ const { safeParseArray } = require('../utils/json');
 
 const COLOR_KEYS = ['primary_color', 'secondary_color', 'header_color', 'footer_color', 'text_color', 'hover_color'];
 
+// In-memory cache for home-blocks (per vendor, 15s TTL)
+const homeBlocksCache = new Map();
+const HOME_BLOCKS_TTL = 15 * 1000;
+const getHomeBlocksCache = (vendorId) => {
+    const entry = homeBlocksCache.get(vendorId);
+    if (!entry) return null;
+    if (Date.now() > entry.expiresAt) { homeBlocksCache.delete(vendorId); return null; }
+    return entry.data;
+};
+const setHomeBlocksCache = (vendorId, data) => homeBlocksCache.set(vendorId, { data, expiresAt: Date.now() + HOME_BLOCKS_TTL });
+const clearHomeBlocksCache = (vendorId) => homeBlocksCache.delete(vendorId);
+
 // GET /vendors/subscription
 const getMyPlan = asyncHandler(async (req, res) => {
     const vendorId = req.vendor.id;
@@ -212,18 +224,22 @@ const resetCustomColors = asyncHandler(async (req, res) => {
 
 // GET /vendors/home-blocks
 const getHomeBlocks = asyncHandler(async (req, res) => {
+    const cached = getHomeBlocksCache(req.vendor.id);
+    if (cached) return ApiResponse.success(res, cached, 'Home blocks retrieved');
+
     const vendor = await Vendor.findByPk(req.vendor.id, { attributes: ['theme_id', 'home_blocks'] });
     if (!vendor?.theme_id) return ApiResponse.success(res, [], 'No active theme set');
 
-    // Use vendor's custom order if saved, otherwise fall back to theme defaults
+    let blocks;
     if (vendor.home_blocks) {
         const raw = safeParseArray(vendor.home_blocks);
         if (raw.length > 0) {
-            const blocks = raw.map(b => ({
+            blocks = raw.map(b => ({
                 block_type: b.block_type,
                 variant:    b.variant || 'variant_1',
                 is_visible: b.is_visible !== false ? 1 : 0,
             }));
+            setHomeBlocksCache(req.vendor.id, blocks);
             return ApiResponse.success(res, blocks, 'Home blocks retrieved');
         }
     }
@@ -232,12 +248,13 @@ const getHomeBlocks = asyncHandler(async (req, res) => {
     if (!theme) return ApiResponse.success(res, [], 'Theme not found');
 
     const raw = safeParseArray(theme.home_blocks);
-    const blocks = raw.map(b => ({
+    blocks = raw.map(b => ({
         block_type: b.block_type,
         variant:    b.variant || 'variant_1',
         is_visible: b.is_visible !== false ? 1 : 0,
     }));
 
+    setHomeBlocksCache(req.vendor.id, blocks);
     ApiResponse.success(res, blocks, 'Home blocks retrieved');
 });
 
@@ -253,6 +270,7 @@ const saveHomeBlocks = asyncHandler(async (req, res) => {
     }));
 
     await Vendor.update({ home_blocks: JSON.stringify(normalized) }, { where: { id: req.vendor.id } });
+    clearHomeBlocksCache(req.vendor.id);
 
     ApiResponse.success(res, normalized, 'Home blocks saved');
 });

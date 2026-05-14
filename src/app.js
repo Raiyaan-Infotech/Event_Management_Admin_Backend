@@ -4,6 +4,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const path = require('path');
 const cookieParser = require('cookie-parser');
+const compression = require('compression');
 const errorHandler = require('./middleware/errorHandler');
 const bodyTransform = require('./middleware/bodyTransform');
 const logger = require('./utils/logger');
@@ -11,6 +12,7 @@ const logger = require('./utils/logger');
 const app = express();
 
 // Middleware
+app.use(compression());
 app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(cookieParser());
 const ALLOWED_ORIGINS = (process.env.FRONTEND_URL || 'http://localhost:3000,http://localhost:3001')

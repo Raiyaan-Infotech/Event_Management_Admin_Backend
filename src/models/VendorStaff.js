@@ -3,9 +3,10 @@ const bcrypt = require('bcryptjs');
 
 module.exports = (sequelize) => {
     const VendorStaff = sequelize.define('VendorStaff', {
-        id:          { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-        vendor_id:   { type: DataTypes.INTEGER, allowNull: false },
-        role_id:     { type: DataTypes.INTEGER, allowNull: true },
+        id:              { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+        vendor_id:       { type: DataTypes.INTEGER, allowNull: false },
+        role_id:         { type: DataTypes.INTEGER, allowNull: true },
+        department_id:   { type: DataTypes.INTEGER, allowNull: true },
         emp_id:      { type: DataTypes.STRING(50),  allowNull: true },
         name:        { type: DataTypes.STRING(200), allowNull: false },
         email:       { type: DataTypes.STRING(255), allowNull: false },

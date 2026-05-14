@@ -1534,6 +1534,21 @@ ALTER TABLE `vendor_clients` ADD COLUMN IF NOT EXISTS `reset_token_expires_at`  
 ALTER TABLE `vendor_clients` ADD COLUMN IF NOT EXISTS `subscription_id`           INT DEFAULT NULL;
 ALTER TABLE `vendor_clients` MODIFY COLUMN IF EXISTS `plan`                        VARCHAR(200) DEFAULT NULL;
 
+-- ─── Vendor Departments ───────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `vendor_departments` (
+  `id`          INT          NOT NULL AUTO_INCREMENT,
+  `vendor_id`   INT          NOT NULL,
+  `company_id`  INT          DEFAULT NULL,
+  `name`        VARCHAR(200) NOT NULL,
+  `description` TEXT         DEFAULT NULL,
+  `is_active`   TINYINT      NOT NULL DEFAULT 1,
+  `created_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at`  DATETIME     DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_vendor_departments_vendor` (`vendor_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ─── Vendor Pages ─────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS `vendor_pages` (
   `id`          INT          NOT NULL AUTO_INCREMENT,
@@ -2109,7 +2124,8 @@ ON DUPLICATE KEY UPDATE `value` = VALUES(`value`), `status` = 'reviewed';
 -- ═══════════════════════════════════════════════════════════════
 
 -- STEP 1: Add new columns
-ALTER TABLE vendor_staff ADD COLUMN IF NOT EXISTS role_id INT NULL AFTER vendor_id;
+ALTER TABLE vendor_staff ADD COLUMN IF NOT EXISTS role_id        INT NULL AFTER vendor_id;
+ALTER TABLE vendor_staff ADD COLUMN IF NOT EXISTS department_id  INT NULL AFTER role_id;
 ALTER TABLE roles ADD COLUMN IF NOT EXISTS vendor_id INT NULL AFTER company_id;
 ALTER TABLE permissions ADD COLUMN IF NOT EXISTS vendor_id INT NULL AFTER company_id;
 ALTER TABLE modules ADD COLUMN IF NOT EXISTS vendor_id INT NULL AFTER company_id;

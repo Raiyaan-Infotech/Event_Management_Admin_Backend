@@ -68,7 +68,8 @@ db.EmailSentLog = require('./EmailSentLog')(sequelize, Sequelize);
 // Vendor
 db.Vendor = require('./Vendor')(sequelize, Sequelize);
 db.VendorClient = require('./VendorClient')(sequelize, Sequelize);
-db.VendorStaff = require('./VendorStaff')(sequelize, Sequelize);
+db.VendorStaff      = require('./VendorStaff')(sequelize, Sequelize);
+db.VendorDepartment = require('./VendorDepartment')(sequelize, Sequelize);
 
 // Menus & Subscriptions
 db.Menu = require('./Menu')(sequelize, Sequelize);
@@ -211,8 +212,14 @@ db.Vendor.hasMany(db.VendorClient, { foreignKey: 'vendor_id', as: 'clients' });
 db.VendorClient.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
 db.VendorClient.belongsTo(db.Subscription, { foreignKey: 'subscription_id', as: 'subscription' });
 
-db.Vendor.hasMany(db.VendorStaff, { foreignKey: 'vendor_id', as: 'staff' });
-db.VendorStaff.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
+db.Vendor.hasMany(db.VendorStaff,      { foreignKey: 'vendor_id', as: 'staff' });
+db.VendorStaff.belongsTo(db.Vendor,    { foreignKey: 'vendor_id', as: 'vendor' });
+
+db.Vendor.hasMany(db.VendorDepartment,           { foreignKey: 'vendor_id', as: 'departments' });
+db.VendorDepartment.belongsTo(db.Vendor,         { foreignKey: 'vendor_id', as: 'vendor' });
+
+db.VendorDepartment.hasMany(db.VendorStaff,      { foreignKey: 'department_id', as: 'staff' });
+db.VendorStaff.belongsTo(db.VendorDepartment,    { foreignKey: 'department_id', as: 'department' });
 
 // Staff RBAC
 db.VendorStaff.belongsTo(db.Role, { foreignKey: 'role_id', as: 'role' });
