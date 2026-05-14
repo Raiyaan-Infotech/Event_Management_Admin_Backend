@@ -1514,6 +1514,9 @@ CREATE TABLE IF NOT EXISTS `vendor_clients` (
   `company_id`                INT          DEFAULT NULL,
   `login_access`              TINYINT(1)   DEFAULT 0,
   `send_credentials_to_email` TINYINT(1)   DEFAULT 0,
+  `password_changed_at`       DATETIME     DEFAULT NULL,
+  `reset_token`               VARCHAR(6)   DEFAULT NULL,
+  `reset_token_expires_at`    DATETIME     DEFAULT NULL,
   `created_at`                DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`                DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `deleted_at`                DATETIME     DEFAULT NULL,
@@ -1525,6 +1528,9 @@ ALTER TABLE `vendor_clients` ADD COLUMN IF NOT EXISTS `login_access`            
 ALTER TABLE `vendor_clients` ADD COLUMN IF NOT EXISTS `send_credentials_to_email` TINYINT(1) DEFAULT 0;
 ALTER TABLE `vendor_clients` ADD COLUMN IF NOT EXISTS `password`                  VARCHAR(255) DEFAULT NULL;
 ALTER TABLE `vendor_clients` ADD COLUMN IF NOT EXISTS `client_type`               ENUM('subscribed','unsubscribed') NOT NULL DEFAULT 'subscribed';
+ALTER TABLE `vendor_clients` ADD COLUMN IF NOT EXISTS `password_changed_at`       DATETIME DEFAULT NULL;
+ALTER TABLE `vendor_clients` ADD COLUMN IF NOT EXISTS `reset_token`               VARCHAR(6) DEFAULT NULL;
+ALTER TABLE `vendor_clients` ADD COLUMN IF NOT EXISTS `reset_token_expires_at`    DATETIME DEFAULT NULL;
 ALTER TABLE `vendor_clients` ADD COLUMN IF NOT EXISTS `subscription_id`           INT DEFAULT NULL;
 ALTER TABLE `vendor_clients` MODIFY COLUMN IF EXISTS `plan`                        VARCHAR(200) DEFAULT NULL;
 

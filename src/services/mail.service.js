@@ -212,6 +212,36 @@ const getInbox = async (caller, query = {}) => {
   return { total: rows.count, rows: rows.rows };
 };
 
+const enrichRecipientsWithNames = async (mails) => {
+  const adminIds = new Set(), vendorIds = new Set(), clientIds = new Set();
+  for (const mail of mails) {
+    for (const r of (mail.recipients || [])) {
+      if (r.recipient_type === 'admin')  adminIds.add(r.recipient_id);
+      if (r.recipient_type === 'vendor') vendorIds.add(r.recipient_id);
+      if (r.recipient_type === 'client') clientIds.add(r.recipient_id);
+    }
+  }
+  const [admins, vendors, clients] = await Promise.all([
+    adminIds.size  ? User.findAll({ where: { id: [...adminIds] },  attributes: ['id', 'name', 'email'] }) : [],
+    vendorIds.size ? Vendor.findAll({ where: { id: [...vendorIds] }, attributes: ['id', 'name', 'email'] }) : [],
+    clientIds.size ? VendorClient.findAll({ where: { id: [...clientIds] }, attributes: ['id', 'name', 'email'] }) : [],
+  ]);
+  const map = {
+    admin:  Object.fromEntries(admins.map(u => [u.id, u])),
+    vendor: Object.fromEntries(vendors.map(v => [v.id, v])),
+    client: Object.fromEntries(clients.map(c => [c.id, c])),
+  };
+  for (const mail of mails) {
+    for (const r of (mail.recipients || [])) {
+      const contact = map[r.recipient_type]?.[r.recipient_id];
+      if (contact) {
+        r.dataValues.recipient_name  = contact.name;
+        r.dataValues.recipient_email = contact.email;
+      }
+    }
+  }
+};
+
 const getSent = async (caller, query = {}) => {
   const { label, folder_id, limit = 50, page = 1 } = query;
   const offset = (Number(page) - 1) * Number(limit);
@@ -219,13 +249,15 @@ const getSent = async (caller, query = {}) => {
   if (label) where.sender_label = label;
   if (folder_id) where.sender_custom_folder_id = folder_id;
 
-  return Mail.findAndCountAll({
+  const result = await Mail.findAndCountAll({
     where,
     include: [{ model: MailRecipient, as: 'recipients' }],
     order: [['sent_at', 'DESC']],
     limit: Number(limit),
     offset,
   });
+  await enrichRecipientsWithNames(result.rows);
+  return result;
 };
 
 const getDrafts = async (caller, query = {}) => {

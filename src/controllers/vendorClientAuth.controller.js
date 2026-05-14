@@ -52,10 +52,27 @@ const changeClientPassword = asyncHandler(async (req, res) => {
     ApiResponse.success(res, null, 'Password changed successfully');
 });
 
+const clientForgotPassword = asyncHandler(async (req, res) => {
+    const { email } = req.body;
+    if (!email) throw ApiError.badRequest('Email is required');
+    const { otp } = await vendorClientAuthService.forgotPassword(email);
+    // In production send otp via email; for now return it in response so frontend can display it
+    ApiResponse.success(res, { reset_code: otp }, 'A reset code has been generated. Use it to set a new password within 15 minutes.');
+});
+
+const clientResetPassword = asyncHandler(async (req, res) => {
+    const { email, reset_code, new_password } = req.body;
+    if (!email || !reset_code || !new_password) throw ApiError.badRequest('Email, reset code and new password are required');
+    await vendorClientAuthService.resetPassword(email, reset_code, new_password);
+    ApiResponse.success(res, null, 'Password reset successfully. You can now log in.');
+});
+
 module.exports = {
     clientLogin,
     clientLogout,
     clientMe,
     updateClientProfile,
     changeClientPassword,
+    clientForgotPassword,
+    clientResetPassword,
 };

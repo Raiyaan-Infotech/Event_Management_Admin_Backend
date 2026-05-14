@@ -70,7 +70,9 @@ router.post('/staff/auth/verify-reset-otp',  vendorStaffAuthController.staffVeri
 router.post('/staff/auth/reset-password',    vendorStaffAuthController.staffResetPassword);
 
 // ─── Client Portal Auth (public) ──────────────────────────────────────────────
-router.post('/client/auth/login', vendorClientAuthController.clientLogin);
+router.post('/client/auth/login',           vendorClientAuthController.clientLogin);
+router.post('/client/auth/forgot-password', vendorClientAuthController.clientForgotPassword);
+router.post('/client/auth/reset-password',  vendorClientAuthController.clientResetPassword);
 
 // ─── Staff Auth (protected — staff JWT) ───────────────────────────────────────
 router.post('/staff/auth/logout',           isStaffAuthenticated, vendorStaffAuthController.staffLogout);

@@ -25,6 +25,7 @@ async function buildPreviewData(vendorId, themeIdOverride = null) {
             'about_us', 'company_information', 'company_contact', 'company_email',
             'company_address', 'nav_menu', 'footer_links', 'copywrite', 'poweredby',
             'newsletter_status', 'theme_id', 'palette_id', 'home_blocks',
+            'contact_mode', 'contact', 'alt_contact', 'alt_email', 'address', 'alt_address',
         ],
         include: [
                     { model: District, as: 'district', attributes: ['id', 'name'] },

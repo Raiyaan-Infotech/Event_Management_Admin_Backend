@@ -39,8 +39,10 @@ module.exports = (sequelize) => {
         city:     { type: DataTypes.STRING(100), allowNull: true },
         locality: { type: DataTypes.STRING(100), allowNull: true },
         pincode:  { type: DataTypes.STRING(20),  allowNull: true },
-        company_id:          { type: DataTypes.INTEGER, allowNull: true },
-        password_changed_at: { type: DataTypes.DATE,    allowNull: true },
+        company_id:              { type: DataTypes.INTEGER,     allowNull: true },
+        password_changed_at:     { type: DataTypes.DATE,        allowNull: true },
+        reset_token:             { type: DataTypes.STRING(6),   allowNull: true },
+        reset_token_expires_at:  { type: DataTypes.DATE,        allowNull: true },
     }, {
         tableName: 'vendor_clients',
         timestamps: true,

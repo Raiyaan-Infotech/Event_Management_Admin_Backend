@@ -11,15 +11,24 @@ const { Company } = require('../models');
 const getPublic = asyncHandler(async (req, res) => {
   const settings = await settingService.getPublic(req.companyId);
 
-  // Include company branding so login pages can show the correct logo
-  const company = req.companyId
-    ? await Company.findByPk(req.companyId, { attributes: ['name', 'logo', 'favicon'] })
-    : await Company.findOne({ attributes: ['name', 'logo', 'favicon'] });
+  // Include company branding — try with favicon (may not exist on older DBs), fall back without it
+  let company = null;
+  try {
+    company = req.companyId
+      ? await Company.findByPk(req.companyId, { attributes: ['name', 'logo', 'favicon'] })
+      : await Company.findOne({ attributes: ['name', 'logo', 'favicon'] });
+  } catch {
+    try {
+      company = req.companyId
+        ? await Company.findByPk(req.companyId, { attributes: ['name', 'logo'] })
+        : await Company.findOne({ attributes: ['name', 'logo'] });
+    } catch { /* ignore */ }
+  }
 
   logger.logRequest(req, 'Get public settings');
   return ApiResponse.success(res, {
     settings,
-    company: company ? { name: company.name, logo: company.logo, favicon: company.favicon } : null,
+    company: company ? { name: company.name, logo: company.logo, favicon: company.favicon ?? null } : null,
   });
 });
 

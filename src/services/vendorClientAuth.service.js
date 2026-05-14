@@ -65,4 +65,31 @@ const changePassword = async (clientId, currentPassword, newPassword) => {
     return true;
 };
 
-module.exports = { login, getProfile, updateProfile, changePassword };
+const forgotPassword = async (email) => {
+    const client = await VendorClient.findOne({ where: { email } });
+    if (!client) throw ApiError.notFound('No account found with this email address.');
+    if (client.is_active !== 1) throw ApiError.forbidden('Your account is inactive. Please contact the vendor.');
+    if (client.login_access !== 1) throw ApiError.forbidden('Login access is not enabled for this account.');
+
+    // Generate a 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+    await client.update({ reset_token: otp, reset_token_expires_at: expiresAt });
+    return { otp, clientName: client.name };
+};
+
+const resetPassword = async (email, otp, newPassword) => {
+    const client = await VendorClient.findOne({
+        where: { email },
+        attributes: { include: ['reset_token', 'reset_token_expires_at'] },
+    });
+    if (!client) throw ApiError.notFound('No account found with this email address.');
+    if (!client.reset_token || client.reset_token !== otp) throw ApiError.badRequest('Invalid or expired reset code.');
+    if (!client.reset_token_expires_at || new Date() > new Date(client.reset_token_expires_at)) {
+        throw ApiError.badRequest('Reset code has expired. Please request a new one.');
+    }
+    await client.update({ password: newPassword, reset_token: null, reset_token_expires_at: null });
+    return true;
+};
+
+module.exports = { login, getProfile, updateProfile, changePassword, forgotPassword, resetPassword };

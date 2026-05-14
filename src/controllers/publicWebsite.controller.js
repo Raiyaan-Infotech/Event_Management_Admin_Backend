@@ -41,6 +41,7 @@ const getPublicVendorWebsite = asyncHandler(async (req, res) => {
             'about_us', 'company_information', 'company_contact', 'company_email',
             'company_address', 'nav_menu', 'footer_links', 'copywrite', 'poweredby',
             'newsletter_status', 'theme_id', 'palette_id',
+            'contact_mode', 'contact', 'alt_contact', 'alt_email', 'address', 'alt_address',
     ]);
     if (!vendor) throw ApiError.notFound('Vendor not found');
 

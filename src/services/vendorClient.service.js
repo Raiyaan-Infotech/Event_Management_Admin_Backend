@@ -42,6 +42,11 @@ const getById = async (id, vendorId) => {
 };
 
 const create = async (data, vendorId, companyId) => {
+    if (data.email) {
+        const existing = await VendorClient.findOne({ where: { email: data.email, vendor_id: vendorId } });
+        if (existing) throw ApiError.conflict('A client with this email is already registered.');
+    }
+
     const safeData = {};
     for (const field of CLIENT_CREATABLE_FIELDS) {
         if (data[field] !== undefined) safeData[field] = data[field];
