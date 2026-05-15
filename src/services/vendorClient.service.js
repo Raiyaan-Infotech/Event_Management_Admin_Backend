@@ -43,7 +43,11 @@ const getById = async (id, vendorId) => {
 
 const create = async (data, vendorId, companyId) => {
     if (data.email) {
-        const existing = await VendorClient.findOne({ where: { email: data.email, vendor_id: vendorId } });
+        // paranoid: false so soft-deleted clients are also checked — prevents email reuse
+        const existing = await VendorClient.findOne({
+            where: { email: data.email, vendor_id: vendorId },
+            paranoid: false,
+        });
         if (existing) throw ApiError.conflict('A client with this email is already registered.');
     }
 
