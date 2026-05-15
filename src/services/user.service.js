@@ -1,4 +1,4 @@
-const { User, Role, Permission, Country, State, District, City, RefreshToken } = require('../models');
+const { User, Role, Permission, Country, State, District, City, RefreshToken, Department } = require('../models');
 const baseService = require('./base.service');
 const logger = require('../utils/logger');
 const ApiError = require('../utils/apiError');
@@ -14,12 +14,20 @@ const getAll = async (query = {}, companyId = undefined) => {
     searchFields: ['full_name', 'email', 'phone'],
     sortableFields: ['created_at', 'full_name', 'email'],
     companyId,
-    attributes: ['id', 'full_name', 'username', 'email', 'phone', 'is_active', 'login_access', 'avatar', 'role_id', 'company_id', 'department', 'designation', 'country_id', 'state_id', 'city_id', 'pincode_id', 'created_at'],
-    include: [{
-      model: Role,
-      as: 'role',
-      attributes: ['id', 'name', 'slug', 'level'],
-    }],
+    attributes: ['id', 'full_name', 'username', 'email', 'phone', 'is_active', 'login_access', 'avatar', 'role_id', 'company_id', 'department_id', 'department', 'designation', 'country_id', 'state_id', 'city_id', 'pincode_id', 'created_at'],
+    include: [
+      {
+        model: Role,
+        as: 'role',
+        attributes: ['id', 'name', 'slug', 'level'],
+      },
+      {
+        model: Department,
+        as: 'department_ref',
+        attributes: ['id', 'name'],
+        required: false,
+      },
+    ],
     moduleSlug: 'employees',
   });
 };
@@ -39,9 +47,10 @@ const getById = async (id, companyId = undefined) => {
             as: 'permissions',
           }],
         },
-        { model: Country, as: 'country', attributes: ['id', 'name', 'code'] },
-        { model: State, as: 'state', attributes: ['id', 'name'] },
-        { model: District, as: 'city', attributes: ['id', 'name'] },
+        { model: Country,    as: 'country',        attributes: ['id', 'name', 'code'] },
+        { model: State,      as: 'state',           attributes: ['id', 'name'] },
+        { model: District,   as: 'city',            attributes: ['id', 'name'] },
+        { model: Department, as: 'department_ref',  attributes: ['id', 'name'], required: false },
       ],
     });
 

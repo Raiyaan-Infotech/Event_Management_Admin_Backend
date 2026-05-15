@@ -31,6 +31,7 @@ db.RefreshToken = require('./RefreshToken')(sequelize, Sequelize);
 // Infrastructure
 db.Company = require('./Company')(sequelize, Sequelize);
 db.Role = require('./Role')(sequelize, Sequelize);
+db.Department = require('./Department')(sequelize, Sequelize);
 db.User = require('./User')(sequelize, Sequelize);
 db.Permission = require('./Permission')(sequelize, Sequelize);
 db.Module = require('./Module')(sequelize, Sequelize);
@@ -130,6 +131,13 @@ db.VendorNewsletterSentLog.belongsTo(db.VendorClient, { foreignKey: 'client_id',
 db.Company.hasMany(db.User, { foreignKey: 'company_id', as: 'users' });
 db.User.belongsTo(db.Company, { foreignKey: 'company_id', as: 'company' });
 
+db.Company.hasMany(db.Department, { foreignKey: 'company_id', as: 'departments' });
+db.Department.belongsTo(db.Company, { foreignKey: 'company_id', as: 'company' });
+
+// Department → User
+db.Department.hasMany(db.User, { foreignKey: 'department_id', as: 'employees' });
+db.User.belongsTo(db.Department, { foreignKey: 'department_id', as: 'department_ref' });
+
 db.Company.hasMany(db.Role, { foreignKey: 'company_id', as: 'roles' });
 db.Role.belongsTo(db.Company, { foreignKey: 'company_id', as: 'company' });
 
@@ -175,6 +183,11 @@ db.State.hasMany(db.District, { foreignKey: 'state_id', as: 'districts' });
 db.District.belongsTo(db.State, { foreignKey: 'state_id', as: 'state' });
 db.District.hasMany(db.City, { foreignKey: 'city_id', as: 'cities' });
 db.City.belongsTo(db.District, { foreignKey: 'city_id', as: 'district' });
+
+// User ↔ Location (required for getById includes)
+db.User.belongsTo(db.Country,  { foreignKey: 'country_id', as: 'country' });
+db.User.belongsTo(db.State,    { foreignKey: 'state_id',   as: 'state' });
+db.User.belongsTo(db.District, { foreignKey: 'city_id',    as: 'city' });
 
 // Translation Relationships
 // Translation Relationships

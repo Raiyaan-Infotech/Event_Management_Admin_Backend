@@ -36,7 +36,8 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Routes
 app.use('/api/v1/auth', require('./routes/auth.routes'));
-app.use('/api/v1/users', require('./routes/user.routes'));
+app.use('/api/v1/users',       require('./routes/user.routes'));
+app.use('/api/v1/departments', require('./routes/department.routes'));
 app.use('/api/v1/roles', require('./routes/role.routes'));
 app.use('/api/v1/permissions', require('./routes/permission.routes'));
 app.use('/api/v1/modules', require('./routes/module.routes'));
