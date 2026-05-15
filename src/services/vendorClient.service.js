@@ -42,6 +42,9 @@ const getById = async (id, vendorId) => {
 };
 
 const create = async (data, vendorId, companyId) => {
+    // Normalize email — lowercase + trim before any check or save
+    if (data.email) data.email = data.email.trim().toLowerCase();
+
     if (data.email) {
         // paranoid: false so soft-deleted clients are also checked — prevents email reuse
         const existing = await VendorClient.findOne({
@@ -69,6 +72,9 @@ const create = async (data, vendorId, companyId) => {
 const update = async (id, data, vendorId) => {
     const record = await VendorClient.findOne({ where: { id, vendor_id: vendorId } });
     if (!record) throw ApiError.notFound('Client not found');
+
+    // Normalize email on update too
+    if (data.email) data.email = data.email.trim().toLowerCase();
 
     const safeData = {};
     for (const field of CLIENT_EDITABLE_FIELDS) {
