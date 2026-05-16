@@ -11,6 +11,8 @@ const {
     VendorThemeColor,
     ColorPalette,
     Subscription,
+    District,
+    City,
 } = require('../models');
 const ApiResponse      = require('../utils/apiResponse');
 const ApiError         = require('../utils/apiError');
@@ -20,17 +22,26 @@ const { v4: uuidv4 } = require('uuid');
 
 const COLOR_KEYS = ['primary_color', 'secondary_color', 'header_color', 'footer_color', 'text_color', 'hover_color'];
 
+const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
+
 const toSlug = (name) =>
     name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
-const findActiveVendorBySlug = async (slug, attributes) => {
+const findActiveVendorBySlug = async (slug, attributes, options = {}) => {
     const vendors = await Vendor.findAll({
         where: { status: 'active' },
         attributes,
         raw: true,
     });
 
-    return vendors.find(v => toSlug(v.company_name || '') === slug);
+    const matchedVendor = vendors.find(v => toSlug(v.company_name || '') === slug);
+    if (!matchedVendor || !options.include) return matchedVendor;
+
+    const vendor = await Vendor.findByPk(matchedVendor.id, {
+        attributes,
+        include: options.include,
+    });
+    return vendor ? vendor.toJSON() : matchedVendor;
 };
 
 const getPublicVendorWebsite = asyncHandler(async (req, res) => {
@@ -42,15 +53,21 @@ const getPublicVendorWebsite = asyncHandler(async (req, res) => {
             'company_address', 'nav_menu', 'footer_links', 'copywrite', 'poweredby',
             'newsletter_status', 'theme_id', 'palette_id',
             'contact_mode', 'contact', 'alt_contact', 'alt_email', 'address', 'alt_address',
-    ]);
+            'city_id', 'state_id', 'country_id', 'pincode_id',
+    ], {
+        include: [
+            { model: District, as: 'district', attributes: ['id', 'name'] },
+            { model: City, as: 'locality', attributes: ['id', 'name', 'pincode'] },
+        ],
+    });
     if (!vendor) throw ApiError.notFound('Vendor not found');
 
     const vendorId = vendor.id;
 
     const [sliders, portfolioItems, gallery, testimonials, plans, socialLinks, pages] = await Promise.all([
-        VendorSlider.findAll({ where: { vendor_id: vendorId }, order: [['id', 'ASC']] }),
+        VendorSlider.findAll({ where: { vendor_id: vendorId, status: 'published', is_active: 1 }, order: [['id', 'ASC']] }),
         VendorPortfolioItem.findAll({ where: { vendor_id: vendorId }, order: [['createdAt', 'DESC']] }),
-        VendorGallery.findAll({ where: { vendor_id: vendorId }, order: [['createdAt', 'DESC']] }),
+        VendorGallery.findAll({ where: { vendor_id: vendorId, is_active: 1 }, order: [['createdAt', 'DESC']] }),
         VendorTestimonial.findAll({ where: { vendor_id: vendorId, is_active: 1 }, order: [['createdAt', 'DESC']] }),
         Subscription.findAll({
             where: { is_active: 1, is_custom: 0 },
@@ -149,7 +166,9 @@ const registerPublicVendorClient = asyncHandler(async (req, res) => {
         subscribe_newsletter: subscribeNewsletter,
     } = req.body;
 
-    if (!name || !email || !mobile) {
+    const normalizedEmail = normalizeEmail(email);
+
+    if (!name || !normalizedEmail || !mobile) {
         throw ApiError.badRequest('Name, email, and mobile are required');
     }
 
@@ -159,7 +178,7 @@ const registerPublicVendorClient = asyncHandler(async (req, res) => {
     const existing = await VendorClient.findOne({
         where: {
             vendor_id: vendor.id,
-            email,
+            email: normalizedEmail,
         },
     });
 
@@ -193,7 +212,7 @@ const registerPublicVendorClient = asyncHandler(async (req, res) => {
         company_id: vendor.company_id || null,
         client_id: generateClientId(),
         name,
-        email,
+        email: normalizedEmail,
         mobile,
         address: address || null,
         country: country || null,
@@ -217,7 +236,9 @@ const loginPublicVendorClient = asyncHandler(async (req, res) => {
     const { slug } = req.params;
     const { email, mobile } = req.body;
 
-    if (!email || !mobile) {
+    const normalizedEmail = normalizeEmail(email);
+
+    if (!normalizedEmail || !mobile) {
         throw ApiError.badRequest('Email and mobile are required');
     }
 
@@ -227,7 +248,7 @@ const loginPublicVendorClient = asyncHandler(async (req, res) => {
     const client = await VendorClient.findOne({
         where: {
             vendor_id: vendor.id,
-            email,
+            email: normalizedEmail,
             mobile,
         },
     });
@@ -243,12 +264,14 @@ const subscribePublicVendorNewsletter = asyncHandler(async (req, res) => {
     const { slug } = req.params;
     const { email, name, mobile } = req.body;
 
-    if (!email) throw ApiError.badRequest('Email is required');
+    const normalizedEmail = normalizeEmail(email);
+
+    if (!normalizedEmail) throw ApiError.badRequest('Email is required');
 
     const vendor = await findActiveVendorBySlug(slug, ['id', 'company_name', 'company_id']);
     if (!vendor) throw ApiError.notFound('Vendor not found');
 
-    const existing = await VendorClient.findOne({ where: { vendor_id: vendor.id, email } });
+    const existing = await VendorClient.findOne({ where: { vendor_id: vendor.id, email: normalizedEmail } });
     if (existing) {
         await existing.update({
             client_type: 'subscribed',
@@ -258,13 +281,13 @@ const subscribePublicVendorNewsletter = asyncHandler(async (req, res) => {
         return ApiResponse.success(res, existing, 'Newsletter subscribed successfully');
     }
 
-    const localName = email.split('@')[0] || 'Newsletter Subscriber';
+    const localName = normalizedEmail.split('@')[0] || 'Newsletter Subscriber';
     const client = await VendorClient.create({
         vendor_id: vendor.id,
         company_id: vendor.company_id || null,
         client_id: generateClientId(),
         name: name || localName,
-        email,
+        email: normalizedEmail,
         mobile: mobile || '',
         registration_type: 'guest',
         client_type: 'subscribed',

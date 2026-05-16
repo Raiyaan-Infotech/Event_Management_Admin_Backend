@@ -8,6 +8,23 @@ const { safeParseArray } = require('../utils/json');
 
 const COLOR_KEYS = ['primary_color', 'secondary_color', 'header_color', 'footer_color', 'text_color', 'hover_color'];
 
+const normalizePlanName = (value) => String(value || '').trim().toLowerCase();
+
+const themeIncludesPlan = (theme, planId) =>
+    safeParseArray(theme?.plans).map(Number).includes(Number(planId));
+
+const findPlanByMembership = async (membership) => {
+    const planName = normalizePlanName(membership);
+    if (!planName) return null;
+
+    const plans = await Subscription.findAll({
+        where: { is_active: 1, is_custom: 0 },
+        attributes: ['id', 'name'],
+    });
+
+    return plans.find((plan) => normalizePlanName(plan.name) === planName) || null;
+};
+
 // In-memory cache for home-blocks (per vendor, 15s TTL)
 const homeBlocksCache = new Map();
 const HOME_BLOCKS_TTL = 15 * 1000;
@@ -34,7 +51,11 @@ const getMyPlan = asyncHandler(async (req, res) => {
     });
 
     if (customPlan) {
-        return ApiResponse.success(res, { type: 'custom', plans: [customPlan] }, 'Subscription retrieved');
+        const commonPlans = await Subscription.findAll({
+            where: { is_custom: 0, is_active: 1 },
+            order: [['sort_order', 'ASC'], ['price', 'ASC']],
+        });
+        return ApiResponse.success(res, { type: 'custom', plans: [customPlan], all_plans: [customPlan, ...commonPlans] }, 'Subscription retrieved');
     }
 
     const commonPlans = await Subscription.findAll({
@@ -48,10 +69,10 @@ const getMyPlan = asyncHandler(async (req, res) => {
     );
 
     if (matchedPlan) {
-        return ApiResponse.success(res, { type: 'common', plans: [matchedPlan] }, 'Subscription retrieved');
+        return ApiResponse.success(res, { type: 'common', plans: [matchedPlan], all_plans: commonPlans }, 'Subscription retrieved');
     }
 
-    ApiResponse.success(res, { type: 'common', plans: commonPlans }, 'Subscription plans retrieved');
+    ApiResponse.success(res, { type: 'common', plans: commonPlans, all_plans: commonPlans }, 'Subscription plans retrieved');
 });
 
 // GET /vendors/client/subscription/plans
@@ -93,8 +114,17 @@ const selectTheme = asyncHandler(async (req, res) => {
 
     if (!theme_id) throw ApiError.badRequest('theme_id is required');
 
-    const theme = await Theme.findByPk(theme_id);
+    const [vendor, theme] = await Promise.all([
+        Vendor.findByPk(vendorId, { attributes: ['id', 'membership'] }),
+        Theme.findByPk(theme_id),
+    ]);
+    if (!vendor) throw ApiError.notFound('Vendor not found');
     if (!theme || !theme.is_active) throw ApiError.notFound('Theme not found or inactive');
+
+    const plan = await findPlanByMembership(vendor.membership);
+    if (!plan || !themeIncludesPlan(theme, plan.id)) {
+        throw ApiError.badRequest('Selected theme is not available for the current subscription plan');
+    }
 
     // Clear vendor's custom block order when switching themes so they get the new theme's defaults
     await Vendor.update({ theme_id, home_blocks: null }, { where: { id: vendorId } });

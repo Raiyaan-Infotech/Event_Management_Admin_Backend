@@ -1,6 +1,8 @@
 const { DataTypes } = require('sequelize');
 const bcrypt = require('bcryptjs');
 
+const normalizeEmail = (value) => typeof value === 'string' ? value.trim().toLowerCase() : value;
+
 module.exports = (sequelize) => {
     const VendorClient = sequelize.define('VendorClient', {
         id:               { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
@@ -49,6 +51,9 @@ module.exports = (sequelize) => {
         paranoid: true,
         underscored: true,
         hooks: {
+            beforeValidate: (client) => {
+                if (client.email) client.email = normalizeEmail(client.email);
+            },
             beforeCreate: async (client) => {
                 if (client.password) {
                     client.password = await bcrypt.hash(client.password, 12);
@@ -76,3 +81,6 @@ module.exports = (sequelize) => {
 
     return VendorClient;
 };
+
+
+

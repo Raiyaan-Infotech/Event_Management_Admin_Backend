@@ -1,12 +1,50 @@
-const { Vendor, District, City } = require('../models');
+const { Vendor, District, City, Subscription, Theme } = require('../models');
 const baseService = require('./base.service');
 const ApiError = require('../utils/apiError');
 const emailSenderService = require('./emailSender.service');
 const mediaService = require('./media.service');
+const { validateVendorContactFields, validateVendorPasswordChange } = require('../utils/vendorValidation');
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
 
 const MODEL_NAME = 'Vendor';
+
+const normalizeEmail = (value) => typeof value === 'string' ? value.trim().toLowerCase() : value;
+const normalizePlanName = (value) => String(value || '').trim().toLowerCase();
+const normalizeEmailFields = (data) => {
+    for (const field of ['email', 'company_email', 'alt_email']) {
+        if (data[field] !== undefined && data[field] !== null) {
+            data[field] = normalizeEmail(data[field]);
+        }
+    }
+};
+
+const findPlanByMembership = async (membership) => {
+    const planName = normalizePlanName(membership);
+    if (!planName) return null;
+    const plans = await Subscription.findAll({
+        where: { is_active: 1, is_custom: 0 },
+        attributes: ['id', 'name'],
+    });
+    return plans.find((plan) => normalizePlanName(plan.name) === planName) || null;
+};
+
+const themeAllowedForPlan = (theme, planId) => {
+    const { safeParseArray } = require('../utils/json');
+    return safeParseArray(theme?.plans).map(Number).includes(Number(planId));
+};
+
+const validateThemeForMembership = async (membership, themeId) => {
+    if (!membership || !themeId) return;
+    const [plan, theme] = await Promise.all([
+        findPlanByMembership(membership),
+        Theme.findByPk(themeId, { attributes: ['id', 'plans', 'is_active'] }),
+    ]);
+
+    if (!plan || !theme || Number(theme.is_active) !== 1 || !themeAllowedForPlan(theme, plan.id)) {
+        throw ApiError.badRequest('Selected theme is not available for the selected subscription plan');
+    }
+};
 
 const getAll = async (query = {}, companyId = undefined) => {
     return baseService.getAll(Vendor, MODEL_NAME, query, {
@@ -45,6 +83,8 @@ const normalizeMedia = (data, companyId) => {
 };
 
 const create = async (data, companyId = undefined) => {
+    normalizeEmailFields(data);
+    await validateThemeForMembership(data.membership, data.theme_id);
     const existing = await Vendor.findOne({ where: { email: data.email } });
     if (existing) throw ApiError.conflict('A vendor with this email already exists');
     const normalized = await normalizeMedia(data, companyId);
@@ -52,9 +92,16 @@ const create = async (data, companyId = undefined) => {
 };
 
 const update = async (id, data, companyId = undefined) => {
+    normalizeEmailFields(data);
     // Don't allow empty password on update — remove it so hash hook doesn't run
     if (data.password === '' || data.password === null || data.password === undefined) {
         delete data.password;
+    }
+    if (data.membership && data.theme_id) {
+        await validateThemeForMembership(data.membership, data.theme_id);
+    }
+    if (data.theme_id !== undefined) {
+        data.home_blocks = null;
     }
     if (data.email) {
         const { Op } = require('sequelize');
@@ -93,6 +140,7 @@ const updateProfile = async (vendorId, data) => {
 
     if (filtered.acc_type === '') delete filtered.acc_type;
     if (filtered.contact_mode === '') delete filtered.contact_mode;
+    validateVendorContactFields(filtered);
 
     const normalized = await normalizeMedia(filtered, vendor.company_id);
     await vendor.update(normalized);
@@ -101,6 +149,8 @@ const updateProfile = async (vendorId, data) => {
 
 // Vendor changes their own password
 const changePassword = async (vendorId, currentPassword, newPassword) => {
+    validateVendorPasswordChange({ currentPassword, newPassword });
+
     const vendor = await Vendor.findByPk(vendorId, {
         attributes: { include: ['password'] },
     });

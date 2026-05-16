@@ -11,6 +11,11 @@ const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
+const isBlankPassword = (value) =>
+  typeof value !== "string" || value.trim().length === 0;
+
+const hasPasswordWhitespace = (value) => /\s/.test(value);
+
 /**
  * Register new user
  */
@@ -264,6 +269,14 @@ const updateProfile = async (userId, data) => {
  */
 const changePassword = async (userId, currentPassword, newPassword) => {
   try {
+    if (isBlankPassword(currentPassword) || isBlankPassword(newPassword)) {
+      throw ApiError.badRequest("Current and new password are required");
+    }
+
+    if (hasPasswordWhitespace(newPassword)) {
+      throw ApiError.badRequest("Password must not contain spaces");
+    }
+
     const user = await User.findByPk(userId);
     if (!user) {
       throw ApiError.notFound("User not found");

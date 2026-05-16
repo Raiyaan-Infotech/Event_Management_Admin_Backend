@@ -1,4 +1,4 @@
-const { Theme } = require('../models');
+const { ColorPalette, Theme } = require('../models');
 const { Sequelize } = require('../models');
 const { Op } = Sequelize;
 const baseService = require('./base.service');
@@ -52,8 +52,18 @@ const validateRequiredBlocks = (data) => {
     if (missing.length) throw ApiError.badRequest(`Missing required blocks: ${missing.join(', ')}`);
 };
 
+const validateRequiredPalette = async (data, companyId) => {
+    if (!data.palette_id) throw ApiError.badRequest('Color palette is required');
+
+    const where = { id: data.palette_id, is_active: 1 };
+    if (companyId) where.company_id = companyId;
+    const palette = await ColorPalette.findOne({ where });
+    if (!palette) throw ApiError.badRequest('Please select a valid active color palette');
+};
+
 const createTheme = async (data, userId = null, companyId = undefined) => {
     validateRequiredBlocks(data);
+    await validateRequiredPalette(data, companyId);
     return baseService.create(Theme, MODEL_NAME, {
         ...data,
         company_id: companyId
@@ -62,6 +72,9 @@ const createTheme = async (data, userId = null, companyId = undefined) => {
 
 const updateTheme = async (id, data, userId = null, companyId = undefined) => {
     validateRequiredBlocks(data);
+    if (Object.prototype.hasOwnProperty.call(data, 'palette_id')) {
+        await validateRequiredPalette(data, companyId);
+    }
     return baseService.update(Theme, MODEL_NAME, id, data, userId, { companyId });
 };
 

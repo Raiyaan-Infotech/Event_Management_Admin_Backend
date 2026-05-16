@@ -26,7 +26,7 @@ async function buildPreviewData(vendorId, themeIdOverride = null) {
             'company_address', 'nav_menu', 'footer_links', 'copywrite', 'poweredby',
             'newsletter_status', 'theme_id', 'palette_id', 'home_blocks',
             'contact_mode', 'contact', 'alt_contact', 'alt_email', 'address', 'alt_address',
-            'city_id', 'state_id', 'country_id',
+            'city_id', 'state_id', 'country_id', 'pincode_id',
         ],
         include: [
                     { model: District, as: 'district', attributes: ['id', 'name'] },
@@ -38,9 +38,9 @@ async function buildPreviewData(vendorId, themeIdOverride = null) {
 
     const { Subscription } = require('../models');
     const [sliders, portfolioItems, gallery, testimonials, plans, socialLinks, pages] = await Promise.all([
-        VendorSlider.findAll({ where: { vendor_id: vendorId }, order: [['id', 'ASC']] }),
+        VendorSlider.findAll({ where: { vendor_id: vendorId, status: 'published', is_active: 1 }, order: [['id', 'ASC']] }),
         VendorPortfolioItem.findAll({ where: { vendor_id: vendorId }, order: [['createdAt', 'DESC']] }),
-        VendorGallery.findAll({ where: { vendor_id: vendorId }, order: [['createdAt', 'DESC']] }),
+        VendorGallery.findAll({ where: { vendor_id: vendorId, is_active: 1 }, order: [['createdAt', 'DESC']] }),
         VendorTestimonial.findAll({ where: { vendor_id: vendorId, is_active: 1 }, order: [['createdAt', 'DESC']] }),
         Subscription.findAll({
             where: { is_active: 1, is_custom: 0 },
