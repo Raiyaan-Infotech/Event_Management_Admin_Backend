@@ -34,22 +34,37 @@ const getThemeById = async (id, companyId = undefined) => {
     return baseService.getById(Theme, MODEL_NAME, id, { companyId });
 };
 
+const BLOCK_LABELS = {
+    about_us:          'About Us',
+    terms_conditions:  'Terms & Conditions',
+    privacy_policy:    'Privacy Policy',
+    contact_us:        'Contact Us',
+    slider:            'Slider',
+    simple_slider:     'Simple Slider',
+    advance_slider:    'Advance Slider',
+};
+
+const labelFor = (key) => BLOCK_LABELS[key] || key;
+
 const validateRequiredBlocks = (data) => {
     if (!data.home_blocks) return;
     const present = safeParseArray(data.home_blocks)
         .map(b => b.block_type);
-    
+
     // Check for core requirements
-    const coreRequired = ['about_us', 'terms_conditions', 'privacy_policy'];
+    const coreRequired = ['about_us', 'terms_conditions', 'privacy_policy', 'contact_us'];
     const missingCore = coreRequired.filter(r => !present.includes(r));
-    
+
     // Check for at least one slider type
     const hasSlider = present.some(t => ['simple_slider', 'advance_slider'].includes(t));
-    
+
     const missing = [...missingCore];
     if (!hasSlider) missing.push('slider');
 
-    if (missing.length) throw ApiError.badRequest(`Missing required blocks: ${missing.join(', ')}`);
+    if (missing.length) {
+        const labels = missing.map(labelFor).join(', ');
+        throw ApiError.badRequest(`Missing required blocks: ${labels}`);
+    }
 };
 
 const validateRequiredPalette = async (data, companyId) => {
