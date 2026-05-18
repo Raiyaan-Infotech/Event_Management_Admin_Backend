@@ -92,8 +92,36 @@ const logout = asyncHandler(async (req, res) => {
 });
 
 const me = asyncHandler(async (req, res) => {
-    const vendor = await vendorService.getById(req.vendor.id);
+    const vendor = await vendorService.getProfile(req.vendor.id);
     ApiResponse.success(res, vendor, 'Vendor profile retrieved');
+});
+
+// Admin → issues vendor JWT cookies for the target vendor so admin can open the vendor portal as them
+const impersonate = asyncHandler(async (req, res) => {
+    const vendorId = parseInt(req.params.id, 10);
+    const vendor = await vendorService.getById(vendorId);
+    if (!vendor) throw ApiError.notFound('Vendor not found');
+    if (vendor.status !== 'active') throw ApiError.forbidden('Vendor account is inactive.');
+
+    const accessToken  = generateVendorAccessToken(vendor);
+    const refreshToken = generateVendorRefreshToken(vendor);
+
+    res.cookie('vendor_access_token', accessToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+        maxAge: 15 * 60 * 1000,
+    });
+    res.cookie('vendor_refresh_token', refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    logVendorActivity(vendor.id, 'impersonated_by_admin', 'vendor_auth', `Admin user #${req.user?.id} opened vendor portal as this vendor`, req);
+
+    ApiResponse.success(res, { vendor_id: vendor.id, vendor: vendor.toJSON ? vendor.toJSON() : vendor }, 'Impersonation session created');
 });
 
 const updateProfile = asyncHandler(async (req, res) => {
@@ -149,4 +177,4 @@ const updateAbout = asyncHandler(async (req, res) => {
     ApiResponse.success(res, vendor, 'About company updated successfully');
 });
 
-module.exports = { getAll, getById, create, update, updateStatus, remove, login, logout, me, updateProfile, changePassword, getMyActivity, forgotPassword, resetPassword, getAbout, updateAbout };
+module.exports = { getAll, getById, create, update, updateStatus, remove, login, logout, me, impersonate, updateProfile, changePassword, getMyActivity, forgotPassword, resetPassword, getAbout, updateAbout };

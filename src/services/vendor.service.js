@@ -70,7 +70,9 @@ const getProfile = async (vendorId) => {
         ],
     });
     if (!vendor) throw ApiError.notFound('Vendor not found');
-    return vendor;
+    const json = vendor.toJSON();
+    json.city = json.locality?.name || json.district?.name || null;
+    return json;
 };
 
 // For auth — needs password field included

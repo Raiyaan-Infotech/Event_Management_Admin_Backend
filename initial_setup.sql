@@ -1433,6 +1433,8 @@ CREATE TABLE IF NOT EXISTS `vendors` (
   `bank_logo`                VARCHAR(500) NULL,
   `password_reset_token`     VARCHAR(10)  NULL,
   `password_reset_expires`   DATETIME     NULL,
+  `password_changed_at`      DATETIME     NULL,
+  `plan_changed_at`          DATETIME     NULL,
 
   `created_at`      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -1782,10 +1784,11 @@ INSERT IGNORE INTO `modules` (`name`, `slug`, `description`, `company_id`, `is_a
 ('Vendors', 'vendors', 'Manage vendor accounts, company info and bank details', 1, 1);
 
 INSERT IGNORE INTO `permissions` (`name`, `slug`, `module`, `company_id`, `description`, `is_active`) VALUES
-('View Vendors',   'vendors.view',   'vendors', 1, 'View vendors list',        1),
-('Create Vendors', 'vendors.create', 'vendors', 1, 'Create new vendor accounts', 1),
-('Edit Vendors',   'vendors.edit',   'vendors', 1, 'Edit existing vendors',    1),
-('Delete Vendors', 'vendors.delete', 'vendors', 1, 'Delete vendor accounts',   1);
+('View Vendors',        'vendors.view',        'vendors', 1, 'View vendors list',                              1),
+('Create Vendors',      'vendors.create',      'vendors', 1, 'Create new vendor accounts',                     1),
+('Edit Vendors',        'vendors.edit',        'vendors', 1, 'Edit existing vendors',                          1),
+('Delete Vendors',      'vendors.delete',      'vendors', 1, 'Delete vendor accounts',                         1),
+('Impersonate Vendors', 'vendors.impersonate', 'vendors', 1, 'Open the vendor portal as a vendor (read/edit)', 1);
 
 UPDATE `permissions` p
 JOIN `modules` m ON m.`slug` = p.`module`
@@ -2462,6 +2465,9 @@ ALTER TABLE `vendors`
 
 ALTER TABLE `vendors`
   MODIFY COLUMN `membership` VARCHAR(100) NOT NULL DEFAULT 'basic';
+
+ALTER TABLE `vendors`
+  ADD COLUMN IF NOT EXISTS `plan_changed_at` DATETIME NULL AFTER `password_reset_expires`;
 
 ALTER TABLE `vendor_theme_colors`
   ADD COLUMN IF NOT EXISTS `is_active` TINYINT NOT NULL DEFAULT 0 COMMENT '1=custom active, 0=use palette' AFTER `hover_color`;

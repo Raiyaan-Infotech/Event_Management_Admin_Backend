@@ -1,0 +1,114 @@
+[
+  {
+    "severity": "High",
+    "file": "src/utils/vendorValidation.js",
+    "line": "42",
+    "issue": "Password length validation uses > (greater than) instead of >= (greater than or equal), requiring passwords to be EXACTLY 8 characters. This rejects valid 8-char passwords at the boundary and prevents longer passwords.",
+    "fix": "Change line 42 from 'if (newPassword.length > 8)' to 'if (newPassword.length > 128)' (or appropriate max length) to allow passwords up to a reasonable maximum while still rejecting excessive lengths"
+  },
+  {
+    "severity": "High",
+    "file": "src/services/auth.service.js",
+    "line": "87-94",
+    "issue": "Email not normalized before database query in login function. User can bypass login by using different case/spacing (e.g., 'User@Example.COM' vs 'user@example.com')",
+    "fix": "Add email normalization: const normalizedEmail = email.trim().toLowerCase(); and use normalizedEmail in the findOne query"
+  },
+  {
+    "severity": "High",
+    "file": "src/services/user.service.js",
+    "line": "79-88",
+    "issue": "Email not normalized before database query in create function. Allows duplicate emails with different case (e.g., 'user@example.com' and 'USER@EXAMPLE.COM')",
+    "fix": "Add email normalization before existingUser query and before User.create: data.email = data.email.trim().toLowerCase();"
+  },
+  {
+    "severity": "High",
+    "file": "src/models/User.js",
+    "line": "1-166",
+    "issue": "User model lacks beforeValidate hook to normalize email globally. Email is not normalized at model level, relying on service layer normalization which is incomplete (missing in auth.service.login and user.service.create)",
+    "fix": "Add beforeValidate hook: beforeValidate: (user) => { if (user.email) user.email = user.email.trim().toLowerCase(); }"
+  },
+  {
+    "severity": "High",
+    "file": "src/models/VendorStaff.js",
+    "line": "1-74",
+    "issue": "VendorStaff model lacks email normalization at model or service level. Email can have case/whitespace variations, potentially causing duplicates or login failures",
+    "fix": "Add beforeValidate hook to normalize email (similar to VendorClient model which has this at line 54-56)"
+  },
+  {
+    "severity": "Medium",
+    "file": "src/services/vendorStaff.service.js",
+    "line": "63-87",
+    "issue": "Email not normalized in create function before uniqueness check or database save",
+    "fix": "Add email normalization: if (data.email) data.email = data.email.trim().toLowerCase(); before role validation and creation"
+  },
+  {
+    "severity": "Critical",
+    "file": "src/routes/approval.routes.js",
+    "line": "16-58",
+    "issue": "Route ordering issue: GET /pending comes before GET /:id. The dynamic /:id parameter will match 'pending', causing getPendingCount to never be reached. Should declare /pending AFTER the route security applies but before /:id",
+    "fix": "Reorder routes: move router.get('/pending', ...) to line 30+ (after routes with specific paths like GET / and POST /) and before GET /:id"
+  },
+  {
+    "severity": "High",
+    "file": "src/utils/vendorValidation.js",
+    "line": "40",
+    "issue": "Password validation enforces exactly 8 characters (line 40 checks length < 8, line 42 rejects > 8), preventing more secure longer passwords. Industry best practice is minimum 12-16 characters",
+    "fix": "Update line 40 to: if (newPassword.length < 12) throw ApiError.badRequest('Password must be at least 12 characters'); and line 42 to: if (newPassword.length > 128) throw ApiError.badRequest('Password must not exceed 128 characters');"
+  },
+  {
+    "severity": "Medium",
+    "file": "src/routes/vendor.routes.js",
+    "line": "309-310",
+    "issue": "Public preview endpoint GET /:id/preview-data placed after vendor-protected routes. While intentional (per comment), ensure the public endpoint is truly public and not accidentally protected by middleware from line 315-316 which are applied after this declaration",
+    "fix": "Verify that GET /:id/preview-data (line 310) is NOT protected by isAuthenticated middleware. Currently it appears correct, but the middleware application at lines 315-316 comes AFTER the route declaration, so this is safe"
+  },
+  {
+    "severity": "Medium",
+    "file": "src/models/Vendor.js",
+    "line": "37",
+    "issue": "Vendor model email field lacks validate block for email format validation (unlike User model at line 18-20 which has validate: { isEmail: true })",
+    "fix": "Add validation: email: { type: DataTypes.STRING(255), allowNull: false, unique: true, validate: { isEmail: true } }"
+  },
+  {
+    "severity": "Medium",
+    "file": "src/models/VendorStaff.js",
+    "line": "12-13",
+    "issue": "VendorStaff model fields 'email' and 'mobile' lack validation. Email should have isEmail validation, mobile should validate phone format",
+    "fix": "Add to email field: validate: { isEmail: true }. Add mobile validation or ensure validation occurs in service layer"
+  },
+  {
+    "severity": "Low",
+    "file": "src/controllers/auth.controller.js",
+    "line": "30-31",
+    "issue": "Email passed to authService.login is not normalized by controller. If User model doesn't normalize, login fails for 'User@Example.COM' when stored as 'user@example.com'",
+    "fix": "Normalize email in controller: const normalizedEmail = req.body.email.trim().toLowerCase(); const user = await authService.login(normalizedEmail, password, req);"
+  },
+  {
+    "severity": "Low",
+    "file": "src/services/auth.service.js",
+    "line": "22-43",
+    "issue": "Register function does not normalize email before creating user, but VendorClient model has beforeValidate hook (line 54-56 in VendorClient.js) that does normalize. Inconsistency creates bugs when User.create doesn't have same hook",
+    "fix": "Ensure User model has beforeValidate hook that normalizes email, or explicitly normalize in register before User.create()"
+  },
+  {
+    "severity": "Medium",
+    "file": "src/services/vendorClient.service.js",
+    "line": "44-55",
+    "issue": "Email uniqueness check at line 50-54 uses paranoid:false to catch soft-deleted records, which is correct, but the email normalization at line 46 happens BEFORE the check. If model hook normalizes on beforeValidate, this is redundant but not harmful",
+    "fix": "This is actually implemented correctly compared to other services. Keep as reference pattern"
+  },
+  {
+    "severity": "Medium",
+    "file": "src/utils/vendorValidation.js",
+    "line": "35-48",
+    "issue": "Password validation in validateVendorPasswordChange does not normalize/trim the password input before length checks. If password contains leading/trailing spaces it still counts toward length",
+    "fix": "Trim newPassword at start of function: newPassword = String(newPassword).trim(); before all validation checks"
+  },
+  {
+    "severity": "Low",
+    "file": "src/models/VendorClient.js",
+    "line": "4-5, 54-56",
+    "issue": "Email normalization happens in both beforeValidate hook and in vendorClient.service.js create function (line 46). This redundancy is not a bug but indicates the pattern isn't consistently applied across all models",
+    "fix": "For consistency, all models that need email normalization should have beforeValidate hook at model level (User, Vendor, VendorStaff already lack this)"
+  }
+]

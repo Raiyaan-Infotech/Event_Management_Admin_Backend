@@ -328,6 +328,7 @@ router.put('/:id',
     vendorController.update
 );
 router.patch('/:id/status',   hasPermission('vendors.edit'),   vendorController.updateStatus);
+router.post('/:id/impersonate', hasPermission('vendors.impersonate'), vendorController.impersonate);
 router.delete('/:id',
     hasPermission('vendors.delete'),
     checkApprovalRequired('vendors', 'delete', 'vendors'),

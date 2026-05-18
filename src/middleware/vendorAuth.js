@@ -42,6 +42,12 @@ const isVendorAuthenticated = async (req, res, next) => {
             }
         }
 
+        if (vendor.plan_changed_at && decoded.iat) {
+            if (vendor.plan_changed_at.getTime() > decoded.iat * 1000) {
+                return res.status(401).json({ success: false, message: 'Your plan was updated by admin. Please login again.' });
+            }
+        }
+
         req.vendor = vendor;
         next();
     } catch (error) {
