@@ -113,21 +113,40 @@ const getEvents = async (vendorId) => {
 };
 
 const replaceEvents = async (items, vendorId, companyId, createdBy) => {
+    if (!Array.isArray(items) || items.length === 0) {
+        throw ApiError.badRequest('Events highlights are required');
+    }
+
+    const normalizeLabel = (value) => String(value || '').trim().toLowerCase();
+    const cleaned = items
+        .map((it) => ({
+            label: String(it?.label || '').trim(),
+            value: String(it?.value || '').trim(),
+        }))
+        .filter((it) => it.label || it.value);
+    const header = cleaned.find((it) => normalizeLabel(it.label) === 'header');
+    const detail = cleaned.find((it) => normalizeLabel(it.label) === 'detail');
+    const highlights = cleaned.filter((it) => !['header', 'detail'].includes(normalizeLabel(it.label)));
+
+    if (!header?.value) throw ApiError.badRequest('Header is required');
+    if (!detail?.value) throw ApiError.badRequest('Detail is required');
+    if (highlights.length !== 4) throw ApiError.badRequest('Exactly 4 event highlights are required');
+    const incompleteIndex = highlights.findIndex((it) => !it.label || !it.value);
+    if (incompleteIndex >= 0) {
+        throw ApiError.badRequest(`Highlight ${incompleteIndex + 1} label and value are required`);
+    }
+
     await VendorPortfolioItem.destroy({ where: { type: 'event', vendor_id: vendorId }, force: true });
-    if (!Array.isArray(items) || items.length === 0) return [];
-    const rows = items
-        .filter((it) => it && it.label && it.value)
-        .map((it, idx) => ({
-            type:       'event',
-            label:      it.label,
-            value:      it.value,
-            sort_order: idx,
-            vendor_id:  vendorId,
-            company_id: companyId,
-            created_by: createdBy,
-            is_active:  1,
-        }));
-    if (rows.length === 0) return [];
+    const rows = [header, detail, ...highlights].map((it, idx) => ({
+        type:       'event',
+        label:      it.label,
+        value:      it.value,
+        sort_order: idx,
+        vendor_id:  vendorId,
+        company_id: companyId,
+        created_by: createdBy,
+        is_active:  1,
+    }));
     return VendorPortfolioItem.bulkCreate(rows);
 };
 

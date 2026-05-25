@@ -1,6 +1,56 @@
-const { VendorPage } = require('../models');
+const { VendorPage, Vendor } = require('../models');
 const baseService = require('./base.service');
 const ApiError = require('../utils/apiError');
+
+const parseNavMenu = (value) => {
+    if (Array.isArray(value)) return value;
+    if (typeof value !== 'string' || !value.trim()) return [];
+    try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+};
+
+const stripPageFromNavMenu = async (vendorId, deletedPageId) => {
+    const vendor = await Vendor.findByPk(vendorId, { attributes: ['id', 'nav_menu'] });
+    if (!vendor) return;
+    const menu = parseNavMenu(vendor.nav_menu);
+    if (!menu.length) return;
+
+    const targetId = Number(deletedPageId);
+    let changed = false;
+
+    const cleaned = menu.map((item) => {
+        const next = { ...item };
+        if (Array.isArray(item.page_ids)) {
+            const filtered = item.page_ids.filter((id) => Number(id) !== targetId);
+            if (filtered.length !== item.page_ids.length) {
+                next.page_ids = filtered;
+                changed = true;
+            }
+        }
+        if (Array.isArray(item.children)) {
+            const filtered = item.children.filter((c) => Number(c?.page_id) !== targetId);
+            if (filtered.length !== item.children.length) {
+                next.children = filtered;
+                changed = true;
+            }
+        }
+        return next;
+    }).filter((item) => {
+        const type = String(item.type || '').toLowerCase();
+        if (['home', 'about', 'contact'].includes(type)) return true;
+        const pageCount = Array.isArray(item.page_ids) ? item.page_ids.length : 0;
+        const childCount = Array.isArray(item.children) ? item.children.length : 0;
+        return pageCount > 0 || childCount > 0;
+    });
+
+    if (changed) {
+        await vendor.update({ nav_menu: cleaned });
+    }
+};
 
 const MODEL_NAME = 'VendorPage';
 const PAGE_NAME_MAX_LENGTH = 25;
@@ -64,6 +114,7 @@ const remove = async (id, vendorId) => {
     const page = await VendorPage.findOne({ where: { id, vendor_id: vendorId } });
     if (!page) throw ApiError.notFound('Page not found');
     await page.destroy();
+    await stripPageFromNavMenu(vendorId, id);
     return true;
 };
 

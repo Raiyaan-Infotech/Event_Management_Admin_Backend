@@ -162,6 +162,7 @@ const sendMail = async (caller, data) => {
 
   const recipientRows = await syncRecipients(mail.id, data.recipients);
   await notificationService.createForRecipients(mail.id, recipientRows);
+  console.log('[mail.send]', { mailId: mail.id, sender: `${caller.type}:${caller.id}`, recipients: recipientRows.map(r => `${r.recipient_type}:${r.recipient_id}:${r.role}`) });
   return mail;
 };
 
@@ -209,6 +210,7 @@ const getInbox = async (caller, query = {}) => {
     offset,
   });
 
+  console.log('[mail.inbox]', { caller: `${caller.type}:${caller.id}`, filter: recipientWhere, foundCount: rows.count });
   return { total: rows.count, rows: rows.rows };
 };
 

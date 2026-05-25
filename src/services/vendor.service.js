@@ -46,6 +46,21 @@ const validateThemeForMembership = async (membership, themeId) => {
     }
 };
 
+const requireVendorLocation = (data) => {
+    const requiredFields = [
+        ['country_id', 'Country'],
+        ['state_id', 'State'],
+        ['city_id', 'District'],
+        ['pincode_id', 'City'],
+    ];
+
+    for (const [field, label] of requiredFields) {
+        if (data[field] === undefined || data[field] === null || data[field] === '') {
+            throw ApiError.badRequest(`${label} is required`);
+        }
+    }
+};
+
 const getAll = async (query = {}, companyId = undefined) => {
     return baseService.getAll(Vendor, MODEL_NAME, query, {
         searchFields: ['name', 'email', 'company_name', 'contact'],
@@ -81,11 +96,12 @@ const getByEmailWithPassword = async (email) => {
 };
 
 const normalizeMedia = (data, companyId) => {
-    return mediaService.uploadDataUriFields(data, ['company_logo'], { folder: 'vendors' }, companyId);
+    return mediaService.uploadDataUriFields(data, ['company_logo', 'profile', 'bank_logo'], { folder: 'vendors' }, companyId);
 };
 
 const create = async (data, companyId = undefined) => {
     normalizeEmailFields(data);
+    requireVendorLocation(data);
     await validateThemeForMembership(data.membership, data.theme_id);
     const existing = await Vendor.findOne({ where: { email: data.email } });
     if (existing) throw ApiError.conflict('A vendor with this email already exists');
@@ -95,6 +111,7 @@ const create = async (data, companyId = undefined) => {
 
 const update = async (id, data, companyId = undefined) => {
     normalizeEmailFields(data);
+    requireVendorLocation(data);
     // Don't allow empty password on update — remove it so hash hook doesn't run
     if (data.password === '' || data.password === null || data.password === undefined) {
         delete data.password;

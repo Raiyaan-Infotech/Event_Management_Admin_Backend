@@ -15,6 +15,11 @@ const setAccessCookie = (res, name, token) => {
   });
 };
 
+const clearClientCookies = (res) => {
+  res.clearCookie('client_access_token', COOKIE_OPTIONS);
+  res.clearCookie('client_refresh_token', COOKIE_OPTIONS);
+};
+
 const authenticateAdmin = async (req, res) => {
   let decoded = req.cookies.access_token ? verifyAccessToken(req.cookies.access_token) : null;
 
@@ -83,10 +88,11 @@ const authenticateClient = async (req, res) => {
   }
 
   if (decoded && decoded.type === 'client') {
-    if (decoded.companyId) {
-      return { type: 'client', id: decoded.id, vendorId: decoded.vendorId, companyId: decoded.companyId };
+    const client = await VendorClient.findByPk(decoded.id, { attributes: ['id', 'company_id', 'vendor_id', 'is_active', 'login_access'] });
+    if (!client || client.is_active !== 1 || client.login_access !== 1) {
+      clearClientCookies(res);
+      return null;
     }
-    const client = await VendorClient.findByPk(decoded.id, { attributes: ['id', 'company_id', 'vendor_id'] });
     const vendor = client?.company_id
       ? null
       : await Vendor.findByPk(client?.vendor_id || decoded.vendorId, { attributes: ['id', 'company_id'] });
