@@ -55,9 +55,18 @@ const updateTerms = asyncHandler(async (req, res) => {
     const { VendorPage } = require('../models');
     const [page] = await VendorPage.findOrCreate({
         where: { vendor_id: req.vendor.id, name: 'Terms & Conditions' },
-        defaults: { content: '', company_id: req.vendor.company_id, is_active: 1 },
+        defaults: {
+            content: '',
+            description: 'Your website terms and conditions.',
+            company_id: req.vendor.company_id,
+            created_by: req.vendor.id,
+            is_active: 1,
+        },
     });
-    await page.update({ content: req.body.content });
+    await page.update({
+        content: req.body.content,
+        updated_by: req.vendor.id,
+    });
     logVendorActivity(req.vendor.id, 'update_terms', 'vendor_pages', 'Terms & Conditions updated', req);
     ApiResponse.success(res, page, 'Terms updated');
 });
@@ -72,9 +81,18 @@ const updatePrivacy = asyncHandler(async (req, res) => {
     const { VendorPage } = require('../models');
     const [page] = await VendorPage.findOrCreate({
         where: { vendor_id: req.vendor.id, name: 'Privacy Policy' },
-        defaults: { content: '', company_id: req.vendor.company_id, is_active: 1 },
+        defaults: {
+            content: '',
+            description: 'Your website privacy policy.',
+            company_id: req.vendor.company_id,
+            created_by: req.vendor.id,
+            is_active: 1,
+        },
     });
-    await page.update({ content: req.body.content });
+    await page.update({
+        content: req.body.content,
+        updated_by: req.vendor.id,
+    });
     logVendorActivity(req.vendor.id, 'update_privacy', 'vendor_pages', 'Privacy Policy updated', req);
     ApiResponse.success(res, page, 'Privacy policy updated');
 });
