@@ -80,6 +80,11 @@ const getAll = async (query = {}, vendorId) => {
     }
     delete queryForBase.status;
 
+    if (queryForBase.is_active !== undefined && queryForBase.is_active !== '') {
+        customWhere.is_active = Number(queryForBase.is_active);
+        delete queryForBase.is_active;
+    }
+
     if (query.plan) {
         if (String(query.plan).toLowerCase() === 'guest') {
             customWhere.registration_type = 'guest';
