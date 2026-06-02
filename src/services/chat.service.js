@@ -13,6 +13,7 @@ const ApiError = require('../utils/apiError');
 const mediaService = require('./media.service');
 
 const ACTOR_TYPES = new Set(['admin', 'vendor', 'client']);
+const CHAT_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 
 const normalizeActor = (actor) => {
   if (!actor || !ACTOR_TYPES.has(actor.type) || !actor.id) {
@@ -32,6 +33,36 @@ const safeStoredAvatar = (value) => {
   if (!value || typeof value !== 'string') return null;
   if (value.startsWith('data:')) return null;
   return value.length > 500 ? null : value;
+};
+
+const uploadChatAttachment = async (value, companyId) => {
+  if (!value) return null;
+
+  const dataUrl = String(value.data_url || value.dataUrl || '');
+  const name = String(value.name || 'attachment').slice(0, 255);
+  const type = String(value.type || '').slice(0, 100);
+  const declaredSize = Number(value.size) || 0;
+  const base64 = dataUrl.split(',')[1] || '';
+  const estimatedSize = Math.ceil(base64.length * 0.75);
+
+  if (!/^data:[^;]+;base64,/.test(dataUrl)) {
+    throw ApiError.badRequest('Attachment must be a valid uploaded file.');
+  }
+  if (Math.max(declaredSize, estimatedSize) > CHAT_ATTACHMENT_MAX_BYTES) {
+    throw ApiError.badRequest('Attachment must be 10 MB or smaller.');
+  }
+
+  const url = await mediaService.uploadDataUri(dataUrl, {
+    folder: 'chat/attachments',
+    originalName: name.replace(/\.[^.]+$/, '') || 'attachment',
+  }, companyId || 1);
+
+  return {
+    url,
+    name,
+    type,
+    size: declaredSize || estimatedSize,
+  };
 };
 
 const resolveAvatar = async ({ value, actor, companyId, persist }) => {
@@ -339,8 +370,14 @@ const sendMessage = async (callerInput, payload) => {
   const text = String(payload.message || '').trim();
 
   if (!conversationId) throw ApiError.badRequest('conversation_id is required.');
-  if (!text) throw ApiError.badRequest('Message is required.');
+  if (!text && !payload.attachment) throw ApiError.badRequest('Message is required.');
   if (text.length > 5000) throw ApiError.badRequest('Message is too long.');
+
+  await assertParticipant(caller, conversationId);
+  const conversation = await ChatConversation.findByPk(conversationId, { attributes: ['company_id'] });
+  if (!conversation) throw ApiError.notFound('Conversation not found.');
+  const attachment = await uploadChatAttachment(payload.attachment, caller.companyId || conversation.company_id);
+  const messageText = text || attachment?.name || 'Attachment';
 
   return sequelize.transaction(async (transaction) => {
     await assertParticipant(caller, conversationId, transaction);
@@ -349,8 +386,9 @@ const sendMessage = async (callerInput, payload) => {
       conversation_id: conversationId,
       sender_type: caller.type,
       sender_id: caller.id,
-      message: text,
+      message: messageText,
       message_type: 'text',
+      metadata: attachment ? { attachment } : null,
     }, { transaction });
 
     await ChatConversation.update({

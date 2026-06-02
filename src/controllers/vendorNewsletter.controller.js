@@ -60,11 +60,24 @@ exports.getNewsletterSends = async (req, res) => {
 
 exports.sendNewsletter = async (req, res) => {
   try {
-    const { user_type: userType, plans, category_id: categoryId, template_id: templateId, send_to: sendTo } = req.body;
+    const userType = req.body.userType ?? req.body.user_type;
+    const plans = Array.isArray(req.body.plans) ? req.body.plans : [];
+    const categoryId = req.body.categoryId ?? req.body.category_id;
+    const templateId = req.body.templateId ?? req.body.template_id;
+    const sendTo = req.body.sendTo ?? req.body.send_to;
     const db = require('../models');
     const { Op } = require('sequelize');
 
-    const template = await db.VendorEmailTemplate.findByPk(templateId);
+    if (!['Guest', 'Registered'].includes(userType)) {
+      throw ApiError.badRequest('Valid user type is required.');
+    }
+    if (!['subscribers', 'unsubscribers'].includes(sendTo)) {
+      throw ApiError.badRequest('Valid recipient group is required.');
+    }
+
+    const template = await db.VendorEmailTemplate.findOne({
+      where: { id: templateId, vendor_id: req.vendor.id, is_active: 1 },
+    });
     if (!template) return ApiResponse.error(res, 'Template not found', 404);
 
     const clientType = sendTo === 'unsubscribers' ? 'unsubscribed' : 'subscribed';
@@ -78,28 +91,14 @@ exports.sendNewsletter = async (req, res) => {
 
     const subscribers = await db.VendorClient.findAll({ where });
 
-    const send = await vendorNewsletterService.createSend(req.vendor.id, req.vendor.company_id, {
-      templateId:   template.id,
-      templateName: template.name,
-      categoryId:   categoryId || template.category_id,
-      userType,
-      plans:        plans || [],
-      totalSent:    subscribers.length,
-    });
+    const { send, mail } = await vendorNewsletterService.deliverNewsletterInternal(
+      req.vendor,
+      template,
+      subscribers,
+      { categoryId, userType, plans }
+    );
 
-    for (const client of subscribers) {
-      await vendorNewsletterService.createSentLog(
-        req.vendor.id,
-        send.id,
-        client.id,
-        client.email,
-        client.name,
-        client.registration_type === 'guest' ? 'Guest' : (client.plan || 'Standard'),
-        template.name
-      );
-    }
-
-    ApiResponse.success(res, { newsletterId: send.id, count: subscribers.length }, `Newsletter sent to ${subscribers.length} recipients`, 200);
+    ApiResponse.success(res, { newsletterId: send.id, mailId: mail?.id || null, count: subscribers.length }, `Newsletter sent to ${subscribers.length} recipients`, 200);
   } catch (err) {
     ApiResponse.error(res, err.message || 'Failed to send newsletter', 400);
   }

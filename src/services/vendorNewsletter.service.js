@@ -1,5 +1,13 @@
 const { Op, literal } = require('sequelize');
-const { VendorClient, VendorNewsletterSend, VendorNewsletterSentLog } = require('../models');
+const {
+    sequelize,
+    VendorClient,
+    VendorNewsletterSend,
+    VendorNewsletterSentLog,
+    Mail,
+    MailRecipient,
+    MailNotification,
+} = require('../models');
 
 const getSubscribers = async (vendorId) => {
     return VendorClient.findAll({
@@ -40,7 +48,7 @@ const bulkUpdateByIds = async (vendorId, ids, clientType) => {
     return count;
 };
 
-const createSend = async (vendorId, companyId, data) => {
+const createSend = async (vendorId, companyId, data, options = {}) => {
     return VendorNewsletterSend.create({
         vendor_id:     vendorId,
         company_id:    companyId || null,
@@ -51,7 +59,7 @@ const createSend = async (vendorId, companyId, data) => {
         plans:         data.plans && data.plans.length > 0 ? data.plans : null,
         total_sent:    data.totalSent,
         created_by:    vendorId,
-    });
+    }, options);
 };
 
 const getNewsletterSends = async (vendorId) => {
@@ -68,7 +76,7 @@ const getNewsletterSends = async (vendorId) => {
     });
 };
 
-const createSentLog = async (vendorId, sendId, clientId, email, name, membership, template) => {
+const createSentLog = async (vendorId, sendId, clientId, email, name, membership, template, options = {}) => {
     return VendorNewsletterSentLog.create({
         vendor_id:   vendorId,
         campaign_id: sendId,
@@ -78,6 +86,61 @@ const createSentLog = async (vendorId, sendId, clientId, email, name, membership
         membership,
         template,
         status: 'sent',
+    }, options);
+};
+
+const deliverNewsletterInternal = async (vendor, template, subscribers, data) => {
+    return sequelize.transaction(async (transaction) => {
+        const send = await createSend(vendor.id, vendor.company_id, {
+            templateId: template.id,
+            templateName: template.name,
+            categoryId: data.categoryId || template.category_id,
+            userType: data.userType,
+            plans: data.plans || [],
+            totalSent: subscribers.length,
+        }, { transaction });
+
+        let mail = null;
+        if (subscribers.length > 0) {
+            mail = await Mail.create({
+                company_id: vendor.company_id || null,
+                sender_type: 'vendor',
+                sender_id: vendor.id,
+                subject: template.name,
+                body: template.description || template.name,
+                status: 'sent',
+                sent_at: new Date(),
+            }, { transaction });
+
+            await MailRecipient.bulkCreate(subscribers.map((client) => ({
+                mail_id: mail.id,
+                recipient_type: 'client',
+                recipient_id: client.id,
+                role: 'to',
+                is_read: 0,
+                is_active: 1,
+            })), { transaction });
+
+            await MailNotification.bulkCreate(subscribers.map((client) => ({
+                mail_id: mail.id,
+                recipient_type: 'client',
+                recipient_id: client.id,
+                is_read: 0,
+            })), { transaction });
+
+            await VendorNewsletterSentLog.bulkCreate(subscribers.map((client) => ({
+                vendor_id: vendor.id,
+                campaign_id: send.id,
+                client_id: client.id,
+                email: client.email,
+                name: client.name || client.email,
+                membership: client.registration_type === 'guest' ? 'Guest' : (client.plan || 'Standard'),
+                template: template.name,
+                status: 'sent',
+            })), { transaction });
+        }
+
+        return { send, mail };
     });
 };
 
@@ -120,6 +183,7 @@ module.exports = {
     createSend,
     getNewsletterSends,
     createSentLog,
+    deliverNewsletterInternal,
     getSentLogs,
     markAsOpened,
 };
