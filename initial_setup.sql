@@ -2818,3 +2818,77 @@ CREATE TABLE IF NOT EXISTS `chat_read_states` (
   CONSTRAINT `fk_chat_read_conversation`
     FOREIGN KEY (`conversation_id`) REFERENCES `chat_conversations`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Current build cleanup: Website Management was backed up separately and removed
+-- from the active project. Keep fresh installs aligned with the cleaned schema.
+SET FOREIGN_KEY_CHECKS = 0;
+
+ALTER TABLE `vendors`
+  DROP COLUMN IF EXISTS `newsletter_status`,
+  DROP COLUMN IF EXISTS `footer_links`,
+  DROP COLUMN IF EXISTS `nav_menu`,
+  DROP COLUMN IF EXISTS `theme_id`,
+  DROP COLUMN IF EXISTS `palette_id`,
+  DROP COLUMN IF EXISTS `home_blocks`;
+
+DROP TABLE IF EXISTS
+  `vendor_theme_colors`,
+  `vendor_sliders`,
+  `vendor_hero_sections`,
+  `vendor_portfolio_items`,
+  `vendor_gallery`,
+  `vendor_testimonials`,
+  `vendor_social_links`,
+  `vendor_home_blocks`,
+  `vendor_pages`,
+  `ui_blocks`,
+  `ui_block_categories`,
+  `themes`,
+  `color_palettes`;
+
+DELETE `rp`
+FROM `role_permissions` AS `rp`
+INNER JOIN `permissions` AS `p` ON `p`.`id` = `rp`.`permission_id`
+WHERE `p`.`slug` IN (
+  'themes.view',
+  'themes.create',
+  'themes.edit',
+  'themes.delete',
+  'ui_blocks.view',
+  'ui_blocks.create',
+  'ui_blocks.edit',
+  'ui_blocks.delete',
+  'color_palettes.view',
+  'color_palettes.create',
+  'color_palettes.edit',
+  'color_palettes.delete',
+  'website_management.view',
+  'website_management.create',
+  'website_management.edit',
+  'website_management.delete'
+);
+
+DELETE FROM `permissions`
+WHERE `slug` IN (
+  'themes.view',
+  'themes.create',
+  'themes.edit',
+  'themes.delete',
+  'ui_blocks.view',
+  'ui_blocks.create',
+  'ui_blocks.edit',
+  'ui_blocks.delete',
+  'color_palettes.view',
+  'color_palettes.create',
+  'color_palettes.edit',
+  'color_palettes.delete',
+  'website_management.view',
+  'website_management.create',
+  'website_management.edit',
+  'website_management.delete'
+);
+
+DELETE FROM `modules`
+WHERE `slug` IN ('themes', 'ui_blocks', 'color_palettes', 'website_management', 'appearance');
+
+SET FOREIGN_KEY_CHECKS = 1;

@@ -40,6 +40,35 @@ const upload = multer({
     },
 });
 
+const websiteManagementRemoved = (req, res) => {
+    return res.status(410).json({
+        success: false,
+        message: 'Website Management has been removed from this project build.',
+    });
+};
+
+router.use([
+    '/ui-blocks',
+    '/social-links',
+    '/staff/portal/website',
+    '/staff/portal/pages',
+    '/pages',
+    '/sliders',
+    '/hero-section',
+    '/portfolio',
+    '/gallery',
+    '/testimonials',
+    '/subscription/themes',
+    '/subscription/theme',
+    '/subscription/colors',
+    '/subscription/palette',
+    '/color-palettes',
+    '/home-blocks',
+    '/auth/preview-data',
+    '/:id/preview-data',
+    '/:vendorId/social-links',
+], websiteManagementRemoved);
+
 // ─── Public — UI blocks catalog (no auth, metadata only) ─────────────────────
 router.get('/ui-blocks', asyncHandler(async (req, res) => {
     const { UiBlock } = require('../models');
@@ -251,15 +280,6 @@ router.delete('/gallery/:id',        isVendorAuthenticated, vendorGalleryControl
 
 // ─── Vendor Subscription (vendor JWT) ───────────────────────────────────────
 router.get('/subscription',                  isVendorAuthenticated, vendorSubscriptionController.getMyPlan);
-router.get('/subscription/themes/:planId',   isVendorAuthenticated, vendorSubscriptionController.getThemesByPlan);
-router.put('/subscription/theme',            isVendorAuthenticated, vendorSubscriptionController.selectTheme);
-router.get('/subscription/colors',           isVendorAuthenticated, vendorSubscriptionController.getColors);
-router.put('/subscription/colors',           isVendorAuthenticated, vendorSubscriptionController.saveColors);
-router.put('/subscription/colors/reset',     isVendorAuthenticated, vendorSubscriptionController.resetCustomColors);
-router.put('/subscription/palette',          isVendorAuthenticated, vendorSubscriptionController.selectPalette);
-router.get('/color-palettes',               isVendorAuthenticated, vendorSubscriptionController.getAllPalettes);
-router.get('/home-blocks',                  isVendorAuthenticated, vendorSubscriptionController.getHomeBlocks);
-router.put('/home-blocks',                  isVendorAuthenticated, vendorSubscriptionController.saveHomeBlocks);
 
 // ─── Vendor Testimonials (vendor JWT) ────────────────────────────────────────
 router.get('/testimonials',              isVendorAuthenticated, vendorTestimonialController.getAll);

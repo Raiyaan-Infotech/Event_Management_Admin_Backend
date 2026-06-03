@@ -41,10 +41,6 @@ db.Setting = require('./Setting')(sequelize, Sequelize);
 db.ApprovalRequest = require('./ApprovalRequest')(sequelize, Sequelize);
 db.ActivityLog = require('./ActivityLog')(sequelize, Sequelize);
 db.Plugin = require('./Plugin')(sequelize, Sequelize);
-db.Theme = require('./Theme')(sequelize, Sequelize);
-db.ColorPalette = require('./ColorPalette')(sequelize, Sequelize);
-db.UiBlockCategory = require('./UiBlockCategory')(sequelize, Sequelize);
-db.UiBlock = require('./UiBlock')(sequelize, Sequelize);
 
 // Locations
 db.Country = require('./Country')(sequelize, Sequelize);
@@ -86,12 +82,6 @@ db.MissingTranslationKey = require('./MissingTranslationKey')(sequelize, Sequeli
 // Payments
 db.Payment = require('./Payment')(sequelize, Sequelize);
 db.Currency = require('./Currency')(sequelize, Sequelize); // ✅ Add this line
-db.VendorPage = require('./vendorPage')(sequelize, Sequelize);
-db.VendorSlider = require('./VendorSlider')(sequelize, Sequelize);
-db.VendorHeroSection = require('./VendorHeroSection')(sequelize, Sequelize);
-db.VendorPortfolioItem = require('./VendorPortfolioItem')(sequelize, Sequelize);
-db.VendorGallery = require('./VendorGallery')(sequelize, Sequelize);
-db.VendorTestimonial = require('./VendorTestimonial')(sequelize, Sequelize);
 db.VendorEmailCategory = require('./VendorEmailCategory')(sequelize, Sequelize);
 db.VendorEmailTemplate = require('./VendorEmailTemplate')(sequelize, Sequelize);
 // Unified mail system
@@ -106,19 +96,11 @@ db.ChatReadState = require('./ChatReadState')(sequelize, Sequelize);
 db.VendorNewsletter = require('./VendorNewsletter')(sequelize, Sequelize);
 db.VendorNewsletterSend = require('./VendorNewsletterSend')(sequelize, Sequelize);
 db.VendorNewsletterSentLog = require('./VendorNewsletterSentLog')(sequelize, Sequelize);
-db.VendorSocialLink = require('./vendorSocialLink')(sequelize, Sequelize);
-db.VendorThemeColor = require('./VendorThemeColor')(sequelize, Sequelize);
 
 // Vendor Slider → Page
-db.VendorSlider.belongsTo(db.VendorPage, { foreignKey: 'page_id', as: 'page' });
-db.VendorPage.hasMany(db.VendorSlider, { foreignKey: 'page_id', as: 'sliders' });
 
-db.Vendor.hasOne(db.VendorHeroSection, { foreignKey: 'vendor_id', as: 'heroSection' });
-db.VendorHeroSection.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
 
 //Vendor gallery → Vendor
-db.Vendor.hasMany(db.VendorGallery, { foreignKey: 'vendor_id', as: 'gallery' });
-db.VendorGallery.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
 
 // Vendor Newsletter → Client
 db.VendorNewsletter.belongsTo(db.VendorClient, { foreignKey: 'client_id', as: 'client' });
@@ -167,8 +149,6 @@ db.Module.hasMany(db.Permission, { foreignKey: 'module_id', as: 'permissions' })
 db.Permission.belongsTo(db.Module, { foreignKey: 'module_id', as: 'moduleRef' });
 
 // UI Blocks Relationships
-db.UiBlockCategory.hasMany(db.UiBlock, { foreignKey: 'category_id', as: 'blocks' });
-db.UiBlock.belongsTo(db.UiBlockCategory, { foreignKey: 'category_id', as: 'category' });
 
 // Approval Relationships
 db.User.hasMany(db.ApprovalRequest, { as: 'requestedApprovals', foreignKey: 'requester_id' });
@@ -269,17 +249,9 @@ db.ChatConversation.hasMany(db.ChatReadState, { foreignKey: 'conversation_id', a
 db.ChatReadState.belongsTo(db.ChatConversation, { foreignKey: 'conversation_id', as: 'conversation' });
 
 // Theme → Color Palette
-db.Theme.belongsTo(db.ColorPalette, { foreignKey: 'palette_id', as: 'palette' });
-db.ColorPalette.hasMany(db.Theme, { foreignKey: 'palette_id', as: 'themes' });
 
 // Vendor → ColorPalette (vendor's selected palette)
-db.Vendor.belongsTo(db.ColorPalette, { foreignKey: 'palette_id', as: 'selectedPalette' });
-db.ColorPalette.hasMany(db.Vendor, { foreignKey: 'palette_id', as: 'vendors' });
 
 // Vendor Theme Colors — per (vendor, theme) override
-db.Vendor.hasMany(db.VendorThemeColor, { foreignKey: 'vendor_id', as: 'themeColors' });
-db.VendorThemeColor.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
-db.Theme.hasMany(db.VendorThemeColor, { foreignKey: 'theme_id', as: 'vendorOverrides' });
-db.VendorThemeColor.belongsTo(db.Theme, { foreignKey: 'theme_id', as: 'theme' });
 
 module.exports = db;

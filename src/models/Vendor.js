@@ -40,14 +40,8 @@ module.exports = (sequelize) => {
             type: DataTypes.STRING(100),
             defaultValue: 'basic',
         },
-        copywrite:          { type: DataTypes.STRING(255), allowNull: true },
-        poweredby:          { type: DataTypes.STRING(255), allowNull: true },
-        newsletter_status:  { type: DataTypes.TINYINT, allowNull: false, defaultValue: 0 },
-        footer_links:       { type: DataTypes.JSON, allowNull: true, defaultValue: null },
-        nav_menu:      { type: DataTypes.JSON, allowNull: true, defaultValue: null },
-        theme_id:      { type: DataTypes.INTEGER, allowNull: true },
-        palette_id:    { type: DataTypes.INTEGER, allowNull: true },  // FK → color_palettes
-        home_blocks:   { type: DataTypes.JSON,    allowNull: true, defaultValue: null }, // vendor's custom block order
+        copywrite: { type: DataTypes.STRING(255), allowNull: true },
+        poweredby: { type: DataTypes.STRING(255), allowNull: true },
         // Bank Info
         bank_name: { type: DataTypes.STRING(200), allowNull: true },
         acc_no:    { type: DataTypes.STRING(100), allowNull: true },
@@ -80,7 +74,7 @@ module.exports = (sequelize) => {
                     vendor.password = await bcrypt.hash(vendor.password, 12);
                     vendor.password_changed_at = new Date();
                 }
-                if (vendor.changed('membership') || vendor.changed('theme_id')) {
+                if (vendor.changed('membership')) {
                     vendor.plan_changed_at = new Date();
                 }
             },
