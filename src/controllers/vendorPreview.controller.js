@@ -1,6 +1,7 @@
 const {
     Vendor,
     VendorSlider,
+    VendorHeroSection,
     VendorPortfolioItem,
     VendorGallery,
     VendorTestimonial,
@@ -37,8 +38,9 @@ async function buildPreviewData(vendorId, themeIdOverride = null) {
     if (!vendor) throw ApiError.notFound('Vendor not found');
 
     const { Subscription } = require('../models');
-    const [sliders, portfolioItems, gallery, testimonials, plans, socialLinks, pages] = await Promise.all([
+    const [sliders, heroSection, portfolioItems, gallery, testimonials, plans, socialLinks, pages] = await Promise.all([
         VendorSlider.findAll({ where: { vendor_id: vendorId, status: 'published', is_active: 1 }, order: [['id', 'ASC']] }),
+        VendorHeroSection.findOne({ where: { vendor_id: vendorId, is_active: 1 } }),
         VendorPortfolioItem.findAll({ where: { vendor_id: vendorId }, order: [['createdAt', 'DESC']] }),
         VendorGallery.findAll({ where: { vendor_id: vendorId, is_active: 1 }, order: [['createdAt', 'DESC']] }),
         VendorTestimonial.findAll({ where: { vendor_id: vendorId, is_active: 1 }, order: [['createdAt', 'DESC']] }),
@@ -128,6 +130,7 @@ async function buildPreviewData(vendorId, themeIdOverride = null) {
         home_blocks,
         colors,
         sliders,
+        heroSection,
         portfolio: {
             clients:  portfolioItems.filter(p => p.type === 'client'),
             sponsors: portfolioItems.filter(p => p.type === 'sponsor'),

@@ -3,21 +3,21 @@ const {
   verifyRefreshToken,
   generateAccessToken,
   generateVendorAccessToken,
-  generateClientAccessToken,
   COOKIE_OPTIONS,
 } = require('../utils/jwt');
-const { User, Role, RefreshToken, Vendor, VendorClient } = require('../models');
+const { User, Role, RefreshToken, Vendor } = require('../models');
+const {
+  clearClientCookies,
+  findClientForAuthentication,
+  getClientAuthenticationError,
+  refreshClientSession,
+} = require('../utils/clientSession');
 
 const setAccessCookie = (res, name, token) => {
   res.cookie(name, token, {
     ...COOKIE_OPTIONS,
     maxAge: 15 * 60 * 1000,
   });
-};
-
-const clearClientCookies = (res) => {
-  res.clearCookie('client_access_token', COOKIE_OPTIONS);
-  res.clearCookie('client_refresh_token', COOKIE_OPTIONS);
 };
 
 const authenticateAdmin = async (req, res) => {
@@ -74,22 +74,17 @@ const authenticateVendor = async (req, res) => {
 
 const authenticateClient = async (req, res) => {
   let decoded = req.cookies.client_access_token ? verifyAccessToken(req.cookies.client_access_token) : null;
+  let client = null;
 
   if ((!decoded || decoded.type !== 'client') && req.cookies.client_refresh_token) {
-    const refreshDecoded = verifyRefreshToken(req.cookies.client_refresh_token);
-    if (refreshDecoded?.type === 'client') {
-      const client = await VendorClient.findByPk(refreshDecoded.id);
-      if (client && client.is_active === 1 && client.login_access === 1) {
-        const newAccessToken = generateClientAccessToken(client);
-        setAccessCookie(res, 'client_access_token', newAccessToken);
-        decoded = verifyAccessToken(newAccessToken);
-      }
-    }
+    const refreshed = await refreshClientSession(req, res);
+    decoded = refreshed?.decoded || null;
+    client = refreshed?.client || null;
   }
 
   if (decoded && decoded.type === 'client') {
-    const client = await VendorClient.findByPk(decoded.id, { attributes: ['id', 'company_id', 'vendor_id', 'is_active', 'login_access'] });
-    if (!client || client.is_active !== 1 || client.login_access !== 1) {
+    if (!client) client = await findClientForAuthentication(decoded.id);
+    if (getClientAuthenticationError(client, decoded.iat)) {
       clearClientCookies(res);
       return null;
     }

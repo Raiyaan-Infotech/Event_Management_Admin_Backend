@@ -12,6 +12,7 @@ const vendorPermissionController = require('../controllers/vendorPermission.cont
 const staffPortalController = require('../controllers/staffPortal.controller');
 const vendorPageController = require('../controllers/vendorPage.controller');
 const vendorSliderController = require('../controllers/vendorSlider.controller');
+const vendorHeroSectionController = require('../controllers/vendorHeroSection.controller');
 const vendorGalleryController = require('../controllers/vendorGallery.controller');
 const vendorTestimonialController = require('../controllers/vendorTestimonial.controller');
 const vendorNewsletterController = require('../controllers/vendorNewsletter.controller');
@@ -42,19 +43,8 @@ const upload = multer({
 // ─── Public — UI blocks catalog (no auth, metadata only) ─────────────────────
 router.get('/ui-blocks', asyncHandler(async (req, res) => {
     const { UiBlock } = require('../models');
-    await UiBlock.findOrCreate({
-        where: { block_type: 'register' },
-        defaults: {
-            block_type: 'register',
-            label: 'Register',
-            icon: 'UserPlus',
-            category_id: 1,
-            description: 'Controls whether the register action appears in the website header.',
-            variants: [{ key: 'variant_1', label: 'Standard' }],
-            plan_ids: [1, 2, 3],
-            is_active: 1,
-        },
-    });
+    const { ensureCoreUiBlocks } = require('../utils/coreUiBlocks');
+    await ensureCoreUiBlocks();
     const blocks = await UiBlock.findAll({
         where: { is_active: 1 },
         attributes: ['block_type', 'label', 'icon', 'description', 'variants'],
@@ -71,7 +61,7 @@ router.post('/staff/auth/verify-reset-otp',  vendorStaffAuthController.staffVeri
 router.post('/staff/auth/reset-password',    vendorStaffAuthController.staffResetPassword);
 
 // ─── Client Portal Auth (public) ──────────────────────────────────────────────
-router.post('/client/auth/login',           vendorClientAuthController.clientLogin);
+router.post('/client/auth/handoff',         vendorClientAuthController.clientHandoff);
 router.post('/client/auth/forgot-password', vendorClientAuthController.clientForgotPassword);
 router.post('/client/auth/reset-password',  vendorClientAuthController.clientResetPassword);
 
@@ -228,6 +218,8 @@ router.post('/sliders',             isVendorAuthenticated, vendorSliderControlle
 router.put('/sliders/:id',          isVendorAuthenticated, vendorSliderController.update);
 router.patch('/sliders/:id/status', isVendorAuthenticated, vendorSliderController.updateStatus);
 router.delete('/sliders/:id',       isVendorAuthenticated, vendorSliderController.remove);
+router.get('/hero-section',         isVendorAuthenticated, vendorHeroSectionController.get);
+router.put('/hero-section',         isVendorAuthenticated, vendorHeroSectionController.upsert);
 
 // ─── Portfolio Clients (vendor JWT) ──────────────────────────────────────────
 router.get('/portfolio/clients',              isVendorAuthenticated, portfolioClientCtrl.getAll);

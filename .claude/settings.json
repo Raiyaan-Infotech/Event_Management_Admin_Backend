@@ -1,4 +1,14 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(dir \"D:\\\\Jamal\\\\Event_Management_Admin_Frontend\\\\src\\\\app\\\\admin\\\\platform\\\\users\\\\_components\")",
+      "Bash(dir \"D:\\\\Jamal\\\\Event_Management_Admin_Frontend\\\\src\\\\app\\\\admin\\\\platform\\\\users\" /b /s)",
+      "Bash(findstr /i \"vendor edit\")"
+    ],
+    "additionalDirectories": [
+      "D:\\Jamal"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {
@@ -10,11 +20,6 @@
           }
         ]
       }
-    ]
-  },
-  "permissions": {
-    "additionalDirectories": [
-      "D:\\Jamal"
     ]
   }
 }

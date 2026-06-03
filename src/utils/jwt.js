@@ -112,10 +112,23 @@ const generateClientAccessToken = (client) => {
 
 const generateClientRefreshToken = (client) => {
   return jwt.sign(
-    { id: client.id, type: 'client' },
+    { id: client.id, type: 'client', jti: uuidv4() },
     getRefreshSecret(),
     { expiresIn: '7d' }
   );
+};
+
+const generateClientHandoffToken = (client) => {
+  return jwt.sign(
+    { id: client.id, vendorId: client.vendor_id, type: 'client_handoff' },
+    getAccessSecret(),
+    { expiresIn: '1m' }
+  );
+};
+
+const verifyClientHandoffToken = (token) => {
+  const decoded = verifyAccessToken(token);
+  return decoded?.type === 'client_handoff' ? decoded : null;
 };
 
 module.exports = {
@@ -132,4 +145,6 @@ module.exports = {
   generateStaffRefreshToken,
   generateClientAccessToken,
   generateClientRefreshToken,
+  generateClientHandoffToken,
+  verifyClientHandoffToken,
 };

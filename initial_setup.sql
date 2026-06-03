@@ -1597,6 +1597,40 @@ CREATE TABLE IF NOT EXISTS `vendor_sliders` (
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS `vendor_hero_sections` (
+  `id`           BIGINT       NOT NULL AUTO_INCREMENT,
+  `vendor_id`    INT          NOT NULL,
+  `company_id`   INT          DEFAULT NULL,
+  `title`        VARCHAR(255) DEFAULT NULL,
+  `heading`      VARCHAR(255) DEFAULT NULL,
+  `description`  TEXT         DEFAULT NULL,
+  `button`       VARCHAR(100) DEFAULT NULL,
+  `button2`      VARCHAR(100) DEFAULT NULL,
+  `image_url`    VARCHAR(500) DEFAULT NULL,
+  `bg_image_url` VARCHAR(500) DEFAULT NULL,
+  `page_id`      INT          DEFAULT NULL,
+  `page_id2`     INT          DEFAULT NULL,
+  `variant`      VARCHAR(50)  NOT NULL DEFAULT 'variant_1',
+  `stat1_val`    VARCHAR(100) DEFAULT NULL,
+  `stat1_lbl`    VARCHAR(150) DEFAULT NULL,
+  `stat1_sub`    VARCHAR(150) DEFAULT NULL,
+  `stat2_val`    VARCHAR(100) DEFAULT NULL,
+  `stat2_lbl`    VARCHAR(150) DEFAULT NULL,
+  `stat2_sub`    VARCHAR(150) DEFAULT NULL,
+  `stat3_val`    VARCHAR(100) DEFAULT NULL,
+  `stat3_lbl`    VARCHAR(150) DEFAULT NULL,
+  `stat3_sub`    VARCHAR(150) DEFAULT NULL,
+  `is_active`    TINYINT(1)   NOT NULL DEFAULT 1,
+  `created_by`   INT          DEFAULT NULL,
+  `updated_by`   INT          DEFAULT NULL,
+  `deleted_by`   INT          DEFAULT NULL,
+  `created_at`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at`   DATETIME     DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `vendor_hero_sections_vendor_unique` (`vendor_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS `vendor_portfolio_items` (
   `id`         BIGINT       NOT NULL AUTO_INCREMENT,
   `type`       ENUM('client','sponsor','event') NOT NULL,
@@ -2588,6 +2622,49 @@ SELECT * FROM (
 ) AS tmp
 WHERE NOT EXISTS (
   SELECT 1 FROM `ui_blocks` WHERE `block_type` = 'register'
+);
+
+INSERT INTO `ui_blocks`
+  (`block_type`, `label`, `icon`, `description`, `category_id`, `variants`, `plan_ids`, `is_active`, `created_at`, `updated_at`)
+SELECT * FROM (
+  SELECT
+    'hero_section',
+    'Hero Section',
+    'Sparkles',
+    'Configurable hero banner with text, images, page buttons, and layout variants.',
+    2,
+    JSON_ARRAY(
+      JSON_OBJECT('key','variant_1','label','Classic Premium'),
+      JSON_OBJECT('key','variant_2','label','EventPress Center'),
+      JSON_OBJECT('key','variant_3','label','Smart Study Layout'),
+      JSON_OBJECT('key','variant_4','label','Dark Luxury Stats Layout'),
+      JSON_OBJECT('key','variant_5','label','Stress-Free Events Layout'),
+      JSON_OBJECT('key','variant_6','label','Widescreen Left-Aligned Layout'),
+      JSON_OBJECT('key','variant_7','label','Widescreen Center-Aligned Layout'),
+      JSON_OBJECT('key','variant_8','label','Widescreen Right-Aligned Layout'),
+      JSON_OBJECT('key','variant_9','label','Widescreen Left-Aligned (with Button)'),
+      JSON_OBJECT('key','variant_10','label','Widescreen Center-Aligned (with Button)'),
+      JSON_OBJECT('key','variant_11','label','Widescreen Right-Aligned (with Button)'),
+      JSON_OBJECT('key','variant_12','label','Widescreen Left-Aligned (with 2 Buttons)'),
+      JSON_OBJECT('key','variant_13','label','Widescreen Center-Aligned (with 2 Buttons)'),
+      JSON_OBJECT('key','variant_14','label','Widescreen Right-Aligned (with 2 Buttons)'),
+      JSON_OBJECT('key','variant_15','label','Widescreen Left-Aligned Layout (No Title)'),
+      JSON_OBJECT('key','variant_16','label','Widescreen Center-Aligned Layout (No Title)'),
+      JSON_OBJECT('key','variant_17','label','Widescreen Right-Aligned Layout (No Title)'),
+      JSON_OBJECT('key','variant_18','label','Widescreen Left-Aligned (No Title, with Button)'),
+      JSON_OBJECT('key','variant_19','label','Widescreen Center-Aligned (No Title, with Button)'),
+      JSON_OBJECT('key','variant_20','label','Widescreen Right-Aligned (No Title, with Button)'),
+      JSON_OBJECT('key','variant_21','label','Widescreen Left-Aligned (No Title, with 2 Buttons)'),
+      JSON_OBJECT('key','variant_22','label','Widescreen Center-Aligned (No Title, with 2 Buttons)'),
+      JSON_OBJECT('key','variant_23','label','Widescreen Right-Aligned (No Title, with 2 Buttons)')
+    ),
+    JSON_ARRAY(1, 2, 3),
+    1,
+    NOW(),
+    NOW()
+) AS tmp
+WHERE NOT EXISTS (
+  SELECT 1 FROM `ui_blocks` WHERE `block_type` = 'hero_section'
 );
 
 -- ============================================================

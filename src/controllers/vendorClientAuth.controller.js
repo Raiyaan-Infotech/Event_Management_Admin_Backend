@@ -2,35 +2,25 @@ const vendorClientAuthService = require('../services/vendorClientAuth.service');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const { asyncHandler } = require('../utils/helpers');
-const { generateClientAccessToken, generateClientRefreshToken, COOKIE_OPTIONS } = require('../utils/jwt');
+const { verifyClientHandoffToken } = require('../utils/jwt');
+const {
+    clearClientCookies,
+    revokeClientRefreshToken,
+    startClientSession,
+} = require('../utils/clientSession');
 
-const CLIENT_COOKIE_OPTIONS = {
-    ...COOKIE_OPTIONS,
-};
+const clientHandoff = asyncHandler(async (req, res) => {
+    const decoded = verifyClientHandoffToken(req.body?.token);
+    if (!decoded) throw ApiError.unauthorized('Invalid or expired client login handoff.');
 
-const clientLogin = asyncHandler(async (req, res) => {
-    const { email, password } = req.body;
-    if (!email || !password) throw ApiError.badRequest('Email and password are required');
-
-    const client = await vendorClientAuthService.login(email, password);
-    const accessToken = generateClientAccessToken(client);
-    const refreshToken = generateClientRefreshToken(client);
-
-    res.cookie('client_access_token', accessToken, {
-        ...CLIENT_COOKIE_OPTIONS,
-        maxAge: 15 * 60 * 1000,
-    });
-    res.cookie('client_refresh_token', refreshToken, {
-        ...CLIENT_COOKIE_OPTIONS,
-        maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-
+    const client = await vendorClientAuthService.getHandoffClient(decoded.id, decoded.vendorId);
+    await startClientSession(req, res, client);
     ApiResponse.success(res, { client: client.toJSON() }, 'Login successful');
 });
 
 const clientLogout = asyncHandler(async (req, res) => {
-    res.clearCookie('client_access_token', CLIENT_COOKIE_OPTIONS);
-    res.clearCookie('client_refresh_token', CLIENT_COOKIE_OPTIONS);
+    await revokeClientRefreshToken(req.cookies.client_refresh_token, req.client.id);
+    clearClientCookies(res);
     ApiResponse.success(res, null, 'Logged out successfully');
 });
 
@@ -49,6 +39,7 @@ const changeClientPassword = asyncHandler(async (req, res) => {
     if (!current_password || !new_password) throw ApiError.badRequest('Current and new password are required');
 
     await vendorClientAuthService.changePassword(req.client.id, current_password, new_password);
+    clearClientCookies(res);
     ApiResponse.success(res, null, 'Password changed successfully');
 });
 
@@ -68,7 +59,7 @@ const clientResetPassword = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
-    clientLogin,
+    clientHandoff,
     clientLogout,
     clientMe,
     updateClientProfile,

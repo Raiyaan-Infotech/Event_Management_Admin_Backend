@@ -1,6 +1,7 @@
 const {
     Vendor,
     VendorSlider,
+    VendorHeroSection,
     VendorPortfolioItem,
     VendorGallery,
     VendorTestimonial,
@@ -19,6 +20,8 @@ const ApiError         = require('../utils/apiError');
 const { asyncHandler } = require('../utils/helpers');
 const { safeParseArray } = require('../utils/json');
 const { v4: uuidv4 } = require('uuid');
+const { generateClientHandoffToken } = require('../utils/jwt');
+const { validateClientPassword } = require('../utils/clientPasswordPolicy');
 
 const COLOR_KEYS = ['primary_color', 'secondary_color', 'header_color', 'footer_color', 'text_color', 'hover_color'];
 
@@ -52,6 +55,7 @@ const getPublicVendorWebsite = asyncHandler(async (req, res) => {
             'about_us', 'company_information', 'company_contact', 'company_email',
             'company_address', 'nav_menu', 'footer_links', 'copywrite', 'poweredby',
             'newsletter_status', 'theme_id', 'palette_id',
+            'home_blocks',
             'contact_mode', 'contact', 'alt_contact', 'alt_email', 'address', 'alt_address',
             'city_id', 'state_id', 'country_id', 'pincode_id',
     ], {
@@ -64,8 +68,9 @@ const getPublicVendorWebsite = asyncHandler(async (req, res) => {
 
     const vendorId = vendor.id;
 
-    const [sliders, portfolioItems, gallery, testimonials, plans, socialLinks, pages] = await Promise.all([
+    const [sliders, heroSection, portfolioItems, gallery, testimonials, plans, socialLinks, pages] = await Promise.all([
         VendorSlider.findAll({ where: { vendor_id: vendorId, status: 'published', is_active: 1 }, order: [['id', 'ASC']] }),
+        VendorHeroSection.findOne({ where: { vendor_id: vendorId, is_active: 1 } }),
         VendorPortfolioItem.findAll({ where: { vendor_id: vendorId }, order: [['createdAt', 'DESC']] }),
         VendorGallery.findAll({ where: { vendor_id: vendorId, is_active: 1 }, order: [['createdAt', 'DESC']] }),
         VendorTestimonial.findAll({ where: { vendor_id: vendorId, is_active: 1 }, order: [['createdAt', 'DESC']] }),
@@ -124,14 +129,15 @@ const getPublicVendorWebsite = asyncHandler(async (req, res) => {
                 : (palette_defaults?.[k] || theme_defaults[k] || null);
         }
 
-        if (theme?.home_blocks) {
-            const raw = safeParseArray(theme.home_blocks);
-            home_blocks = raw.map(b => ({
-                block_type: b.block_type,
-                variant:    b.variant || 'variant_1',
-                is_visible: b.is_visible !== false,
-            }));
-        }
+        const vendorCustomBlocks = safeParseArray(vendor.home_blocks);
+        const raw = vendorCustomBlocks.length > 0
+            ? vendorCustomBlocks
+            : safeParseArray(theme?.home_blocks);
+        home_blocks = raw.map(b => ({
+            block_type: b.block_type,
+            variant:    b.variant || 'variant_1',
+            is_visible: b.is_visible !== false,
+        }));
     }
 
     ApiResponse.success(res, {
@@ -140,6 +146,7 @@ const getPublicVendorWebsite = asyncHandler(async (req, res) => {
         home_blocks,
         colors,
         sliders,
+        heroSection,
         portfolio: {
             clients:  portfolioItems.filter(p => p.type === 'client'),
             sponsors: portfolioItems.filter(p => p.type === 'sponsor'),
@@ -162,49 +169,30 @@ const generateClientId = () => {
 const registerPublicVendorClient = asyncHandler(async (req, res) => {
     const { slug } = req.params;
     const {
-        name, email, mobile, address, country, state, district, city, locality, pincode,
+        name, email, mobile, password, address, country, state, district, city, locality, pincode,
         subscribe_newsletter: subscribeNewsletter,
     } = req.body;
 
     const normalizedEmail = normalizeEmail(email);
 
-    if (!name || !normalizedEmail || !mobile) {
-        throw ApiError.badRequest('Name, email, and mobile are required');
+    if (!name || !normalizedEmail || !mobile || !password) {
+        throw ApiError.badRequest('Name, email, mobile, and password are required');
     }
+    validateClientPassword(password);
 
     const vendor = await findActiveVendorBySlug(slug, ['id', 'company_name', 'company_id']);
     if (!vendor) throw ApiError.notFound('Vendor not found');
 
     const existing = await VendorClient.findOne({
-        where: {
-            vendor_id: vendor.id,
-            email: normalizedEmail,
-        },
+        where: { email: normalizedEmail },
+        paranoid: false,
     });
 
     const wantsNewsletter = subscribeNewsletter === true || subscribeNewsletter === 1 || subscribeNewsletter === '1' || subscribeNewsletter === 'true';
     const clientType = wantsNewsletter ? 'subscribed' : 'unsubscribed';
 
     if (existing) {
-        await existing.update({
-            name,
-            mobile,
-            address: address || null,
-            country: country || null,
-            state: state || null,
-            district: district || null,
-            city: city || null,
-            locality: locality || null,
-            pincode: pincode || null,
-            client_type: clientType,
-            registration_type: existing.registration_type || 'guest',
-            login_access: 1,
-            is_active: 1,
-        });
-
-        return ApiResponse.success(res, existing, wantsNewsletter
-            ? 'Existing client updated and subscribed successfully'
-            : 'Existing client updated successfully');
+        throw ApiError.conflict('This email is already registered.');
     }
 
     const client = await VendorClient.create({
@@ -214,6 +202,7 @@ const registerPublicVendorClient = asyncHandler(async (req, res) => {
         name,
         email: normalizedEmail,
         mobile,
+        password,
         address: address || null,
         country: country || null,
         state: state || null,
@@ -234,12 +223,12 @@ const registerPublicVendorClient = asyncHandler(async (req, res) => {
 
 const loginPublicVendorClient = asyncHandler(async (req, res) => {
     const { slug } = req.params;
-    const { email, mobile } = req.body;
+    const { email, password } = req.body;
 
     const normalizedEmail = normalizeEmail(email);
 
-    if (!normalizedEmail || !mobile) {
-        throw ApiError.badRequest('Email and mobile are required');
+    if (!normalizedEmail || !password) {
+        throw ApiError.badRequest('Email and password are required');
     }
 
     const vendor = await findActiveVendorBySlug(slug, ['id', 'company_name']);
@@ -249,15 +238,19 @@ const loginPublicVendorClient = asyncHandler(async (req, res) => {
         where: {
             vendor_id: vendor.id,
             email: normalizedEmail,
-            mobile,
         },
+        attributes: { include: ['password'] },
     });
 
-    if (!client) throw ApiError.unauthorized('Invalid email or mobile');
+    if (!client) throw ApiError.unauthorized('Invalid email or password');
+    const isValid = await client.validatePassword(password);
+    if (!isValid) throw ApiError.unauthorized('Invalid email or password');
     if (client.is_active !== 1) throw ApiError.forbidden('Your account is inactive. Please contact the vendor.');
     if (client.login_access !== 1) throw ApiError.forbidden('Login access is not enabled. Please contact the vendor.');
 
-    ApiResponse.success(res, client, 'Login successful');
+    ApiResponse.success(res, {
+        handoff_token: generateClientHandoffToken(client),
+    }, 'Login successful');
 });
 
 const subscribePublicVendorNewsletter = asyncHandler(async (req, res) => {
@@ -271,8 +264,14 @@ const subscribePublicVendorNewsletter = asyncHandler(async (req, res) => {
     const vendor = await findActiveVendorBySlug(slug, ['id', 'company_name', 'company_id']);
     if (!vendor) throw ApiError.notFound('Vendor not found');
 
-    const existing = await VendorClient.findOne({ where: { vendor_id: vendor.id, email: normalizedEmail } });
+    const existing = await VendorClient.findOne({
+        where: { email: normalizedEmail },
+        paranoid: false,
+    });
     if (existing) {
+        if (existing.vendor_id !== vendor.id || existing.deletedAt) {
+            throw ApiError.conflict('This email is already registered.');
+        }
         await existing.update({
             client_type: 'subscribed',
             registration_type: existing.registration_type || 'guest',

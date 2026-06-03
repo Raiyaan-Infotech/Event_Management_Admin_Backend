@@ -27,6 +27,7 @@ db.sequelize = sequelize;
 // Auth & Session
 db.Session = require('./Session')(sequelize, Sequelize);
 db.RefreshToken = require('./RefreshToken')(sequelize, Sequelize);
+db.ClientRefreshToken = require('./ClientRefreshToken')(sequelize, Sequelize);
 
 // Infrastructure
 db.Company = require('./Company')(sequelize, Sequelize);
@@ -87,6 +88,7 @@ db.Payment = require('./Payment')(sequelize, Sequelize);
 db.Currency = require('./Currency')(sequelize, Sequelize); // ✅ Add this line
 db.VendorPage = require('./vendorPage')(sequelize, Sequelize);
 db.VendorSlider = require('./VendorSlider')(sequelize, Sequelize);
+db.VendorHeroSection = require('./VendorHeroSection')(sequelize, Sequelize);
 db.VendorPortfolioItem = require('./VendorPortfolioItem')(sequelize, Sequelize);
 db.VendorGallery = require('./VendorGallery')(sequelize, Sequelize);
 db.VendorTestimonial = require('./VendorTestimonial')(sequelize, Sequelize);
@@ -110,6 +112,9 @@ db.VendorThemeColor = require('./VendorThemeColor')(sequelize, Sequelize);
 // Vendor Slider → Page
 db.VendorSlider.belongsTo(db.VendorPage, { foreignKey: 'page_id', as: 'page' });
 db.VendorPage.hasMany(db.VendorSlider, { foreignKey: 'page_id', as: 'sliders' });
+
+db.Vendor.hasOne(db.VendorHeroSection, { foreignKey: 'vendor_id', as: 'heroSection' });
+db.VendorHeroSection.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
 
 //Vendor gallery → Vendor
 db.Vendor.hasMany(db.VendorGallery, { foreignKey: 'vendor_id', as: 'gallery' });
@@ -224,6 +229,8 @@ db.Vendor.belongsTo(db.City,     { foreignKey: 'pincode_id',  as: 'locality' });
 db.Vendor.hasMany(db.VendorClient, { foreignKey: 'vendor_id', as: 'clients' });
 db.VendorClient.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
 db.VendorClient.belongsTo(db.Subscription, { foreignKey: 'subscription_id', as: 'subscription' });
+db.VendorClient.hasMany(db.ClientRefreshToken, { foreignKey: 'client_id', as: 'refreshTokens' });
+db.ClientRefreshToken.belongsTo(db.VendorClient, { foreignKey: 'client_id', as: 'client' });
 
 db.Vendor.hasMany(db.VendorStaff,      { foreignKey: 'vendor_id', as: 'staff' });
 db.VendorStaff.belongsTo(db.Vendor,    { foreignKey: 'vendor_id', as: 'vendor' });

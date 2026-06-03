@@ -42,6 +42,7 @@ const BLOCK_LABELS = {
     slider:            'Slider',
     simple_slider:     'Simple Slider',
     advance_slider:    'Advance Slider',
+    hero_section:      'Hero Section',
 };
 
 const labelFor = (key) => BLOCK_LABELS[key] || key;

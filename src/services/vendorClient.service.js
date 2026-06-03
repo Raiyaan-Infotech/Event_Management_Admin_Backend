@@ -4,6 +4,7 @@ const baseService = require('./base.service');
 const ApiError = require('../utils/apiError');
 const { v4: uuidv4 } = require('uuid');
 const mediaService = require('./media.service');
+const { validateClientPassword } = require('../utils/clientPasswordPolicy');
 
 const MODEL_NAME = 'VendorClient';
 const generateClientId = () => `CLI-${uuidv4().replace(/-/g, '').slice(0, 10).toUpperCase()}`;
@@ -122,12 +123,13 @@ const getById = async (id, vendorId) => {
 const create = async (data, vendorId, companyId) => {
     normalizeClientInput(data);
     validateClientInput(data);
+    if (data.password) validateClientPassword(data.password);
     // Normalize email — lowercase + trim before any check or save
 
     if (data.email) {
         // paranoid: false so soft-deleted clients are also checked — prevents email reuse
         const existing = await VendorClient.findOne({
-            where: { email: data.email, vendor_id: vendorId },
+            where: { email: data.email },
             paranoid: false,
         });
         if (existing) throw ApiError.conflict('A client with this email is already registered.');
@@ -153,8 +155,18 @@ const update = async (id, data, vendorId) => {
     if (!record) throw ApiError.notFound('Client not found');
     normalizeClientInput(data);
     validateClientInput(data, { isUpdate: true });
+    if (data.password) validateClientPassword(data.password);
 
-    // Normalize email on update too
+    if (data.email) {
+        const existing = await VendorClient.findOne({
+            where: {
+                email: data.email,
+                id: { [Op.ne]: id },
+            },
+            paranoid: false,
+        });
+        if (existing) throw ApiError.conflict('A client with this email is already registered.');
+    }
 
     const safeData = {};
     for (const field of CLIENT_EDITABLE_FIELDS) {

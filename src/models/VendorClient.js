@@ -10,7 +10,7 @@ module.exports = (sequelize) => {
         client_id:        { type: DataTypes.STRING(50),  allowNull: true },
         name:             { type: DataTypes.STRING(200), allowNull: false },
         mobile:           { type: DataTypes.STRING(20),  allowNull: false },
-        email:            { type: DataTypes.STRING(255), allowNull: false },
+        email:            { type: DataTypes.STRING(255), allowNull: false, unique: true },
         password:         { type: DataTypes.STRING(255), allowNull: true },
         profile_pic:      { type: DataTypes.TEXT('long'), allowNull: true },
         login_access:     { type: DataTypes.TINYINT, defaultValue: 0 },
