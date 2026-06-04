@@ -59,8 +59,6 @@ const getPublicVendorWebsite = asyncHandler(async (req, res) => {
 
     return ApiResponse.success(res, {
         vendor,
-        theme_id: null,
-        home_blocks: [],
         colors: null,
         sliders: [],
         heroSection: null,

@@ -272,6 +272,10 @@ const seedPlugins = async (companyId) => {
 // ─── Get all plugins (grouped by category) ───────────────────────────────────
 
 const getAll = async (companyId) => {
+    if (companyId) {
+        await seedPlugins(companyId);
+    }
+
     const plugins = await Plugin.findAll({
         where: { company_id: companyId },
         order: [['category', 'ASC'], ['name', 'ASC']],
@@ -301,6 +305,10 @@ const getAll = async (companyId) => {
 // ─── Get single plugin by slug ────────────────────────────────────────────────
 
 const getBySlug = async (slug, companyId) => {
+    if (companyId) {
+        await seedPlugins(companyId);
+    }
+
     const plugin = await Plugin.findOne({
         where: { slug, company_id: companyId },
     });
@@ -329,6 +337,10 @@ const getBySlug = async (slug, companyId) => {
 // ─── Toggle plugin active state ───────────────────────────────────────────────
 
 const toggle = async (slug, companyId, userId = null) => {
+    if (companyId) {
+        await seedPlugins(companyId);
+    }
+
     const plugin = await Plugin.findOne({
         where: { slug, company_id: companyId },
     });

@@ -346,7 +346,6 @@ CREATE TABLE IF NOT EXISTS `email_templates` (
   `name`            VARCHAR(100) NOT NULL,
   `slug`            VARCHAR(100) NOT NULL UNIQUE,
   `company_id`      INT          DEFAULT NULL,
-  `type`            ENUM('header','footer','template') NOT NULL DEFAULT 'template',
   `subject`         VARCHAR(255) DEFAULT NULL,
   `body`            LONGTEXT     DEFAULT NULL,
   `variables`       JSON         DEFAULT NULL,
@@ -599,55 +598,6 @@ CREATE TABLE IF NOT EXISTS `faqs` (
   KEY `idx_faqs_category` (`faq_category_id`),
   KEY `idx_faqs_active` (`is_active`, `deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-
-CREATE TABLE IF NOT EXISTS `color_palettes` (
-  `id`               INT          NOT NULL AUTO_INCREMENT,
-  `company_id`       INT          DEFAULT NULL,
-  `name`             VARCHAR(255) NOT NULL,
-  `primary_color`    VARCHAR(50)  DEFAULT NULL,
-  `secondary_color`  VARCHAR(50)  DEFAULT NULL,
-  `header_color`     VARCHAR(50)  DEFAULT NULL,
-  `footer_color`     VARCHAR(50)  DEFAULT NULL,
-  `text_color`       VARCHAR(50)  DEFAULT NULL,
-  `hover_color`      VARCHAR(50)  DEFAULT NULL,
-  `is_active`        TINYINT      NOT NULL DEFAULT 1 COMMENT '0=inactive,1=active',
-  `created_by`       INT          DEFAULT NULL,
-  `updated_by`       INT          DEFAULT NULL,
-  `created_at`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `deleted_at`       DATETIME     DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  KEY `idx_color_palettes_company` (`company_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS `themes` (
-  `id`             INT          NOT NULL AUTO_INCREMENT,
-  `company_id`     INT          DEFAULT NULL,
-  `palette_id`     INT          DEFAULT NULL COMMENT 'FK to color_palettes — tracks which palette was applied',
-  `name`           VARCHAR(255) NOT NULL,
-  `plans`          JSON         DEFAULT NULL,
-  `header_color`   VARCHAR(50)  DEFAULT NULL,
-  `footer_color`   VARCHAR(50)  DEFAULT NULL,
-  `primary_color`  VARCHAR(50)  DEFAULT NULL,
-  `secondary_color`VARCHAR(50)  DEFAULT NULL,
-  `hover_color`    VARCHAR(50)  DEFAULT NULL,
-  `text_color`     VARCHAR(50)  DEFAULT NULL,
-  `preview_image`  VARCHAR(500) DEFAULT NULL,
-  `home_blocks`    JSON         DEFAULT NULL,
-  `is_active`      TINYINT      NOT NULL DEFAULT 1 COMMENT '0=inactive,1=active',
-  `created_by`     INT          DEFAULT NULL,
-  `updated_by`     INT          DEFAULT NULL,
-  `created_at`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `deleted_at`     DATETIME     DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  KEY `idx_themes_company` (`company_id`),
-  KEY `idx_themes_palette` (`palette_id`),
-  CONSTRAINT `fk_themes_palette` FOREIGN KEY (`palette_id`) REFERENCES `color_palettes` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-
 INSERT INTO `languages` (`name`, `code`, `native_name`, `direction`, `is_default`, `is_active`) VALUES
   ('English', 'en', 'English', 'ltr', 1, 1)
 ON DUPLICATE KEY UPDATE `is_default` = 1;
@@ -719,20 +669,7 @@ INSERT INTO `modules` (`name`, `slug`, `description`, `company_id`, `vendor_id`,
   ('Payment',             'payment',            'Payment management',               NULL, NULL, 1),
   ('Settings',            'settings',           'Payment settings, configuration, currency, timezone, activity log', NULL, NULL, 1),
   ('Help',                'help',               'Help and support',                 NULL, NULL, 1),
-  ('Website Management',  'website_management', 'Website management',               NULL, NULL, 1),
-  ('About Company',       'about',              'About company section',            NULL, NULL, 1),
-  ('Pages',               'pages',              'Website pages management',         NULL, NULL, 1),
-  ('Menu',                'menu',               'Website navigation menu',          NULL, NULL, 1),
-  ('Home',                'home',               'Home page section',                NULL, NULL, 1),
-  ('Home Slider',         'home_slider',        'Home slider management',           NULL, NULL, 1),
-  ('Gallery',             'gallery',            'Gallery management',               NULL, NULL, 1),
-  ('Portfolio',           'portfolio',          'Portfolio management',             NULL, NULL, 1),
-  ('Events Section',      'events_section',     'Website events section',           NULL, NULL, 1),
-  ('Subscription',        'subscription',       'Subscription section',             NULL, NULL, 1),
-  ('Testimonial',         'testimonial',        'Testimonials management',          NULL, NULL, 1),
-  ('Contact Us',          'contact_us',         'Contact us section',              NULL, NULL, 1),
-  ('Footer',              'footer',             'Website footer management',        NULL, NULL, 1),
-  ('Themes',              'themes',             'Theme and styling management',     NULL, NULL, 1)
+  ('Subscription',        'subscription',       'Subscription section',             NULL, NULL, 1)
 ON DUPLICATE KEY UPDATE `is_active` = 1;
 
 
@@ -777,57 +714,9 @@ INSERT INTO `permissions` (`name`, `slug`, `module`, `company_id`, `vendor_id`, 
   ('Edit Settings',         'settings.edit',           'settings',           NULL, NULL, 'Edit settings',               1),
   -- Help
   ('View Help',             'help.view',               'help',               NULL, NULL, 'View help',                   1),
-  -- About Company
-  ('View About Company',        'about.view',              'about',          NULL, NULL, 'View about company section',       1),
-  ('Edit About Company',        'about.edit',              'about',          NULL, NULL, 'Edit about company section',       1),
-  -- Pages
-  ('View Pages',                'pages.view',              'pages',          NULL, NULL, 'View website pages',               1),
-  ('Create Page',               'pages.create',            'pages',          NULL, NULL, 'Create a new website page',        1),
-  ('Edit Page',                 'pages.edit',              'pages',          NULL, NULL, 'Edit an existing website page',    1),
-  ('Delete Page',               'pages.delete',            'pages',          NULL, NULL, 'Delete a website page',            1),
-  -- Menu
-  ('View Menu',                 'menu.view',               'menu',           NULL, NULL, 'View website navigation menu',     1),
-  ('Edit Menu',                 'menu.edit',               'menu',           NULL, NULL, 'Edit website navigation menu',     1),
-  -- Home
-  ('View Home',                 'home.view',               'home',           NULL, NULL, 'View home page section',           1),
-  ('Edit Home',                 'home.edit',               'home',           NULL, NULL, 'Edit home page section',           1),
-  -- Home Slider
-  ('View Home Slider',          'home_slider.view',        'home_slider',    NULL, NULL, 'View home slider items',           1),
-  ('Create Home Slider',        'home_slider.create',      'home_slider',    NULL, NULL, 'Add a home slider item',           1),
-  ('Edit Home Slider',          'home_slider.edit',        'home_slider',    NULL, NULL, 'Edit a home slider item',          1),
-  ('Delete Home Slider',        'home_slider.delete',      'home_slider',    NULL, NULL, 'Delete a home slider item',        1),
-  -- Gallery
-  ('View Gallery',              'gallery.view',            'gallery',        NULL, NULL, 'View gallery items',               1),
-  ('Create Gallery Item',       'gallery.create',          'gallery',        NULL, NULL, 'Add a gallery item',               1),
-  ('Edit Gallery Item',         'gallery.edit',            'gallery',        NULL, NULL, 'Edit a gallery item',              1),
-  ('Delete Gallery Item',       'gallery.delete',          'gallery',        NULL, NULL, 'Delete a gallery item',            1),
-  -- Portfolio
-  ('View Portfolio',            'portfolio.view',          'portfolio',      NULL, NULL, 'View portfolio items',             1),
-  ('Create Portfolio Item',     'portfolio.create',        'portfolio',      NULL, NULL, 'Add a portfolio item',             1),
-  ('Edit Portfolio Item',       'portfolio.edit',          'portfolio',      NULL, NULL, 'Edit a portfolio item',            1),
-  ('Delete Portfolio Item',     'portfolio.delete',        'portfolio',      NULL, NULL, 'Delete a portfolio item',          1),
-  -- Events Section
-  ('View Events Section',       'events_section.view',     'events_section', NULL, NULL, 'View website events section',      1),
-  ('Edit Events Section',       'events_section.edit',     'events_section', NULL, NULL, 'Edit website events section',      1),
   -- Subscription
   ('View Subscription',         'subscription.view',       'subscription',   NULL, NULL, 'View subscription section',        1),
-  ('Edit Subscription',         'subscription.edit',       'subscription',   NULL, NULL, 'Edit subscription section',        1),
-  -- Testimonial
-  ('View Testimonials',         'testimonial.view',        'testimonial',    NULL, NULL, 'View testimonials',                1),
-  ('Create Testimonial',        'testimonial.create',      'testimonial',    NULL, NULL, 'Add a testimonial',                1),
-  ('Edit Testimonial',          'testimonial.edit',        'testimonial',    NULL, NULL, 'Edit a testimonial',               1),
-  ('Delete Testimonial',        'testimonial.delete',      'testimonial',    NULL, NULL, 'Delete a testimonial',             1),
-  -- Contact Us
-  ('View Contact Us',           'contact_us.view',         'contact_us',     NULL, NULL, 'View contact us section',          1),
-  ('Edit Contact Us',           'contact_us.edit',         'contact_us',     NULL, NULL, 'Edit contact us section',          1),
-  -- Footer
-  ('View Footer',               'footer.view',             'footer',         NULL, NULL, 'View website footer',              1),
-  ('Edit Footer',               'footer.edit',             'footer',         NULL, NULL, 'Edit website footer',              1),
-  -- Themes
-  ('View Themes',               'themes.view',             'themes',         NULL, NULL, 'View application themes',              1),
-  ('Create Theme',              'themes.create',           'themes',         NULL, NULL, 'Create a new theme',                   1),
-  ('Edit Theme',                'themes.edit',             'themes',         NULL, NULL, 'Edit an existing theme',               1),
-  ('Delete Theme',              'themes.delete',           'themes',         NULL, NULL, 'Delete a theme',                       1)
+  ('Edit Subscription',         'subscription.edit',       'subscription',   NULL, NULL, 'Edit subscription section',        1)
 ON DUPLICATE KEY UPDATE `is_active` = 1;
 
 
@@ -1149,9 +1038,6 @@ INSERT INTO `translation_keys` (`key`, `default_value`, `group`, `company_id`) V
   ('roles.edit',          'Edit Role',         'roles', 1),
   ('roles.manage_roles',  'Manage Roles',      'roles', 1),
   -- appearance
-  ('appearance.menu',          'Menu',           'appearance', 1),
-  ('appearance.theme',         'Theme',          'appearance', 1),
-  ('appearance.theme_options', 'Theme Options',  'appearance', 1),
   -- common (missing)
   ('common.of',                'of',             'common', 1),
   ('common.are_you_sure',      'Are you sure?',  'common', 1),
@@ -1416,12 +1302,6 @@ CREATE TABLE IF NOT EXISTS `vendors` (
   `membership`      VARCHAR(100) NOT NULL DEFAULT 'basic',
   `copywrite`       VARCHAR(255) NULL,
   `poweredby`            VARCHAR(255) NULL,
-  `newsletter_status`    TINYINT      NOT NULL DEFAULT 0 COMMENT '0=disabled,1=enabled',
-  `footer_links`         JSON NULL,
-  `nav_menu`        JSON NULL COMMENT 'Fixed 4-item nav: home/about/contact/pages types',
-  `theme_id`        INT NULL COMMENT 'FK to themes — vendor active theme selection',
-  `palette_id`      INT NULL COMMENT 'FK to color_palettes — vendor selected palette',
-  `home_blocks`     JSON NULL COMMENT 'Vendor custom block order/visibility — overrides theme defaults',
   `status`          ENUM('active','inactive') NOT NULL DEFAULT 'active',
 
   -- Bank Info
@@ -1444,16 +1324,6 @@ CREATE TABLE IF NOT EXISTS `vendors` (
   UNIQUE KEY `vendors_email_unique` (`email`),
   INDEX `vendors_company_id` (`company_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- Default nav_menu for any vendor whose nav_menu is NULL (fresh installs / seeding)
-UPDATE `vendors`
-SET `nav_menu` = '[
-  {"label":"Home",       "type":"home",    "page_ids":[],"children":[],"order":0},
-  {"label":"About Us",   "type":"about",   "page_ids":[],"children":[],"order":1},
-  {"label":"Contact Us", "type":"contact", "page_ids":[],"children":[],"order":2},
-  {"label":"Pages",      "type":"pages",   "page_ids":[],"children":[],"order":3}
-]'
-WHERE `nav_menu` IS NULL AND `deleted_at` IS NULL;
 
 -- Vendor Staff
 CREATE TABLE IF NOT EXISTS `vendor_staff` (
@@ -1550,142 +1420,6 @@ CREATE TABLE IF NOT EXISTS `vendor_departments` (
   PRIMARY KEY (`id`),
   KEY `idx_vendor_departments_vendor` (`vendor_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- ─── Vendor Pages ─────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS `vendor_pages` (
-  `id`          INT          NOT NULL AUTO_INCREMENT,
-  `name`        VARCHAR(255) NOT NULL,
-  `description` TEXT         DEFAULT NULL,
-  `content`     LONGTEXT     DEFAULT NULL,
-  `is_active`   TINYINT(1)   NOT NULL DEFAULT 1,
-  `vendor_id`   INT          DEFAULT NULL,
-  `company_id`  INT          DEFAULT NULL,
-  `created_by`  INT          DEFAULT NULL,
-  `updated_by`  INT          DEFAULT NULL,
-  `deleted_by`  INT          DEFAULT NULL,
-  `created_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `deleted_at`  DATETIME     DEFAULT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS `vendor_sliders` (
-  `id`                BIGINT       NOT NULL AUTO_INCREMENT,
-  `type`              ENUM('basic','advanced') NOT NULL DEFAULT 'basic',
-  `title`             VARCHAR(255) NOT NULL,
-  `image_path`        VARCHAR(500) NOT NULL,
-  `button_label`      VARCHAR(100) NOT NULL,
-  `page_id`           INT          DEFAULT NULL,
-  `button_color`      VARCHAR(7)   DEFAULT '#3B82F6',
-  `status`            ENUM('published','draft') NOT NULL DEFAULT 'draft',
-  `is_active`         TINYINT(1)   NOT NULL DEFAULT 0,
-  `description`       TEXT         DEFAULT NULL,
-  `title_color`       VARCHAR(7)   DEFAULT '#FFFFFF',
-  `description_color` VARCHAR(7)   DEFAULT '#E2E8F0',
-  `overlay_opacity`   TINYINT      DEFAULT 40,
-  `image_blur`        TINYINT      DEFAULT 0,
-  `image_brightness`  TINYINT      DEFAULT 100,
-  `content_alignment` ENUM('left','center','right') DEFAULT 'center',
-  `vendor_id`         INT          DEFAULT NULL,
-  `company_id`        INT          DEFAULT NULL,
-  `created_by`        INT          DEFAULT NULL,
-  `updated_by`        INT          DEFAULT NULL,
-  `deleted_by`        INT          DEFAULT NULL,
-  `created_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `deleted_at`        DATETIME     DEFAULT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS `vendor_hero_sections` (
-  `id`           BIGINT       NOT NULL AUTO_INCREMENT,
-  `vendor_id`    INT          NOT NULL,
-  `company_id`   INT          DEFAULT NULL,
-  `title`        VARCHAR(255) DEFAULT NULL,
-  `heading`      VARCHAR(255) DEFAULT NULL,
-  `description`  TEXT         DEFAULT NULL,
-  `button`       VARCHAR(100) DEFAULT NULL,
-  `button2`      VARCHAR(100) DEFAULT NULL,
-  `image_url`    VARCHAR(500) DEFAULT NULL,
-  `bg_image_url` VARCHAR(500) DEFAULT NULL,
-  `page_id`      INT          DEFAULT NULL,
-  `page_id2`     INT          DEFAULT NULL,
-  `variant`      VARCHAR(50)  NOT NULL DEFAULT 'variant_1',
-  `stat1_val`    VARCHAR(100) DEFAULT NULL,
-  `stat1_lbl`    VARCHAR(150) DEFAULT NULL,
-  `stat1_sub`    VARCHAR(150) DEFAULT NULL,
-  `stat2_val`    VARCHAR(100) DEFAULT NULL,
-  `stat2_lbl`    VARCHAR(150) DEFAULT NULL,
-  `stat2_sub`    VARCHAR(150) DEFAULT NULL,
-  `stat3_val`    VARCHAR(100) DEFAULT NULL,
-  `stat3_lbl`    VARCHAR(150) DEFAULT NULL,
-  `stat3_sub`    VARCHAR(150) DEFAULT NULL,
-  `is_active`    TINYINT(1)   NOT NULL DEFAULT 1,
-  `created_by`   INT          DEFAULT NULL,
-  `updated_by`   INT          DEFAULT NULL,
-  `deleted_by`   INT          DEFAULT NULL,
-  `created_at`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `deleted_at`   DATETIME     DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `vendor_hero_sections_vendor_unique` (`vendor_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS `vendor_portfolio_items` (
-  `id`         BIGINT       NOT NULL AUTO_INCREMENT,
-  `type`       ENUM('client','sponsor','event') NOT NULL,
-  `image_path` VARCHAR(500) DEFAULT NULL,
-  `label`      VARCHAR(255) DEFAULT NULL,
-  `value`      VARCHAR(255) DEFAULT NULL,
-  `sort_order` INT          DEFAULT 0,
-  `is_active`  TINYINT(1)   DEFAULT 1,
-  `vendor_id`  INT          DEFAULT NULL,
-  `company_id` INT          DEFAULT NULL,
-  `created_by` INT          DEFAULT NULL,
-  `deleted_by` INT          DEFAULT NULL,
-  `createdAt`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updatedAt`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `deletedAt`  DATETIME     DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  KEY `idx_vendor_portfolio_items_vendor_type` (`vendor_id`, `type`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS `vendor_gallery` (
-  `id`          BIGINT       NOT NULL AUTO_INCREMENT,
-  `event_name`  VARCHAR(255) NOT NULL,
-  `city`        VARCHAR(255) NOT NULL,
-  `images`      JSON         DEFAULT NULL,
-  `img_view`    ENUM('public','private') NOT NULL DEFAULT 'public',
-  `is_active`   TINYINT(1)   DEFAULT 1,
-  `vendor_id`   INT          DEFAULT NULL,
-  `company_id`  INT          DEFAULT NULL,
-  `created_by`  INT          DEFAULT NULL,
-  `deleted_by`  INT          DEFAULT NULL,
-  `createdAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updatedAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `deletedAt`   DATETIME     DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  KEY `idx_vendor_gallery_vendor` (`vendor_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS `vendor_testimonials` (
-  `id`                BIGINT        NOT NULL AUTO_INCREMENT,
-  `customer_name`     VARCHAR(255)  NOT NULL,
-  `customer_portrait` VARCHAR(500)  DEFAULT NULL,
-  `event_name`        VARCHAR(255)  NOT NULL,
-  `client_feedback`   TEXT          DEFAULT NULL,
-  `is_active`         TINYINT(1)    DEFAULT 1,
-  `vendor_id`         INT           DEFAULT NULL,
-  `company_id`        INT           DEFAULT NULL,
-  `created_by`        INT           DEFAULT NULL,
-  `deleted_by`        INT           DEFAULT NULL,
-  `createdAt`         DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updatedAt`         DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `deletedAt`         DATETIME      DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  KEY `idx_vendor_testimonials_vendor` (`vendor_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 CREATE TABLE IF NOT EXISTS `vendor_email_categories` (
   `id`          INT          NOT NULL AUTO_INCREMENT PRIMARY KEY,
   `vendor_id`   INT          NOT NULL,
@@ -1774,46 +1508,6 @@ CREATE TABLE IF NOT EXISTS `vendor_newsletter_sent_logs` (
   KEY `idx_status` (`status`),
   FOREIGN KEY (`vendor_id`) REFERENCES `vendors`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- Vendor Social Links
-CREATE TABLE IF NOT EXISTS `vendor_social_links` (
-  `id`         INT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `vendor_id`  INT UNSIGNED NOT NULL,
-  `icon`       VARCHAR(200) NULL,
-  `icon_color` VARCHAR(20)  NULL,
-  `label`      VARCHAR(100) NOT NULL,
-  `url`        VARCHAR(500) NOT NULL,
-  `is_active`  TINYINT(1)   NOT NULL DEFAULT 1,
-  `sort_order` INT          NOT NULL DEFAULT 0,
-  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `deleted_at` DATETIME     NULL DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  KEY `idx_vendor_social_links_vendor` (`vendor_id`),
-  FOREIGN KEY (`vendor_id`) REFERENCES `vendors`(`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- Vendor Theme Colors — per (vendor, theme) color overrides
-CREATE TABLE IF NOT EXISTS `vendor_theme_colors` (
-  `id`              INT NOT NULL AUTO_INCREMENT,
-  `vendor_id`       INT UNSIGNED NOT NULL,
-  `theme_id`        INT NOT NULL,
-  `primary_color`   VARCHAR(50) DEFAULT NULL,
-  `secondary_color` VARCHAR(50) DEFAULT NULL,
-  `header_color`    VARCHAR(50) DEFAULT NULL,
-  `footer_color`    VARCHAR(50) DEFAULT NULL,
-  `text_color`      VARCHAR(50) DEFAULT NULL,
-  `hover_color`     VARCHAR(50) DEFAULT NULL,
-  `is_active`       TINYINT NOT NULL DEFAULT 0 COMMENT '0=palette active, 1=custom override active',
-  `created_at`      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at`      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_vendor_theme` (`vendor_id`, `theme_id`),
-  KEY `idx_vtc_theme` (`theme_id`),
-  CONSTRAINT `fk_vtc_vendor` FOREIGN KEY (`vendor_id`) REFERENCES `vendors`(`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_vtc_theme`  FOREIGN KEY (`theme_id`)  REFERENCES `themes`(`id`)  ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 INSERT IGNORE INTO `modules` (`name`, `slug`, `description`, `company_id`, `is_active`) VALUES
 ('Vendors', 'vendors', 'Manage vendor accounts, company info and bank details', 1, 1);
 
@@ -2122,7 +1816,6 @@ WHERE tk.`group` = 'subscriptions' OR tk.`key` = 'nav.subscriptions'
 ON DUPLICATE KEY UPDATE `value` = VALUES(`value`), `status` = 'reviewed';
 
 -- ============================================================
--- Menus translation keys
 -- ============================================================
 INSERT INTO `translation_keys` (`key`, `default_value`, `group`, `company_id`) VALUES
   ('nav.menus',                   'Menus',                                                                      'nav',   1),
@@ -2194,19 +1887,7 @@ INSERT IGNORE INTO modules (name, slug, description, company_id, vendor_id, is_a
 ('Payment',             'payment',              'Payment management',               NULL, NULL, 1, NOW(), NOW()),
 ('Settings',            'settings',             'Payment settings, configuration, currency, timezone, activity log', NULL, NULL, 1, NOW(), NOW()),
 ('Help',                'help',                 'Help and support',                 NULL, NULL, 1, NOW(), NOW()),
-('Website Management',  'website_management',   'Website management',               NULL, NULL, 1, NOW(), NOW()),
-('About Company',       'about',                'About company section',            NULL, NULL, 1, NOW(), NOW()),
-('Pages',               'pages',                'Website pages management',         NULL, NULL, 1, NOW(), NOW()),
-('Menu',                'menu',                 'Website navigation menu',          NULL, NULL, 1, NOW(), NOW()),
-('Home',                'home',                 'Home page section',                NULL, NULL, 1, NOW(), NOW()),
-('Home Slider',         'home_slider',          'Home slider management',           NULL, NULL, 1, NOW(), NOW()),
-('Gallery',             'gallery',              'Gallery management',               NULL, NULL, 1, NOW(), NOW()),
-('Portfolio',           'portfolio',            'Portfolio management',             NULL, NULL, 1, NOW(), NOW()),
-('Events Section',      'events_section',       'Website events section',           NULL, NULL, 1, NOW(), NOW()),
 ('Subscription',        'subscription',         'Subscription section',             NULL, NULL, 1, NOW(), NOW()),
-('Testimonial',         'testimonial',          'Testimonials management',          NULL, NULL, 1, NOW(), NOW()),
-('Contact Us',          'contact_us',           'Contact us section',              NULL, NULL, 1, NOW(), NOW()),
-('Footer',              'footer',               'Website footer management',        NULL, NULL, 1, NOW(), NOW());
 
 -- STEP 4: Insert permissions for each module
 INSERT IGNORE INTO permissions (name, slug, module_id, module, description, company_id, vendor_id, is_active, created_at, updated_at) VALUES
@@ -2249,208 +1930,9 @@ INSERT IGNORE INTO permissions (name, slug, module_id, module, description, comp
 ('Edit Settings',         'settings.edit',           (SELECT id FROM modules WHERE slug='settings' LIMIT 1),           'settings',           'Edit settings',               NULL, NULL, 1, NOW(), NOW()),
 -- Help
 ('View Help',             'help.view',               (SELECT id FROM modules WHERE slug='help' LIMIT 1),               'help',               'View help',                   NULL, NULL, 1, NOW(), NOW()),
--- About Company
-('View About Company',        'about.view',              (SELECT id FROM modules WHERE slug='about'          LIMIT 1), 'about',          'View about company section',       NULL, NULL, 1, NOW(), NOW()),
-('Edit About Company',        'about.edit',              (SELECT id FROM modules WHERE slug='about'          LIMIT 1), 'about',          'Edit about company section',       NULL, NULL, 1, NOW(), NOW()),
--- Pages
-('View Pages',                'pages.view',              (SELECT id FROM modules WHERE slug='pages'          LIMIT 1), 'pages',          'View website pages',               NULL, NULL, 1, NOW(), NOW()),
-('Create Page',               'pages.create',            (SELECT id FROM modules WHERE slug='pages'          LIMIT 1), 'pages',          'Create a new website page',        NULL, NULL, 1, NOW(), NOW()),
-('Edit Page',                 'pages.edit',              (SELECT id FROM modules WHERE slug='pages'          LIMIT 1), 'pages',          'Edit an existing website page',    NULL, NULL, 1, NOW(), NOW()),
-('Delete Page',               'pages.delete',            (SELECT id FROM modules WHERE slug='pages'          LIMIT 1), 'pages',          'Delete a website page',            NULL, NULL, 1, NOW(), NOW()),
--- Menu
-('View Menu',                 'menu.view',               (SELECT id FROM modules WHERE slug='menu'           LIMIT 1), 'menu',           'View website navigation menu',     NULL, NULL, 1, NOW(), NOW()),
-('Edit Menu',                 'menu.edit',               (SELECT id FROM modules WHERE slug='menu'           LIMIT 1), 'menu',           'Edit website navigation menu',     NULL, NULL, 1, NOW(), NOW()),
--- Home
-('View Home',                 'home.view',               (SELECT id FROM modules WHERE slug='home'           LIMIT 1), 'home',           'View home page section',           NULL, NULL, 1, NOW(), NOW()),
-('Edit Home',                 'home.edit',               (SELECT id FROM modules WHERE slug='home'           LIMIT 1), 'home',           'Edit home page section',           NULL, NULL, 1, NOW(), NOW()),
--- Home Slider
-('View Home Slider',          'home_slider.view',        (SELECT id FROM modules WHERE slug='home_slider'    LIMIT 1), 'home_slider',    'View home slider items',           NULL, NULL, 1, NOW(), NOW()),
-('Create Home Slider',        'home_slider.create',      (SELECT id FROM modules WHERE slug='home_slider'    LIMIT 1), 'home_slider',    'Add a home slider item',           NULL, NULL, 1, NOW(), NOW()),
-('Edit Home Slider',          'home_slider.edit',        (SELECT id FROM modules WHERE slug='home_slider'    LIMIT 1), 'home_slider',    'Edit a home slider item',          NULL, NULL, 1, NOW(), NOW()),
-('Delete Home Slider',        'home_slider.delete',      (SELECT id FROM modules WHERE slug='home_slider'    LIMIT 1), 'home_slider',    'Delete a home slider item',        NULL, NULL, 1, NOW(), NOW()),
--- Gallery
-('View Gallery',              'gallery.view',            (SELECT id FROM modules WHERE slug='gallery'        LIMIT 1), 'gallery',        'View gallery items',               NULL, NULL, 1, NOW(), NOW()),
-('Create Gallery Item',       'gallery.create',          (SELECT id FROM modules WHERE slug='gallery'        LIMIT 1), 'gallery',        'Add a gallery item',               NULL, NULL, 1, NOW(), NOW()),
-('Edit Gallery Item',         'gallery.edit',            (SELECT id FROM modules WHERE slug='gallery'        LIMIT 1), 'gallery',        'Edit a gallery item',              NULL, NULL, 1, NOW(), NOW()),
-('Delete Gallery Item',       'gallery.delete',          (SELECT id FROM modules WHERE slug='gallery'        LIMIT 1), 'gallery',        'Delete a gallery item',            NULL, NULL, 1, NOW(), NOW()),
--- Portfolio
-('View Portfolio',            'portfolio.view',          (SELECT id FROM modules WHERE slug='portfolio'      LIMIT 1), 'portfolio',      'View portfolio items',             NULL, NULL, 1, NOW(), NOW()),
-('Create Portfolio Item',     'portfolio.create',        (SELECT id FROM modules WHERE slug='portfolio'      LIMIT 1), 'portfolio',      'Add a portfolio item',             NULL, NULL, 1, NOW(), NOW()),
-('Edit Portfolio Item',       'portfolio.edit',          (SELECT id FROM modules WHERE slug='portfolio'      LIMIT 1), 'portfolio',      'Edit a portfolio item',            NULL, NULL, 1, NOW(), NOW()),
-('Delete Portfolio Item',     'portfolio.delete',        (SELECT id FROM modules WHERE slug='portfolio'      LIMIT 1), 'portfolio',      'Delete a portfolio item',          NULL, NULL, 1, NOW(), NOW()),
--- Events Section
-('View Events Section',       'events_section.view',     (SELECT id FROM modules WHERE slug='events_section' LIMIT 1), 'events_section', 'View website events section',      NULL, NULL, 1, NOW(), NOW()),
-('Edit Events Section',       'events_section.edit',     (SELECT id FROM modules WHERE slug='events_section' LIMIT 1), 'events_section', 'Edit website events section',      NULL, NULL, 1, NOW(), NOW()),
 -- Subscription
 ('View Subscription',         'subscription.view',       (SELECT id FROM modules WHERE slug='subscription'   LIMIT 1), 'subscription',   'View subscription section',        NULL, NULL, 1, NOW(), NOW()),
 ('Edit Subscription',         'subscription.edit',       (SELECT id FROM modules WHERE slug='subscription'   LIMIT 1), 'subscription',   'Edit subscription section',        NULL, NULL, 1, NOW(), NOW()),
--- Testimonial
-('View Testimonials',         'testimonial.view',        (SELECT id FROM modules WHERE slug='testimonial'    LIMIT 1), 'testimonial',    'View testimonials',                NULL, NULL, 1, NOW(), NOW()),
-('Create Testimonial',        'testimonial.create',      (SELECT id FROM modules WHERE slug='testimonial'    LIMIT 1), 'testimonial',    'Add a testimonial',                NULL, NULL, 1, NOW(), NOW()),
-('Edit Testimonial',          'testimonial.edit',        (SELECT id FROM modules WHERE slug='testimonial'    LIMIT 1), 'testimonial',    'Edit a testimonial',               NULL, NULL, 1, NOW(), NOW()),
-('Delete Testimonial',        'testimonial.delete',      (SELECT id FROM modules WHERE slug='testimonial'    LIMIT 1), 'testimonial',    'Delete a testimonial',             NULL, NULL, 1, NOW(), NOW()),
--- Contact Us
-('View Contact Us',           'contact_us.view',         (SELECT id FROM modules WHERE slug='contact_us'     LIMIT 1), 'contact_us',     'View contact us section',          NULL, NULL, 1, NOW(), NOW()),
-('Edit Contact Us',           'contact_us.edit',         (SELECT id FROM modules WHERE slug='contact_us'     LIMIT 1), 'contact_us',     'Edit contact us section',          NULL, NULL, 1, NOW(), NOW()),
--- Footer
-('View Footer',               'footer.view',             (SELECT id FROM modules WHERE slug='footer'         LIMIT 1), 'footer',         'View website footer',              NULL, NULL, 1, NOW(), NOW()),
-('Edit Footer',               'footer.edit',             (SELECT id FROM modules WHERE slug='footer'         LIMIT 1), 'footer',         'Edit website footer',              NULL, NULL, 1, NOW(), NOW());
-
--- =============================================================================
--- UI BLOCK CATEGORIES TABLE
--- =============================================================================
-
-CREATE TABLE IF NOT EXISTS `ui_block_categories` (
-  `id`          INT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `name`        VARCHAR(255) NOT NULL,
-  `description` TEXT         NULL,
-  `is_active`   TINYINT      NOT NULL DEFAULT 1,
-  `created_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `deleted_at`  DATETIME     NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- =============================================================================
--- UI BLOCKS TABLE
--- =============================================================================
-
-CREATE TABLE IF NOT EXISTS `ui_blocks` (
-  `id`            INT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `block_type`    VARCHAR(255) NOT NULL,
-  `label`         VARCHAR(255) NOT NULL,
-  `icon`          VARCHAR(255) NULL,
-  `description`   TEXT         NULL,
-  `category_id`   INT UNSIGNED NULL,
-  `preview_image` VARCHAR(500) NULL,
-  `variants`      JSON         NULL,
-  `is_active`     TINYINT      NOT NULL DEFAULT 1,
-  `created_by`    INT          NULL,
-  `updated_by`    INT          NULL,
-  `deleted_by`    INT          NULL,
-  `created_at`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `deleted_at`    DATETIME     NULL,
-  PRIMARY KEY (`id`),
-  KEY `fk_ui_blocks_category` (`category_id`),
-  CONSTRAINT `fk_ui_blocks_category`
-    FOREIGN KEY (`category_id`) REFERENCES `ui_block_categories` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- =============================================================================
--- SEED: UI BLOCK CATEGORIES
--- =============================================================================
-
-INSERT INTO `ui_block_categories` (`id`, `name`, `description`, `is_active`, `created_at`, `updated_at`) VALUES
-  (1, 'Sliders',      'Rotating banner and image sliders',          1, NOW(), NOW()),
-  (2, 'Content',      'General content blocks like About Us',       1, NOW(), NOW()),
-  (3, 'Portfolio',    'Client, sponsor and event showcase blocks',  1, NOW(), NOW()),
-  (4, 'Media',        'Gallery and media display blocks',           1, NOW(), NOW()),
-  (5, 'Social Proof', 'Testimonials and reviews blocks',            1, NOW(), NOW()),
-  (6, 'Pricing',      'Subscription and pricing plan blocks',       1, NOW(), NOW())
-ON DUPLICATE KEY UPDATE `name` = VALUES(`name`);
-
--- =============================================================================
--- SEED: UI BLOCKS
--- =============================================================================
-
-INSERT INTO `ui_blocks` (`block_type`, `label`, `icon`, `description`, `category_id`, `variants`, `is_active`, `created_at`, `updated_at`) VALUES
-  ('simple_slider',       'Simple Slider',         'Layers',       'Basic auto-play image slider with caption support',                     1, '["Default", "Minimal", "Fullscreen"]', 1, NOW(), NOW()),
-  ('advance_slider',      'Advance Slider',         'GalleryHorizontal', 'Advanced slider with animations and multiple transition effects',   1, '["Fade", "Slide", "Zoom"]',            1, NOW(), NOW()),
-  ('about_us',            'About Us',               'Info',         'Company introduction and brief description section',                   2, '["Classic", "Split", "Centered"]',     1, NOW(), NOW()),
-  ('portfolio_clients',   'Portfolio — Clients',    'Users',        'Showcase logos and names of your key clients',                         3, '["Grid", "Carousel", "List"]',         1, NOW(), NOW()),
-  ('portfolio_sponsors',  'Portfolio — Sponsors',   'Award',        'Display sponsor logos in a grid or carousel layout',                   3, '["Grid", "Carousel"]',                 1, NOW(), NOW()),
-  ('portfolio_events',    'Portfolio — Events',     'CalendarDays', 'Highlight past events with photos and brief descriptions',             3, '["Grid", "Masonry", "List"]',          1, NOW(), NOW()),
-  ('gallery',             'Gallery',                'Image',        'Responsive image gallery with lightbox support',                       4, '["Grid", "Masonry", "Slider"]',        1, NOW(), NOW()),
-  ('testimonial',         'Testimonials',           'Quote',        'Customer and client testimonials with star ratings',                   5, '["Cards", "Carousel", "List"]',        1, NOW(), NOW()),
-  ('subscription',        'Subscription Plans',     'CreditCard',   'Pricing tiers and subscription plan comparison block',                 6, '["Cards", "Table", "Minimal"]',        1, NOW(), NOW()),
-  ('social_media',        'Social Media',           'Share2',       'Social media links from Website → Social Links',                       2, '["Icon Row", "Icon + Label List"]',    1, NOW(), NOW())
-ON DUPLICATE KEY UPDATE `label` = VALUES(`label`), `description` = VALUES(`description`);
-
--- =============================================================================
--- SEED: COLOR PALETTES
--- =============================================================================
-
-INSERT INTO `color_palettes` (`id`, `name`, `primary_color`, `secondary_color`, `header_color`, `footer_color`, `text_color`, `hover_color`, `is_active`, `created_at`, `updated_at`) VALUES
-  (1, 'Ocean Blue',     '#3b82f6', '#1e40af', '#ffffff', '#f0f9ff', '#1f2937', '#eff6ff', 1, NOW(), NOW()),
-  (2, 'Forest Green',   '#16a34a', '#14532d', '#ffffff', '#f0fdf4', '#1c1917', '#dcfce7', 1, NOW(), NOW()),
-  (3, 'Sunset Orange',  '#f97316', '#c2410c', '#1c1917', '#292524', '#fafaf9', '#fff7ed', 1, NOW(), NOW()),
-  (4, 'Corporate Dark', '#6366f1', '#4338ca', '#111827', '#1f2937', '#f9fafb', '#eef2ff', 1, NOW(), NOW())
-ON DUPLICATE KEY UPDATE `name` = VALUES(`name`), `primary_color` = VALUES(`primary_color`);
-
--- =============================================================================
--- SEED: THEMES  (palette_id references color_palettes above)
--- =============================================================================
-
-INSERT INTO `themes` (`name`, `palette_id`, `primary_color`, `secondary_color`, `header_color`, `footer_color`, `text_color`, `hover_color`, `plans`, `home_blocks`, `is_active`, `created_at`, `updated_at`) VALUES
-  (
-    'Ocean Blue',
-    1,
-    '#3b82f6', '#1e40af', '#ffffff', '#f0f9ff', '#1f2937', '#eff6ff',
-    JSON_ARRAY(),
-    JSON_ARRAY(
-      JSON_OBJECT('block_type','simple_slider',     'variant','variant_1','is_visible',true),
-      JSON_OBJECT('block_type','about_us',           'variant','variant_1','is_visible',true),
-      JSON_OBJECT('block_type','terms_conditions',   'variant','variant_1','is_visible',true),
-      JSON_OBJECT('block_type','privacy_policy',     'variant','variant_1','is_visible',true),
-      JSON_OBJECT('block_type','portfolio_clients',  'variant','variant_1','is_visible',true),
-      JSON_OBJECT('block_type','gallery',            'variant','variant_1','is_visible',true),
-      JSON_OBJECT('block_type','testimonial',        'variant','variant_1','is_visible',true),
-      JSON_OBJECT('block_type','subscription',       'variant','variant_1','is_visible',true)
-    ),
-    1, NOW(), NOW()
-  ),
-  (
-    'Forest Green',
-    2,
-    '#16a34a', '#14532d', '#ffffff', '#f0fdf4', '#1c1917', '#dcfce7',
-    JSON_ARRAY(),
-    JSON_ARRAY(
-      JSON_OBJECT('block_type','advance_slider',     'variant','variant_1','is_visible',true),
-      JSON_OBJECT('block_type','about_us',           'variant','variant_1','is_visible',true),
-      JSON_OBJECT('block_type','terms_conditions',   'variant','variant_1','is_visible',true),
-      JSON_OBJECT('block_type','privacy_policy',     'variant','variant_1','is_visible',true),
-      JSON_OBJECT('block_type','portfolio_clients',  'variant','variant_1','is_visible',true),
-      JSON_OBJECT('block_type','portfolio_sponsors', 'variant','variant_1','is_visible',true),
-      JSON_OBJECT('block_type','gallery',            'variant','variant_1','is_visible',true),
-      JSON_OBJECT('block_type','testimonial',        'variant','variant_1','is_visible',true)
-    ),
-    1, NOW(), NOW()
-  ),
-  (
-    'Sunset Orange',
-    3,
-    '#f97316', '#c2410c', '#1c1917', '#292524', '#fafaf9', '#fff7ed',
-    JSON_ARRAY(),
-    JSON_ARRAY(
-      JSON_OBJECT('block_type','advance_slider',     'variant','variant_1','is_visible',true),
-      JSON_OBJECT('block_type','about_us',           'variant','variant_1','is_visible',true),
-      JSON_OBJECT('block_type','terms_conditions',   'variant','variant_1','is_visible',true),
-      JSON_OBJECT('block_type','privacy_policy',     'variant','variant_1','is_visible',true),
-      JSON_OBJECT('block_type','portfolio_events',   'variant','variant_1','is_visible',true),
-      JSON_OBJECT('block_type','portfolio_sponsors', 'variant','variant_1','is_visible',true),
-      JSON_OBJECT('block_type','gallery',            'variant','variant_1','is_visible',true),
-      JSON_OBJECT('block_type','testimonial',        'variant','variant_1','is_visible',true)
-    ),
-    1, NOW(), NOW()
-  ),
-  (
-    'Corporate Dark',
-    4,
-    '#6366f1', '#4338ca', '#111827', '#1f2937', '#f9fafb', '#eef2ff',
-    JSON_ARRAY(),
-    JSON_ARRAY(
-      JSON_OBJECT('block_type','simple_slider',      'variant','variant_1','is_visible',true),
-      JSON_OBJECT('block_type','about_us',           'variant','variant_1','is_visible',true),
-      JSON_OBJECT('block_type','terms_conditions',   'variant','variant_1','is_visible',true),
-      JSON_OBJECT('block_type','privacy_policy',     'variant','variant_1','is_visible',true),
-      JSON_OBJECT('block_type','portfolio_events',   'variant','variant_1','is_visible',true),
-      JSON_OBJECT('block_type','testimonial',        'variant','variant_1','is_visible',true),
-      JSON_OBJECT('block_type','subscription',       'variant','variant_1','is_visible',true)
-    ),
-    1, NOW(), NOW()
-  )
-ON DUPLICATE KEY UPDATE `name` = VALUES(`name`);
 
 -- =============================================================================
 -- SCHEMA RECONCILIATION WITH CURRENT APPLICATION MODELS
@@ -2489,183 +1971,12 @@ CREATE TABLE IF NOT EXISTS `pincodes` (
   KEY `idx_pincodes_city` (`city_id`),
   KEY `idx_pincodes_code` (`pincode`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- Bring old databases forward for palette/block metadata that newer code expects.
-ALTER TABLE `vendors`
-  ADD COLUMN IF NOT EXISTS `palette_id` INT NULL AFTER `theme_id`;
-
-ALTER TABLE `vendors`
-  ADD COLUMN IF NOT EXISTS `home_blocks` JSON NULL AFTER `palette_id`;
-
+-- Keep old databases aligned with current vendor account columns.
 ALTER TABLE `vendors`
   MODIFY COLUMN `membership` VARCHAR(100) NOT NULL DEFAULT 'basic';
 
 ALTER TABLE `vendors`
   ADD COLUMN IF NOT EXISTS `plan_changed_at` DATETIME NULL AFTER `password_reset_expires`;
-
-ALTER TABLE `vendor_theme_colors`
-  ADD COLUMN IF NOT EXISTS `is_active` TINYINT NOT NULL DEFAULT 0 COMMENT '1=custom active, 0=use palette' AFTER `hover_color`;
-
-ALTER TABLE `ui_blocks`
-  ADD COLUMN IF NOT EXISTS `plan_ids` JSON NULL AFTER `variants`;
-
--- Seed missing UI blocks used by the current vendor/public website flow.
-INSERT INTO `ui_blocks`
-  (`block_type`, `label`, `icon`, `description`, `category_id`, `variants`, `plan_ids`, `is_active`, `created_at`, `updated_at`)
-SELECT * FROM (
-  SELECT
-    'header',
-    'Header',
-    'LayoutTemplate',
-    'Website header and navigation block',
-    2,
-    JSON_ARRAY(JSON_OBJECT('key','variant_1','label','Classic'), JSON_OBJECT('key','variant_2','label','Split')),
-    JSON_ARRAY(1, 2, 3),
-    1,
-    NOW(),
-    NOW()
-) AS tmp
-WHERE NOT EXISTS (
-  SELECT 1 FROM `ui_blocks` WHERE `block_type` = 'header'
-);
-
-INSERT INTO `ui_blocks`
-  (`block_type`, `label`, `icon`, `description`, `category_id`, `variants`, `plan_ids`, `is_active`, `created_at`, `updated_at`)
-SELECT * FROM (
-  SELECT
-    'footer',
-    'Footer',
-    'PanelBottom',
-    'Website footer with quick links and newsletter area',
-    2,
-    JSON_ARRAY(JSON_OBJECT('key','variant_1','label','Grid'), JSON_OBJECT('key','variant_2','label','Centered')),
-    JSON_ARRAY(1, 2, 3),
-    1,
-    NOW(),
-    NOW()
-) AS tmp
-WHERE NOT EXISTS (
-  SELECT 1 FROM `ui_blocks` WHERE `block_type` = 'footer'
-);
-
-INSERT INTO `ui_blocks`
-  (`block_type`, `label`, `icon`, `description`, `category_id`, `variants`, `plan_ids`, `is_active`, `created_at`, `updated_at`)
-SELECT * FROM (
-  SELECT
-    'contact_us',
-    'Contact Us',
-    'Mail',
-    'Contact page block for the public website',
-    2,
-    JSON_ARRAY(JSON_OBJECT('key','variant_1','label','Standard')),
-    JSON_ARRAY(1, 2, 3),
-    1,
-    NOW(),
-    NOW()
-) AS tmp
-WHERE NOT EXISTS (
-  SELECT 1 FROM `ui_blocks` WHERE `block_type` = 'contact_us'
-);
-
-INSERT INTO `ui_blocks`
-  (`block_type`, `label`, `icon`, `description`, `category_id`, `variants`, `plan_ids`, `is_active`, `created_at`, `updated_at`)
-SELECT * FROM (
-  SELECT
-    'terms_conditions',
-    'Terms & Conditions',
-    'FileText',
-    'Terms and conditions legal content block',
-    2,
-    JSON_ARRAY(JSON_OBJECT('key','variant_1','label','Standard')),
-    JSON_ARRAY(1, 2, 3),
-    1,
-    NOW(),
-    NOW()
-) AS tmp
-WHERE NOT EXISTS (
-  SELECT 1 FROM `ui_blocks` WHERE `block_type` = 'terms_conditions'
-);
-
-INSERT INTO `ui_blocks`
-  (`block_type`, `label`, `icon`, `description`, `category_id`, `variants`, `plan_ids`, `is_active`, `created_at`, `updated_at`)
-SELECT * FROM (
-  SELECT
-    'privacy_policy',
-    'Privacy Policy',
-    'Shield',
-    'Privacy policy legal content block',
-    2,
-    JSON_ARRAY(JSON_OBJECT('key','variant_1','label','Standard')),
-    JSON_ARRAY(1, 2, 3),
-    1,
-    NOW(),
-    NOW()
-) AS tmp
-WHERE NOT EXISTS (
-  SELECT 1 FROM `ui_blocks` WHERE `block_type` = 'privacy_policy'
-);
-
-INSERT INTO `ui_blocks`
-  (`block_type`, `label`, `icon`, `description`, `category_id`, `variants`, `plan_ids`, `is_active`, `created_at`, `updated_at`)
-SELECT * FROM (
-  SELECT
-    'register',
-    'Register',
-    'UserPlus',
-    'Controls whether the register action appears in the website header.',
-    2,
-    JSON_ARRAY(JSON_OBJECT('key','variant_1','label','Standard')),
-    JSON_ARRAY(1, 2, 3),
-    1,
-    NOW(),
-    NOW()
-) AS tmp
-WHERE NOT EXISTS (
-  SELECT 1 FROM `ui_blocks` WHERE `block_type` = 'register'
-);
-
-INSERT INTO `ui_blocks`
-  (`block_type`, `label`, `icon`, `description`, `category_id`, `variants`, `plan_ids`, `is_active`, `created_at`, `updated_at`)
-SELECT * FROM (
-  SELECT
-    'hero_section',
-    'Hero Section',
-    'Sparkles',
-    'Configurable hero banner with text, images, page buttons, and layout variants.',
-    2,
-    JSON_ARRAY(
-      JSON_OBJECT('key','variant_1','label','Classic Premium'),
-      JSON_OBJECT('key','variant_2','label','EventPress Center'),
-      JSON_OBJECT('key','variant_3','label','Smart Study Layout'),
-      JSON_OBJECT('key','variant_4','label','Dark Luxury Stats Layout'),
-      JSON_OBJECT('key','variant_5','label','Stress-Free Events Layout'),
-      JSON_OBJECT('key','variant_6','label','Widescreen Left-Aligned Layout'),
-      JSON_OBJECT('key','variant_7','label','Widescreen Center-Aligned Layout'),
-      JSON_OBJECT('key','variant_8','label','Widescreen Right-Aligned Layout'),
-      JSON_OBJECT('key','variant_9','label','Widescreen Left-Aligned (with Button)'),
-      JSON_OBJECT('key','variant_10','label','Widescreen Center-Aligned (with Button)'),
-      JSON_OBJECT('key','variant_11','label','Widescreen Right-Aligned (with Button)'),
-      JSON_OBJECT('key','variant_12','label','Widescreen Left-Aligned (with 2 Buttons)'),
-      JSON_OBJECT('key','variant_13','label','Widescreen Center-Aligned (with 2 Buttons)'),
-      JSON_OBJECT('key','variant_14','label','Widescreen Right-Aligned (with 2 Buttons)'),
-      JSON_OBJECT('key','variant_15','label','Widescreen Left-Aligned Layout (No Title)'),
-      JSON_OBJECT('key','variant_16','label','Widescreen Center-Aligned Layout (No Title)'),
-      JSON_OBJECT('key','variant_17','label','Widescreen Right-Aligned Layout (No Title)'),
-      JSON_OBJECT('key','variant_18','label','Widescreen Left-Aligned (No Title, with Button)'),
-      JSON_OBJECT('key','variant_19','label','Widescreen Center-Aligned (No Title, with Button)'),
-      JSON_OBJECT('key','variant_20','label','Widescreen Right-Aligned (No Title, with Button)'),
-      JSON_OBJECT('key','variant_21','label','Widescreen Left-Aligned (No Title, with 2 Buttons)'),
-      JSON_OBJECT('key','variant_22','label','Widescreen Center-Aligned (No Title, with 2 Buttons)'),
-      JSON_OBJECT('key','variant_23','label','Widescreen Right-Aligned (No Title, with 2 Buttons)')
-    ),
-    JSON_ARRAY(1, 2, 3),
-    1,
-    NOW(),
-    NOW()
-) AS tmp
-WHERE NOT EXISTS (
-  SELECT 1 FROM `ui_blocks` WHERE `block_type` = 'hero_section'
-);
 
 -- ============================================================
 -- UNIFIED INTERNAL MAIL SYSTEM
@@ -2889,6 +2200,5 @@ WHERE `slug` IN (
 );
 
 DELETE FROM `modules`
-WHERE `slug` IN ('themes', 'ui_blocks', 'color_palettes', 'website_management', 'appearance');
 
 SET FOREIGN_KEY_CHECKS = 1;

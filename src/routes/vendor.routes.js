@@ -10,17 +10,8 @@ const vendorRoleController       = require('../controllers/vendorRole.controller
 const vendorDepartmentController  = require('../controllers/vendorDepartment.controller');
 const vendorPermissionController = require('../controllers/vendorPermission.controller');
 const staffPortalController = require('../controllers/staffPortal.controller');
-const vendorPageController = require('../controllers/vendorPage.controller');
-const vendorSliderController = require('../controllers/vendorSlider.controller');
-const vendorHeroSectionController = require('../controllers/vendorHeroSection.controller');
-const vendorGalleryController = require('../controllers/vendorGallery.controller');
-const vendorTestimonialController = require('../controllers/vendorTestimonial.controller');
 const vendorNewsletterController = require('../controllers/vendorNewsletter.controller');
-const vendorSocialLinkController = require('../controllers/vendorSocialLink.controller');
 const vendorSubscriptionController = require('../controllers/vendorSubscription.controller');
-const { makeController, getEvents: portfolioGetEvents, replaceEvents: portfolioReplaceEvents } = require('../controllers/vendorPortfolioItem.controller');
-const portfolioClientCtrl = makeController('client');
-const portfolioSponsorCtrl = makeController('sponsor');
 const mediaService = require('../services/media.service');
 const ApiResponse = require('../utils/apiResponse');
 const { isAuthenticated, hasPermission } = require('../middleware/auth');
@@ -69,20 +60,6 @@ router.use([
     '/:vendorId/social-links',
 ], websiteManagementRemoved);
 
-// ─── Public — UI blocks catalog (no auth, metadata only) ─────────────────────
-router.get('/ui-blocks', asyncHandler(async (req, res) => {
-    const { UiBlock } = require('../models');
-    const { ensureCoreUiBlocks } = require('../utils/coreUiBlocks');
-    await ensureCoreUiBlocks();
-    const blocks = await UiBlock.findAll({
-        where: { is_active: 1 },
-        attributes: ['block_type', 'label', 'icon', 'description', 'variants'],
-        order: [['id', 'ASC']],
-        raw: true,
-    });
-    ApiResponse.success(res, blocks, 'UI blocks catalog retrieved');
-}));
-
 // ─── Staff Auth (public) ──────────────────────────────────────────────────────
 router.post('/staff/auth/login',             vendorStaffAuthController.staffLogin);
 router.post('/staff/auth/forgot-password',   vendorStaffAuthController.staffForgotPassword);
@@ -118,14 +95,6 @@ router.post('/auth/change-password', isVendorAuthenticated, vendorController.cha
 router.get('/auth/activity',         isVendorAuthenticated, vendorController.getMyActivity);
 router.get('/auth/about',            isVendorAuthenticated, vendorController.getAbout);
 router.put('/auth/about',            isVendorAuthenticated, vendorController.updateAbout);
-
-// ─── Vendor Social Links (vendor JWT) ────────────────────────────────────────
-router.get('/social-links',              isVendorAuthenticated, vendorSocialLinkController.getAll);
-router.get('/social-links/:id',          isVendorAuthenticated, vendorSocialLinkController.getById);
-router.post('/social-links',             isVendorAuthenticated, vendorSocialLinkController.create);
-router.put('/social-links/:id',          isVendorAuthenticated, vendorSocialLinkController.update);
-router.put('/social-links/:id/toggle',   isVendorAuthenticated, vendorSocialLinkController.toggleActive);
-router.delete('/social-links/:id',       isVendorAuthenticated, vendorSocialLinkController.remove);
 
 // ─── Vendor Media Upload (vendor JWT) ────────────────────────────────────────
 router.post('/auth/upload', isVendorAuthenticated, (req, res, next) => {
@@ -186,29 +155,6 @@ router.put('/staff/portal/roles/:id/permissions', isStaffAuthenticated, hasStaff
 router.get('/staff/portal/modules',      isStaffAuthenticated, staffPortalController.getModules);
 router.get('/staff/portal/permissions',  isStaffAuthenticated, staffPortalController.getPermissions);
 
-// ─── Staff Portal — Website About ─────────────────────────────────────────────
-router.get('/staff/portal/website/about', isStaffAuthenticated, hasStaffPermission('website_management.view'),   staffPortalController.getWebsiteAbout);
-router.put('/staff/portal/website/about', isStaffAuthenticated, hasStaffPermission('website_management.edit'),   staffPortalController.updateWebsiteAbout);
-
-// ─── Staff Portal — Website Upload ────────────────────────────────────────────
-router.post('/staff/portal/website/upload', isStaffAuthenticated, hasStaffPermission('website_management.edit'), (req, res, next) => {
-    upload.single('file')(req, res, (err) => {
-        if (err) return res.status(400).json({ success: false, message: err.message || 'Upload failed' });
-        next();
-    });
-}, asyncHandler(async (req, res) => {
-    if (!req.file) return ApiResponse.error(res, 'No file provided', 400);
-    const result = await mediaService.upload(req.file, { folder: req.body.folder || 'vendors' }, req.staff.company_id);
-    return ApiResponse.success(res, { file: result }, 'File uploaded successfully');
-}));
-
-// ─── Staff Portal — Website Pages ─────────────────────────────────────────────
-router.get('/staff/portal/pages',        isStaffAuthenticated, hasStaffPermission('website_management.view'),   staffPortalController.getPages);
-router.get('/staff/portal/pages/:id',    isStaffAuthenticated, hasStaffPermission('website_management.view'),   staffPortalController.getPageById);
-router.post('/staff/portal/pages',       isStaffAuthenticated, hasStaffPermission('website_management.create'), staffPortalController.createPage);
-router.put('/staff/portal/pages/:id',    isStaffAuthenticated, hasStaffPermission('website_management.edit'),   staffPortalController.updatePage);
-router.delete('/staff/portal/pages/:id', isStaffAuthenticated, hasStaffPermission('website_management.delete'), staffPortalController.deletePage);
-
 // ─── Vendor Clients (vendor JWT) ─────────────────────────────────────────────
 router.get('/clients',              isVendorAuthenticated, vendorClientController.getAll);
 router.get('/clients/:id',          isVendorAuthenticated, vendorClientController.getById);
@@ -226,68 +172,8 @@ router.put('/staff/:id/role',     isVendorAuthenticated, vendorStaffController.r
 router.patch('/staff/:id/status', isVendorAuthenticated, vendorStaffController.updateStatus);
 router.delete('/staff/:id',       isVendorAuthenticated, vendorStaffController.remove);
 
-// ─── Vendor Pages — T&C + Privacy (MUST be before /:id) ──────────────────────
-router.get('/pages/terms-conditions',  isVendorAuthenticated, vendorPageController.getTerms);
-router.put('/pages/terms-conditions',  isVendorAuthenticated, vendorPageController.updateTerms);
-router.get('/pages/privacy-policy',    isVendorAuthenticated, vendorPageController.getPrivacy);
-router.put('/pages/privacy-policy',    isVendorAuthenticated, vendorPageController.updatePrivacy);
-
-// ─── Vendor Pages CRUD (vendor JWT) ─────────────────────────────────────────
-router.get('/pages',               isVendorAuthenticated, vendorPageController.getAll);
-router.get('/pages/:id',           isVendorAuthenticated, vendorPageController.getById);
-router.post('/pages',              isVendorAuthenticated, vendorPageController.create);
-router.put('/pages/:id',           isVendorAuthenticated, vendorPageController.update);
-router.patch('/pages/:id/status',  isVendorAuthenticated, vendorPageController.updateStatus);
-router.delete('/pages/:id',        isVendorAuthenticated, vendorPageController.remove);
-
-// ─── Vendor Sliders (vendor JWT) ─────────────────────────────────────────────
-router.get('/sliders',              isVendorAuthenticated, vendorSliderController.getAll);
-router.get('/sliders/:id',          isVendorAuthenticated, vendorSliderController.getById);
-router.post('/sliders',             isVendorAuthenticated, vendorSliderController.create);
-router.put('/sliders/:id',          isVendorAuthenticated, vendorSliderController.update);
-router.patch('/sliders/:id/status', isVendorAuthenticated, vendorSliderController.updateStatus);
-router.delete('/sliders/:id',       isVendorAuthenticated, vendorSliderController.remove);
-router.get('/hero-section',         isVendorAuthenticated, vendorHeroSectionController.get);
-router.put('/hero-section',         isVendorAuthenticated, vendorHeroSectionController.upsert);
-
-// ─── Portfolio Clients (vendor JWT) ──────────────────────────────────────────
-router.get('/portfolio/clients',              isVendorAuthenticated, portfolioClientCtrl.getAll);
-router.get('/portfolio/clients/:id',          isVendorAuthenticated, portfolioClientCtrl.getById);
-router.post('/portfolio/clients',             isVendorAuthenticated, portfolioClientCtrl.create);
-router.put('/portfolio/clients/:id',          isVendorAuthenticated, portfolioClientCtrl.update);
-router.patch('/portfolio/clients/:id/status', isVendorAuthenticated, portfolioClientCtrl.updateStatus);
-router.delete('/portfolio/clients/:id',       isVendorAuthenticated, portfolioClientCtrl.remove);
-
-// ─── Portfolio Events (vendor JWT) ───────────────────────────────────────────
-router.get('/portfolio/events', isVendorAuthenticated, portfolioGetEvents);
-router.put('/portfolio/events', isVendorAuthenticated, portfolioReplaceEvents);
-
-// ─── Portfolio Sponsors (vendor JWT) ─────────────────────────────────────────
-router.get('/portfolio/sponsors',              isVendorAuthenticated, portfolioSponsorCtrl.getAll);
-router.get('/portfolio/sponsors/:id',          isVendorAuthenticated, portfolioSponsorCtrl.getById);
-router.post('/portfolio/sponsors',             isVendorAuthenticated, portfolioSponsorCtrl.create);
-router.put('/portfolio/sponsors/:id',          isVendorAuthenticated, portfolioSponsorCtrl.update);
-router.patch('/portfolio/sponsors/:id/status', isVendorAuthenticated, portfolioSponsorCtrl.updateStatus);
-router.delete('/portfolio/sponsors/:id',       isVendorAuthenticated, portfolioSponsorCtrl.remove);
-
-// ─── Vendor Gallery (vendor JWT) ─────────────────────────────────────────────
-router.get('/gallery',               isVendorAuthenticated, vendorGalleryController.getAll);
-router.get('/gallery/:id',           isVendorAuthenticated, vendorGalleryController.getById);
-router.post('/gallery',              isVendorAuthenticated, vendorGalleryController.create);
-router.put('/gallery/:id',           isVendorAuthenticated, vendorGalleryController.update);
-router.patch('/gallery/:id/status',  isVendorAuthenticated, vendorGalleryController.updateStatus);
-router.delete('/gallery/:id',        isVendorAuthenticated, vendorGalleryController.remove);
-
 // ─── Vendor Subscription (vendor JWT) ───────────────────────────────────────
 router.get('/subscription',                  isVendorAuthenticated, vendorSubscriptionController.getMyPlan);
-
-// ─── Vendor Testimonials (vendor JWT) ────────────────────────────────────────
-router.get('/testimonials',              isVendorAuthenticated, vendorTestimonialController.getAll);
-router.get('/testimonials/:id',          isVendorAuthenticated, vendorTestimonialController.getById);
-router.post('/testimonials',             isVendorAuthenticated, vendorTestimonialController.create);
-router.put('/testimonials/:id',          isVendorAuthenticated, vendorTestimonialController.update);
-router.patch('/testimonials/:id/status', isVendorAuthenticated, vendorTestimonialController.updateStatus);
-router.delete('/testimonials/:id',       isVendorAuthenticated, vendorTestimonialController.remove);
 
 // ─── Vendor Newsletter (vendor JWT) ──────────────────────────────────────────
 router.get('/newsletter/subscribers',          isVendorAuthenticated, vendorNewsletterController.getSubscribers);
@@ -316,11 +202,6 @@ router.put('/email-templates/:id',           isVendorAuthenticated, vendorEmailT
 router.patch('/email-templates/:id/status',  isVendorAuthenticated, vendorEmailTemplateController.updateStatus);
 router.delete('/email-templates/:id',        isVendorAuthenticated, vendorEmailTemplateController.delete);
 
-// ─── Preview endpoints ────────────────────────────────────────────────────────
-const { getPreviewData, getMyPreviewData } = require('../controllers/vendorPreview.controller');
-router.get('/auth/preview-data', isVendorAuthenticated, getMyPreviewData);  // vendor's own data
-router.get('/:id/preview-data',  getPreviewData);                            // public fallback
-
 
 
 // ─── Admin CRUD (admin JWT) ───────────────────────────────────────────────────
@@ -346,11 +227,5 @@ router.delete('/:id',
     checkApprovalRequired('vendors', 'delete', 'vendors'),
     vendorController.remove
 );
-
-// ─── Admin — vendor social links management ───────────────────────────────────
-router.get('/:vendorId/social-links',        hasPermission('vendors.view'),   vendorSocialLinkController.getAllByVendor);
-router.post('/:vendorId/social-links',       hasPermission('vendors.edit'),   vendorSocialLinkController.createForVendor);
-router.put('/:vendorId/social-links/:id',    hasPermission('vendors.edit'),   vendorSocialLinkController.updateForVendor);
-router.delete('/:vendorId/social-links/:id', hasPermission('vendors.delete'), vendorSocialLinkController.deleteForVendor);
 
 module.exports = router;
