@@ -30,7 +30,7 @@ const getBySlug = asyncHandler(async (req, res) => {
  * PUT /api/v1/plugins/:slug/toggle
  */
 const toggle = asyncHandler(async (req, res) => {
-    const plugin = await pluginService.toggle(req.params.slug, req.companyId);
+    const plugin = await pluginService.toggle(req.params.slug, req.companyId, req.user?.id || null);
 
     const stateLabel = plugin.is_active === 1 ? 'enabled' : 'disabled';
     logger.logRequest(req, `Toggle plugin: ${req.params.slug} → ${stateLabel}`);

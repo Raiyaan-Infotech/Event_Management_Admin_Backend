@@ -1,5 +1,6 @@
 const vendorService = require('../services/vendor.service');
 const activityLogService = require('../services/activityLog.service');
+const { Plugin } = require('../models');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const { asyncHandler } = require('../utils/helpers');
@@ -93,6 +94,17 @@ const logout = asyncHandler(async (req, res) => {
 
 const me = asyncHandler(async (req, res) => {
     const vendor = await vendorService.getProfile(req.vendor.id);
+    const websitePlugin = await Plugin.findOne({
+        where: {
+            slug: 'website-management',
+            company_id: vendor.company_id || null,
+            is_active: 1,
+        },
+    });
+    vendor.features = {
+        ...(vendor.features || {}),
+        website_management: Boolean(vendor.website_enabled === 1 && websitePlugin),
+    };
     ApiResponse.success(res, vendor, 'Vendor profile retrieved');
 });
 

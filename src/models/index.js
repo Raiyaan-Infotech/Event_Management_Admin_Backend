@@ -69,6 +69,12 @@ db.VendorClient = require('./VendorClient')(sequelize, Sequelize);
 db.VendorStaff      = require('./VendorStaff')(sequelize, Sequelize);
 db.VendorDepartment = require('./VendorDepartment')(sequelize, Sequelize);
 
+// Website builder color palettes
+db.ColorPalette = require('./ColorPalette')(sequelize, Sequelize);
+
+// Vendor website newsletter subscribers (footer email signups)
+db.VendorSubscriber = require('./VendorSubscriber')(sequelize, Sequelize);
+
 // Menus & Subscriptions
 db.Menu = require('./Menu')(sequelize, Sequelize);
 db.Subscription = require('./Subscription')(sequelize, Sequelize);
@@ -211,6 +217,9 @@ db.VendorClient.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
 db.VendorClient.belongsTo(db.Subscription, { foreignKey: 'subscription_id', as: 'subscription' });
 db.VendorClient.hasMany(db.ClientRefreshToken, { foreignKey: 'client_id', as: 'refreshTokens' });
 db.ClientRefreshToken.belongsTo(db.VendorClient, { foreignKey: 'client_id', as: 'client' });
+
+db.Vendor.hasMany(db.VendorSubscriber, { foreignKey: 'vendor_id', as: 'subscribers' });
+db.VendorSubscriber.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
 
 db.Vendor.hasMany(db.VendorStaff,      { foreignKey: 'vendor_id', as: 'staff' });
 db.VendorStaff.belongsTo(db.Vendor,    { foreignKey: 'vendor_id', as: 'vendor' });

@@ -1,6 +1,7 @@
 const {
     Vendor,
     VendorClient,
+    VendorSubscriber,
     Subscription,
     District,
     City,
@@ -11,8 +12,40 @@ const { asyncHandler } = require('../utils/helpers');
 const { v4: uuidv4 } = require('uuid');
 const { generateClientHandoffToken } = require('../utils/jwt');
 const { validateClientPassword } = require('../utils/clientPasswordPolicy');
+const vendorWebsiteBuilderService = require('../services/vendorWebsiteBuilder.service');
 
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
+
+// Mirror a newsletter signup into the vendor_subscribers table (the User
+// Management > Subscriber list). Idempotent: revives a soft-deleted row,
+// reactivates an existing one, otherwise inserts. Never throws — a subscriber
+// bookkeeping failure must not break the public subscribe/register response.
+const upsertVendorSubscriber = async (vendorId, companyId, email) => {
+    const normalized = normalizeEmail(email);
+    if (!vendorId || !normalized) return;
+    try {
+        const existing = await VendorSubscriber.findOne({
+            where: { vendor_id: vendorId, email: normalized },
+            paranoid: false,
+        });
+        if (existing) {
+            if (existing.deletedAt) await existing.restore();
+            if (existing.is_active !== 1 || existing.deletedAt) {
+                await existing.update({ is_active: 1 });
+            }
+            return;
+        }
+        await VendorSubscriber.create({
+            vendor_id: vendorId,
+            company_id: companyId || null,
+            email: normalized,
+            is_active: 1,
+        });
+    } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[upsertVendorSubscriber] failed:', err.message);
+    }
+};
 
 const toSlug = (name) =>
     name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -36,6 +69,11 @@ const findActiveVendorBySlug = async (slug, attributes, options = {}) => {
 
 const getPublicVendorWebsite = asyncHandler(async (req, res) => {
     const { slug } = req.params;
+
+    const builderPayload = await vendorWebsiteBuilderService.getPublicWebsitePayloadBySlug(slug);
+    if (builderPayload) {
+        return ApiResponse.success(res, builderPayload, 'Vendor data retrieved');
+    }
 
     const vendor = await findActiveVendorBySlug(slug, [
             'id', 'company_name', 'company_logo', 'short_description', 'website',
@@ -130,6 +168,10 @@ const registerPublicVendorClient = asyncHandler(async (req, res) => {
         is_active: 1,
     });
 
+    if (wantsNewsletter) {
+        await upsertVendorSubscriber(vendor.id, vendor.company_id, normalizedEmail);
+    }
+
     ApiResponse.success(res, client, 'Registration completed successfully', 201);
 });
 
@@ -189,6 +231,7 @@ const subscribePublicVendorNewsletter = asyncHandler(async (req, res) => {
             registration_type: existing.registration_type || 'guest',
             login_access: existing.login_access === 1 ? 1 : existing.login_access,
         });
+        await upsertVendorSubscriber(vendor.id, vendor.company_id, normalizedEmail);
         return ApiResponse.success(res, existing, 'Newsletter subscribed successfully');
     }
 
@@ -206,7 +249,16 @@ const subscribePublicVendorNewsletter = asyncHandler(async (req, res) => {
         is_active: 1,
     });
 
+    await upsertVendorSubscriber(vendor.id, vendor.company_id, normalizedEmail);
+
     ApiResponse.success(res, client, 'Newsletter subscribed successfully', 201);
+});
+
+const submitPublicVendorContact = asyncHandler(async (req, res) => {
+    const { slug } = req.params;
+    const message = await vendorWebsiteBuilderService.createPublicContactMessage(slug, req.body || {});
+    if (!message) throw ApiError.notFound('Vendor not found');
+    return ApiResponse.created(res, message, 'Contact message submitted successfully');
 });
 
 module.exports = {
@@ -214,4 +266,5 @@ module.exports = {
     registerPublicVendorClient,
     loginPublicVendorClient,
     subscribePublicVendorNewsletter,
+    submitPublicVendorContact,
 };

@@ -55,6 +55,7 @@ app.use('/api/v1/email-campaigns', require('./routes/emailCampaign.routes'));
 app.use('/api/v1/activity-logs', require('./routes/activityLog.routes'));
 app.use('/api/v1/approvals', require('./routes/approval.routes'));
 app.use('/api/v1/plugins', require('./routes/plugin.routes'));
+app.use('/api/v1/color-palettes', require('./routes/colorPalette.routes'));
 app.use('/api/v1/faq-categories', require('./routes/faqCategory.routes'));
 app.use('/api/v1/faqs', require('./routes/faq.routes'));
 app.use('/api/v1/vendors', require('./routes/vendor.routes'));

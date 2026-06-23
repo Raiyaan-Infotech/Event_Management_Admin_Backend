@@ -35,6 +35,20 @@ const errorHandler = (err, req, res, next) => {
     });
   }
 
+  // Sequelize / raw DB error (data truncated, out-of-range value, bad column,
+  // etc.). The real error is logged above; never surface raw SQL to the client.
+  if (
+    err.name === 'SequelizeDatabaseError' ||
+    err.name === 'SequelizeBulkRecordError' ||
+    err.original?.code === 'WARN_DATA_TRUNCATED' ||
+    err.parent?.code === 'WARN_DATA_TRUNCATED'
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: 'Some values could not be saved. Please review the form and try again.',
+    });
+  }
+
   // Custom API error
   if (err.statusCode) {
     return res.status(err.statusCode).json({

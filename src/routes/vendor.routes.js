@@ -3,6 +3,7 @@ const router = express.Router();
 const multer = require('multer');
 const vendorController = require('../controllers/vendor.controller');
 const vendorClientController = require('../controllers/vendorClient.controller');
+const vendorSubscriberController = require('../controllers/vendorSubscriber.controller');
 const vendorClientAuthController = require('../controllers/vendorClientAuth.controller');
 const vendorStaffController = require('../controllers/vendorStaff.controller');
 const vendorStaffAuthController = require('../controllers/vendorStaffAuth.controller');
@@ -12,6 +13,7 @@ const vendorPermissionController = require('../controllers/vendorPermission.cont
 const staffPortalController = require('../controllers/staffPortal.controller');
 const vendorNewsletterController = require('../controllers/vendorNewsletter.controller');
 const vendorSubscriptionController = require('../controllers/vendorSubscription.controller');
+const vendorWebsiteBuilderRoutes = require('./vendorWebsiteBuilder.routes');
 const mediaService = require('../services/media.service');
 const ApiResponse = require('../utils/apiResponse');
 const { isAuthenticated, hasPermission } = require('../middleware/auth');
@@ -57,7 +59,7 @@ router.use([
     '/home-blocks',
     '/auth/preview-data',
     '/:id/preview-data',
-    '/:vendorId/social-links',
+    // '/:vendorId/social-links',
 ], websiteManagementRemoved);
 
 // ─── Staff Auth (public) ──────────────────────────────────────────────────────
@@ -95,6 +97,10 @@ router.post('/auth/change-password', isVendorAuthenticated, vendorController.cha
 router.get('/auth/activity',         isVendorAuthenticated, vendorController.getMyActivity);
 router.get('/auth/about',            isVendorAuthenticated, vendorController.getAbout);
 router.put('/auth/about',            isVendorAuthenticated, vendorController.updateAbout);
+
+// Website Builder rebuild APIs. The old removed website-management paths stay
+// blocked above; new frontend work should call /api/v1/vendors/website/*.
+router.use('/website', isVendorAuthenticated, vendorWebsiteBuilderRoutes);
 
 // ─── Vendor Media Upload (vendor JWT) ────────────────────────────────────────
 router.post('/auth/upload', isVendorAuthenticated, (req, res, next) => {
@@ -162,6 +168,12 @@ router.post('/clients',             isVendorAuthenticated, vendorClientControlle
 router.put('/clients/:id',          isVendorAuthenticated, vendorClientController.update);
 router.patch('/clients/:id/status', isVendorAuthenticated, vendorClientController.updateStatus);
 router.delete('/clients/:id',       isVendorAuthenticated, vendorClientController.remove);
+
+// ─── Vendor Subscribers (vendor JWT) — footer newsletter email signups ────────
+router.get('/subscribers',          isVendorAuthenticated, vendorSubscriberController.getAll);
+router.post('/subscribers',         isVendorAuthenticated, vendorSubscriberController.create);
+router.put('/subscribers/:id',      isVendorAuthenticated, vendorSubscriberController.update);
+router.delete('/subscribers/:id',   isVendorAuthenticated, vendorSubscriberController.remove);
 
 // ─── Vendor Staff (vendor JWT) ────────────────────────────────────────────────
 router.get('/staff',              isVendorAuthenticated, vendorStaffController.getAll);

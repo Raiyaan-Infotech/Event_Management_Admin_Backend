@@ -1,73 +1,34 @@
-const { Plugin, Setting } = require('../models');
+﻿const { Plugin, Setting, Vendor } = require('../models');
 const { Op } = require('sequelize');
 const logger = require('../utils/logger');
 
-// ─── Predefined plugin definitions ───────────────────────────────────────────
+// â”€â”€â”€ Predefined plugin definitions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const PREDEFINED_PLUGINS = [
-    // Content (built-in modules — can be toggled on/off)
     {
-        slug: 'blog',
-        name: 'Blog',
-        description: 'Manage blog posts, categories, and tags.',
+        slug: 'website-management',
+        name: 'Website Management',
+        description: 'Enable vendor website pages, header, footer, sliders, and public website builder access.',
         category: 'content',
-        icon: 'book-open',
+        icon: 'globe',
         config_group: null,
         config_route: null,
     },
     {
-        slug: 'announcements',
-        name: 'Announcements',
-        description: 'Display announcements and banners to your users.',
+        slug: 'faq',
+        name: 'FAQ',
+        description: 'Create frequently asked questions organized by category.',
         category: 'content',
-        icon: 'bell-ring',
+        icon: 'help-circle',
         config_group: null,
         config_route: null,
     },
     {
-        slug: 'testimonials',
-        name: 'Testimonials',
-        description: 'Showcase customer reviews and testimonials.',
-        category: 'content',
-        icon: 'star',
-        config_group: null,
-        config_route: null,
-    },
-    {
-        slug: 'contact-form',
-        name: 'Contact Form',
-        description: 'Receive and manage contact messages from visitors.',
-        category: 'content',
-        icon: 'phone',
-        config_group: null,
-        config_route: null,
-    },
-    {
-        slug: 'pages',
-        name: 'Pages',
-        description: 'Create and manage custom static pages.',
-        category: 'content',
-        icon: 'file-text',
-        config_group: null,
-        config_route: null,
-    },
-    {
-        slug: 'simple-slider',
-        name: 'Simple Slider',
-        description: 'Create and manage homepage image sliders.',
-        category: 'content',
-        icon: 'image',
-        config_group: null,
-        config_route: null,
-    },
-
-    // Marketing
-    {
-        slug: 'ads',
-        name: 'Ads & Banners',
-        description: 'Manage advertisements and ad banners on your site.',
-        category: 'marketing',
-        icon: 'megaphone',
+        slug: 'locations',
+        name: 'Locations',
+        description: 'Manage countries, states, districts, and cities.',
+        category: 'general',
+        icon: 'map-pin',
         config_group: null,
         config_route: null,
     },
@@ -143,7 +104,7 @@ const PREDEFINED_PLUGINS = [
     {
         slug: 'wasabi',
         name: 'Wasabi Storage',
-        description: 'Hot cloud storage — fast, low-cost, reliable.',
+        description: 'Hot cloud storage - fast, low-cost, reliable.',
         category: 'storage',
         icon: 'cloud',
         config_group: 'media',
@@ -239,12 +200,8 @@ const PREDEFINED_PLUGINS = [
         config_route: '/admin/plugins/twilio/config',
     },
 ];
-
-// ─── Category order for display ───────────────────────────────────────────────
-
 const CATEGORY_ORDER = [
     'content',
-    'marketing',
     'authentication',
     'analytics',
     'storage',
@@ -252,9 +209,29 @@ const CATEGORY_ORDER = [
     'maps',
     'security',
     'communication',
+    'general',
 ];
+const WEBSITE_MANAGEMENT_SLUG = 'website-management';
+const PREDEFINED_PLUGIN_SLUGS = PREDEFINED_PLUGINS.map((plugin) => plugin.slug);
 
-// ─── Seed predefined plugins for a company ────────────────────────────────────
+const attachUsageCounts = async (plugins, companyId) => {
+    if (!companyId || !plugins.length) return plugins;
+
+    const websiteUsageCount = await Vendor.count({
+        where: {
+            company_id: companyId,
+            website_enabled: 1,
+        },
+    });
+
+    for (const plugin of plugins) {
+        plugin.setDataValue('usage_count', plugin.slug === WEBSITE_MANAGEMENT_SLUG ? websiteUsageCount : 0);
+    }
+
+    return plugins;
+};
+
+// â”€â”€â”€ Seed predefined plugins for a company â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const seedPlugins = async (companyId) => {
     for (const plugin of PREDEFINED_PLUGINS) {
@@ -269,7 +246,7 @@ const seedPlugins = async (companyId) => {
     }
 };
 
-// ─── Get all plugins (grouped by category) ───────────────────────────────────
+// â”€â”€â”€ Get all plugins (grouped by category) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const getAll = async (companyId) => {
     if (companyId) {
@@ -277,9 +254,11 @@ const getAll = async (companyId) => {
     }
 
     const plugins = await Plugin.findAll({
-        where: { company_id: companyId },
+        where: { company_id: companyId, slug: { [Op.in]: PREDEFINED_PLUGIN_SLUGS } },
         order: [['category', 'ASC'], ['name', 'ASC']],
     });
+
+    await attachUsageCounts(plugins, companyId);
 
     // Group by category
     const grouped = {};
@@ -302,9 +281,15 @@ const getAll = async (companyId) => {
     return { plugins, grouped: sorted };
 };
 
-// ─── Get single plugin by slug ────────────────────────────────────────────────
+// â”€â”€â”€ Get single plugin by slug â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const getBySlug = async (slug, companyId) => {
+    if (!PREDEFINED_PLUGIN_SLUGS.includes(slug)) {
+        const error = new Error('Plugin not found');
+        error.statusCode = 404;
+        throw error;
+    }
+
     if (companyId) {
         await seedPlugins(companyId);
     }
@@ -318,6 +303,8 @@ const getBySlug = async (slug, companyId) => {
         error.statusCode = 404;
         throw error;
     }
+
+    await attachUsageCounts([plugin], companyId);
 
     // Also fetch config settings for this plugin
     let config = [];
@@ -334,9 +321,15 @@ const getBySlug = async (slug, companyId) => {
     return { plugin, config };
 };
 
-// ─── Toggle plugin active state ───────────────────────────────────────────────
+// â”€â”€â”€ Toggle plugin active state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const toggle = async (slug, companyId, userId = null) => {
+    if (!PREDEFINED_PLUGIN_SLUGS.includes(slug)) {
+        const error = new Error('Plugin not found');
+        error.statusCode = 404;
+        throw error;
+    }
+
     if (companyId) {
         await seedPlugins(companyId);
     }
@@ -354,6 +347,7 @@ const toggle = async (slug, companyId, userId = null) => {
     const oldState = plugin.is_active;
     const newState = oldState === 1 ? 0 : 1;
     await plugin.update({ is_active: newState });
+    await attachUsageCounts([plugin], companyId);
     await logger.logActivity(userId, 'toggle', 'Plugin', `Plugin "${plugin.name}" ${newState === 1 ? 'enabled' : 'disabled'}`, { recordId: plugin.id, companyId, oldValues: { is_active: oldState }, newValues: { is_active: newState } });
 
     return plugin;
@@ -366,3 +360,4 @@ module.exports = {
     seedPlugins,
     PREDEFINED_PLUGINS,
 };
+

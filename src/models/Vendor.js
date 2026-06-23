@@ -40,6 +40,7 @@ module.exports = (sequelize) => {
             type: DataTypes.STRING(100),
             defaultValue: 'basic',
         },
+        website_enabled: { type: DataTypes.TINYINT, defaultValue: 0 },
         copywrite: { type: DataTypes.STRING(255), allowNull: true },
         poweredby: { type: DataTypes.STRING(255), allowNull: true },
         // Bank Info

@@ -94,6 +94,15 @@ const getAll = async (query = {}, vendorId) => {
         }
     }
 
+    // Explicit registration_type filter (User Management: Client vs Guest views)
+    if (query.registration_type) {
+        const type = String(query.registration_type).toLowerCase();
+        if (type === 'guest' || type === 'client') {
+            customWhere.registration_type = type;
+        }
+    }
+    delete queryForBase.registration_type;
+
     if (query.search && /^\d+$/.test(String(query.search).trim())) {
         const search = String(query.search).trim();
         customWhere[Op.or] = [
