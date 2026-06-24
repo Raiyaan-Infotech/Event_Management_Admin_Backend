@@ -793,6 +793,54 @@ const getWebsite = async (vendor) => {
   return normalizeRow(website || null);
 };
 
+// The built-in fixed pages every vendor website starts with. Kept in sync with
+// the builder frontend's SYSTEM_PAGES so real DB rows replace the client-side
+// fallback as soon as a vendor's website is created.
+const SYSTEM_PAGE_SEEDS = [
+  { slug: 'about-us', title: 'About Us', content: '<h2>About Us</h2><p>Tell visitors about your team, story, and event planning experience.</p>' },
+  { slug: 'service', title: 'Service', content: '<h2>Our Service</h2><p>Describe the event service, packages, and experiences you offer.</p>' },
+  { slug: 'events', title: 'Events', content: '<h2>Events</h2><p>Showcase weddings, corporate events, celebrations, and other event categories.</p>' },
+  { slug: 'terms-conditions', title: 'Terms & Conditions', content: '<h2>Terms &amp; Conditions</h2><p>Add the terms and conditions visitors agree to when signing up or using your website.</p>' },
+  { slug: 'privacy-policy', title: 'Privacy Policy', content: "<h2>Privacy Policy</h2><p>Explain how you collect, use, and protect your visitors' personal information.</p>" },
+  { slug: 'maintenance', title: 'Maintenance', content: "<p>We're currently performing some upgrades to improve your experience.</p><p>Please check back soon.</p>" },
+];
+
+// Inserts the fixed system pages for a freshly-created website. Idempotent —
+// skips any slug that already exists (incl. soft-deleted) so it never duplicates.
+const seedSystemPages = async (vendor, website) => {
+  if (!website?.id) return;
+  if (!(await hasTable(TABLES.pages))) return;
+
+  const vendorId = getActorId(vendor);
+  const companyId = vendor?.company_id ?? null;
+
+  for (let i = 0; i < SYSTEM_PAGE_SEEDS.length; i += 1) {
+    const page = SYSTEM_PAGE_SEEDS[i];
+    const [existing] = await sequelize.query(
+      `SELECT id FROM \`${TABLES.pages}\` WHERE website_id = :wid AND slug = :slug LIMIT 1`,
+      { replacements: { wid: website.id, slug: page.slug }, type: QueryTypes.SELECT },
+    );
+    if (existing) continue;
+
+    await sequelize.query(
+      `INSERT INTO \`${TABLES.pages}\`
+         (website_id, vendor_id, company_id, page_type, title, slug, content, status, sort_order, is_system, is_active, created_by)
+       VALUES (:wid, :vid, :cid, 'system', :title, :slug, :content, 'published', :so, 1, 1, :vid)`,
+      {
+        replacements: {
+          wid: website.id,
+          vid: vendorId,
+          cid: companyId,
+          title: page.title,
+          slug: page.slug,
+          content: page.content,
+          so: i + 1,
+        },
+      },
+    );
+  }
+};
+
 const ensureWebsite = async (vendor, payload = {}) => {
   const existing = await getWebsite(vendor);
   if (existing) return existing;
@@ -816,18 +864,22 @@ const ensureWebsite = async (vendor, payload = {}) => {
          WHERE id = :id`,
         { replacements: { id: softDeleted.id, actorId: getActorId(vendor), now: new Date() } },
       );
-      return getRowById('website', softDeleted.id, vendor);
+      const revived = await getRowById('website', softDeleted.id, vendor);
+      await seedSystemPages(vendor, revived);
+      return revived;
     }
   }
 
   const baseSlug = toSlug(vendor.company_name || vendor.name || vendor.email || `vendor-${vendor.id}`);
-  return insertRow('website', {
+  const website = await insertRow('website', {
     slug: `${baseSlug || 'vendor'}-${vendor.id}`,
     status: 'draft',
     publish_version: 0,
     is_active: 1,
     ...payload,
   }, vendor);
+  await seedSystemPages(vendor, website);
+  return website;
 };
 
 const updateWebsite = async (vendor, data) => {

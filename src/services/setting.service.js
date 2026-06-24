@@ -113,12 +113,11 @@ const getPublic = async (companyId = undefined) => {
  */
 const update = async (key, value, userId = null, companyId = undefined) => {
   try {
-    const where = { key };
-    if (companyId !== undefined && companyId !== null) {
-      where.company_id = companyId;
-    }
-
-    const setting = await Setting.findOne({ where });
+    // `key` is globally unique (one row per key), so always match by key alone.
+    // Scoping by company_id can miss a row saved under a different/NULL company
+    // and then collide with the UNIQUE(key) constraint. companyId kept for
+    // signature compatibility.
+    const setting = await Setting.findOne({ where: { key } });
 
     if (!setting) {
       throw ApiError.notFound('Setting not found');
@@ -155,13 +154,11 @@ const bulkUpdate = async (settings, group = 'general', userId = null, companyId 
     for (const [key, value] of Object.entries(settings)) {
       const strValue = typeof value === 'object' ? JSON.stringify(value) : String(value);
 
-      const whereClause = { key };
-      if (companyId !== undefined && companyId !== null) {
-        whereClause.company_id = companyId;
-      }
-
+      // Match by the globally-unique `key` only — matching by key+company_id can
+      // miss a row stored under a different/NULL company and then hit the
+      // UNIQUE(key) constraint on insert ("Duplicate entry").
       const [setting, created] = await Setting.findOrCreate({
-        where: whereClause,
+        where: { key },
         defaults: {
           value: strValue,
           group,
@@ -196,13 +193,9 @@ const bulkUpdate = async (settings, group = 'general', userId = null, companyId 
  */
 const upsert = async (key, value, options = {}, userId = null, companyId = undefined) => {
   try {
-    const whereClause = { key };
-    if (companyId !== undefined && companyId !== null) {
-      whereClause.company_id = companyId;
-    }
-
+    // Match by the globally-unique `key` only (see bulkUpdate note).
     const [setting, created] = await Setting.findOrCreate({
-      where: whereClause,
+      where: { key },
       defaults: {
         value: typeof value === 'object' ? JSON.stringify(value) : value,
         group: options.group || 'general',
