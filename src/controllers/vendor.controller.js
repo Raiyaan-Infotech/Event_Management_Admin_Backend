@@ -4,7 +4,7 @@ const { Plugin } = require('../models');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const { asyncHandler } = require('../utils/helpers');
-const { generateVendorAccessToken, generateVendorRefreshToken } = require('../utils/jwt');
+const { generateVendorAccessToken, generateVendorRefreshToken, generateVendorHandoffToken, verifyVendorHandoffToken } = require('../utils/jwt');
 const { logVendorActivity } = require('../middleware/activityLogger');
 
 // ─── Admin CRUD ───────────────────────────────────────────────────────────────
@@ -136,6 +136,44 @@ const impersonate = asyncHandler(async (req, res) => {
     ApiResponse.success(res, { vendor_id: vendor.id, vendor: vendor.toJSON ? vendor.toJSON() : vendor }, 'Impersonation session created');
 });
 
+// Authenticated vendor → mint a short-lived handoff token to open another
+// same-vendor app (e.g. the website builder) on a different origin.
+const createHandoffToken = asyncHandler(async (req, res) => {
+    const handoff_token = generateVendorHandoffToken({ id: req.vendor.id });
+    ApiResponse.success(res, { handoff_token }, 'Handoff token created');
+});
+
+// Public → exchange a handoff token for a real vendor session on THIS origin.
+const handoff = asyncHandler(async (req, res) => {
+    const { token } = req.body;
+    if (!token) throw ApiError.badRequest('Handoff token is required');
+
+    const decoded = verifyVendorHandoffToken(token);
+    if (!decoded) throw ApiError.unauthorized('Invalid or expired handoff token.');
+
+    const vendor = await vendorService.getById(decoded.id);
+    if (!vendor) throw ApiError.unauthorized('Invalid or expired handoff token.');
+    if (vendor.status !== 'active') throw ApiError.forbidden('Your account is inactive. Please contact the administrator.');
+
+    const accessToken  = generateVendorAccessToken(vendor);
+    const refreshToken = generateVendorRefreshToken(vendor);
+
+    res.cookie('vendor_access_token', accessToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+        maxAge: 15 * 60 * 1000,
+    });
+    res.cookie('vendor_refresh_token', refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    ApiResponse.success(res, { vendor: vendor.toJSON ? vendor.toJSON() : vendor }, 'Handoff successful');
+});
+
 const updateProfile = asyncHandler(async (req, res) => {
     const vendor = await vendorService.updateProfile(req.vendor.id, req.body);
     logVendorActivity(req.vendor.id, 'update_profile', 'vendor_profile', 'Profile updated successfully', req);
@@ -189,4 +227,4 @@ const updateAbout = asyncHandler(async (req, res) => {
     ApiResponse.success(res, vendor, 'About company updated successfully');
 });
 
-module.exports = { getAll, getById, create, update, updateStatus, remove, login, logout, me, impersonate, updateProfile, changePassword, getMyActivity, forgotPassword, resetPassword, getAbout, updateAbout };
+module.exports = { getAll, getById, create, update, updateStatus, remove, login, logout, me, impersonate, updateProfile, changePassword, getMyActivity, forgotPassword, resetPassword, getAbout, updateAbout, createHandoffToken, handoff };

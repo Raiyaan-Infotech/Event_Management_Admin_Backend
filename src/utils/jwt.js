@@ -118,6 +118,21 @@ const generateClientRefreshToken = (client) => {
   );
 };
 
+// Vendor handoff — short-lived token to carry a vendor session across domains
+// (e.g. vendor portal → website builder, which lives on a different origin).
+const generateVendorHandoffToken = (vendor) => {
+  return jwt.sign(
+    { id: vendor.id, type: 'vendor_handoff' },
+    getAccessSecret(),
+    { expiresIn: '1m' }
+  );
+};
+
+const verifyVendorHandoffToken = (token) => {
+  const decoded = verifyAccessToken(token);
+  return decoded?.type === 'vendor_handoff' ? decoded : null;
+};
+
 const generateClientHandoffToken = (client) => {
   return jwt.sign(
     { id: client.id, vendorId: client.vendor_id, type: 'client_handoff' },
@@ -145,6 +160,8 @@ module.exports = {
   generateStaffRefreshToken,
   generateClientAccessToken,
   generateClientRefreshToken,
+  generateVendorHandoffToken,
+  verifyVendorHandoffToken,
   generateClientHandoffToken,
   verifyClientHandoffToken,
 };

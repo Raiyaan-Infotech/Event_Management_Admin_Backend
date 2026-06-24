@@ -89,11 +89,13 @@ router.post('/auth/login',           vendorController.login);
 router.post('/auth/logout',          vendorController.logout);
 router.post('/auth/forgot-password', vendorController.forgotPassword);
 router.post('/auth/reset-password',  vendorController.resetPassword);
+router.post('/auth/handoff',         vendorController.handoff);
 
 // ─── Vendor Portal — protected (vendor JWT) ───────────────────────────────────
 router.get('/auth/me',               isVendorAuthenticated, vendorController.me);
 router.put('/auth/profile',          isVendorAuthenticated, vendorController.updateProfile);
 router.post('/auth/change-password', isVendorAuthenticated, vendorController.changePassword);
+router.post('/auth/handoff-token',   isVendorAuthenticated, vendorController.createHandoffToken);
 router.get('/auth/activity',         isVendorAuthenticated, vendorController.getMyActivity);
 router.get('/auth/about',            isVendorAuthenticated, vendorController.getAbout);
 router.put('/auth/about',            isVendorAuthenticated, vendorController.updateAbout);
