@@ -1122,9 +1122,9 @@ const updateListItem = async (tableKey, id, vendor, data, whereExtra = '') =>
   updateRow(tableKey, id, data, vendor, whereExtra);
 
 const deleteListItem = async (tableKey, id, vendor, whereExtra = '') => {
-  // The "Other" contact category is a permanent fallback used by the contact
-  // form ("Other" reveals a free-text field), so it must never be deleted —
-  // from the builder list OR any admin/super-admin surface that hits this API.
+  // Keep the fallback "Other/Others" contact category protected at API level.
+  // The builder UI also disables its delete button, but this prevents accidental
+  // deletion from any caller that reaches this endpoint directly.
   if (tableKey === 'contactCategories') {
     const table = await requireTable(tableKey);
     const [row] = await sequelize.query(
