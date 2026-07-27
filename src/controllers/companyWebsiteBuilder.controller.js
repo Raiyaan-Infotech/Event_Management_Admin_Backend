@@ -469,6 +469,132 @@ const deleteTemplate = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, null, 'Template deleted');
 });
 
+// ─── HOW IT WORKS ─────────────────────────────────────────────────────────────
+
+const getHowItWorksSteps = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const rows = await sequelize.query(
+        'SELECT * FROM company_website_how_it_works WHERE company_id = ? ORDER BY sort_order ASC, id ASC',
+        { replacements: [companyId], type: QueryTypes.SELECT }
+    );
+    return ApiResponse.success(res, rows.map(parseRow), 'How It Works steps retrieved');
+});
+
+const createHowItWorksStep = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const s = req.body || {};
+
+    const [existingCount] = await sequelize.query(
+        'SELECT COUNT(*) as cnt FROM company_website_how_it_works WHERE company_id = ?',
+        { replacements: [companyId], type: QueryTypes.SELECT }
+    );
+
+    const stepNum = s.step_number || (existingCount[0].cnt + 1);
+    const sortOrder = s.sort_order || (existingCount[0].cnt + 1);
+
+    const [insertId] = await sequelize.query(
+        `INSERT INTO company_website_how_it_works 
+         (company_id, step_number, title, description, highlight_title, highlight_subtext, icon, illustration_url, is_active, sort_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        {
+            replacements: [
+                companyId,
+                stepNum,
+                s.title || 'New Step',
+                s.description || '',
+                s.highlight_title || '',
+                s.highlight_subtext || '',
+                s.icon || 'gift',
+                s.illustration_url || null,
+                s.is_active !== false ? 1 : 0,
+                sortOrder,
+            ],
+            type: QueryTypes.INSERT,
+        }
+    );
+
+    return ApiResponse.success(res, { id: insertId, ...s, company_id: companyId }, 'Step created successfully');
+});
+
+const updateHowItWorksStep = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    const s = req.body || {};
+
+    await sequelize.query(
+        `UPDATE company_website_how_it_works SET
+         step_number=?, title=?, description=?, highlight_title=?, highlight_subtext=?,
+         icon=?, illustration_url=?, is_active=?, sort_order=?
+         WHERE id=? AND company_id=?`,
+        {
+            replacements: [
+                s.step_number || 1,
+                s.title,
+                s.description,
+                s.highlight_title || null,
+                s.highlight_subtext || null,
+                s.icon || 'gift',
+                s.illustration_url || null,
+                s.is_active !== false ? 1 : 0,
+                s.sort_order || 0,
+                id,
+                companyId,
+            ],
+            type: QueryTypes.UPDATE,
+        }
+    );
+
+    return ApiResponse.success(res, { id, ...s }, 'Step updated successfully');
+});
+
+const deleteHowItWorksStep = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+
+    await sequelize.query(
+        'DELETE FROM company_website_how_it_works WHERE id=? AND company_id=?',
+        { replacements: [id, companyId], type: QueryTypes.DELETE }
+    );
+
+    return ApiResponse.success(res, null, 'Step deleted successfully');
+});
+
+const replaceHowItWorksSteps = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const items = Array.isArray(req.body?.items) ? req.body.items : (Array.isArray(req.body) ? req.body : []);
+
+    await sequelize.query(
+        'DELETE FROM company_website_how_it_works WHERE company_id=?',
+        { replacements: [companyId], type: QueryTypes.DELETE }
+    );
+
+    for (let i = 0; i < items.length; i++) {
+        const s = items[i];
+        await sequelize.query(
+            `INSERT INTO company_website_how_it_works 
+             (company_id, step_number, title, description, highlight_title, highlight_subtext, icon, illustration_url, is_active, sort_order)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            {
+                replacements: [
+                    companyId,
+                    s.step_number || i + 1,
+                    s.title || `Step ${i + 1}`,
+                    s.description || '',
+                    s.highlight_title || null,
+                    s.highlight_subtext || null,
+                    s.icon || 'gift',
+                    s.illustration_url || null,
+                    s.is_active !== false ? 1 : 0,
+                    s.sort_order || i + 1,
+                ],
+                type: QueryTypes.INSERT,
+            }
+        );
+    }
+
+    return ApiResponse.success(res, items, 'Steps list saved successfully');
+});
+
 module.exports = {
     getUiBlocks,
     saveUiBlocks,
@@ -492,4 +618,10 @@ module.exports = {
     createTemplate,
     updateTemplate,
     deleteTemplate,
+    getHowItWorksSteps,
+    createHowItWorksStep,
+    updateHowItWorksStep,
+    deleteHowItWorksStep,
+    replaceHowItWorksSteps,
 };
+

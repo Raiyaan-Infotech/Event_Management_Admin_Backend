@@ -44,4 +44,11 @@ router.post('/templates', controller.createTemplate);
 router.put('/templates/:id', controller.updateTemplate);
 router.delete('/templates/:id', controller.deleteTemplate);
 
+// How It Works
+router.get('/how-it-works', controller.getHowItWorksSteps);
+router.post('/how-it-works', controller.createHowItWorksStep);
+router.put('/how-it-works/:id', controller.updateHowItWorksStep);
+router.delete('/how-it-works/:id', controller.deleteHowItWorksStep);
+router.put('/how-it-works', controller.replaceHowItWorksSteps);
+
 module.exports = router;
