@@ -67,6 +67,7 @@ app.use('/api/v1/timezones', require('./routes/timezone.routes'));
 app.use('/api/v1/mail',      require('./routes/mail.routes'));
 app.use('/api/v1/chat',      require('./routes/chat.routes'));
 app.use('/api/v1/public',    require('./routes/public.routes'));
+app.use('/api/v1/website-builder', require('./routes/companyWebsiteBuilder.routes'));
 
 // Basic health check
 app.get('/health', (req, res) => {

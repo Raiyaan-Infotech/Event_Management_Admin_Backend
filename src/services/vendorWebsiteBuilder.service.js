@@ -53,6 +53,10 @@ const TABLES = {
   footer: 'vendor_website_footer_settings',
   seo: 'vendor_website_seo_settings',
   publishSnapshots: 'vendor_website_publish_snapshots',
+  pricingSettings: 'company_website_pricing_settings',
+  pricingPlans: 'company_website_pricing_plans',
+  pricingMatrixFeatures: 'company_website_pricing_matrix_features',
+  features: 'company_website_features',
 };
 
 const JSON_COLUMNS = new Set([
@@ -72,6 +76,9 @@ const JSON_COLUMNS = new Set([
   'tracking_json',
   'payload_json',
   'metadata_json',
+  'features_json',
+  'plan_values_json',
+  'bullet_points_json',
 ]);
 
 const TABLE_COLUMNS = {
@@ -313,6 +320,52 @@ const TABLE_COLUMNS = {
     'payload_json',
     'published_by',
     'published_at',
+    'is_active',
+  ],
+  pricingSettings: [
+    'section_title',
+    'section_subtitle',
+    'badge_text',
+    'individual_heading',
+    'individual_subheading',
+    'company_heading',
+    'company_subheading',
+    'yearly_discount_badge',
+  ],
+  pricingPlans: [
+    'plan_name',
+    'subtitle',
+    'target_type',
+    'currency',
+    'price_monthly',
+    'price_yearly',
+    'period_label',
+    'badge_text',
+    'badge_style',
+    'is_popular',
+    'features_json',
+    'is_active',
+    'sort_order',
+  ],
+  pricingMatrixFeatures: [
+    'feature_name',
+    'category',
+    'plan_values_json',
+    'sort_order',
+    'is_active',
+  ],
+  features: [
+    'title',
+    'short_description',
+    'detailed_description',
+    'icon',
+    'custom_icon_url',
+    'feature_image_url',
+    'bullet_points_json',
+    'show_in_menu',
+    'menu_order',
+    'status',
+    'sort_order',
     'is_active',
   ],
 };

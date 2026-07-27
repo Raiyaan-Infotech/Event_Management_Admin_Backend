@@ -83,6 +83,19 @@ router.put('/footer', controller.saveFooter);
 router.get('/seo', controller.getSeo);
 router.put('/seo', controller.saveSeo);
 
+router.get('/pricing/settings', controller.getPricingSettings);
+router.put('/pricing/settings', controller.savePricingSettings);
+router.get('/pricing/plans', controller.listPricingPlans);
+router.put('/pricing/plans', controller.savePricingPlans);
+router.get('/pricing/matrix-features', controller.listPricingMatrixFeatures);
+router.put('/pricing/matrix-features', controller.savePricingMatrixFeatures);
+
+router.get('/features', controller.listFeatures);
+router.post('/features', controller.createFeature);
+router.put('/features/:id', controller.updateFeature);
+router.delete('/features/:id', controller.deleteFeature);
+router.put('/features', controller.replaceFeatures);
+
 router.post('/publish', controller.publishWebsite);
 
 module.exports = router;
