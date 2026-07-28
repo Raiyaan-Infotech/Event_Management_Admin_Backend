@@ -595,6 +595,212 @@ const replaceHowItWorksSteps = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, items, 'Steps list saved successfully');
 });
 
+// ─── WEBSITE BUILDER FAQ CATEGORIES ──────────────────────────────────────────
+
+const getWebsiteFaqCategories = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const rows = await sequelize.query(
+        'SELECT * FROM company_website_faq_categories WHERE company_id = ? ORDER BY sort_order ASC, id ASC',
+        { replacements: [companyId], type: QueryTypes.SELECT }
+    );
+    return ApiResponse.success(res, rows, 'FAQ Categories retrieved');
+});
+
+const createWebsiteFaqCategory = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { name, description, icon, color, sort_order, is_active } = req.body || {};
+    const [id] = await sequelize.query(
+        'INSERT INTO company_website_faq_categories (company_id, name, description, icon, color, sort_order, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        {
+            replacements: [
+                companyId,
+                name || 'New Category',
+                description || null,
+                icon || 'HelpCircle',
+                color || '#7C3AED',
+                sort_order || 0,
+                is_active !== false ? 1 : 0
+            ],
+            type: QueryTypes.INSERT,
+        }
+    );
+    const [created] = await sequelize.query(
+        'SELECT * FROM company_website_faq_categories WHERE id = ?',
+        { replacements: [id], type: QueryTypes.SELECT }
+    );
+    return ApiResponse.created(res, created, 'FAQ Category created successfully');
+});
+
+const updateWebsiteFaqCategory = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    const { name, description, icon, color, sort_order, is_active } = req.body || {};
+
+    await sequelize.query(
+        'UPDATE company_website_faq_categories SET name = COALESCE(?, name), description = ?, icon = COALESCE(?, icon), color = COALESCE(?, color), sort_order = COALESCE(?, sort_order), is_active = COALESCE(?, is_active) WHERE id = ? AND company_id = ?',
+        {
+            replacements: [
+                name ?? null,
+                description ?? null,
+                icon ?? null,
+                color ?? null,
+                sort_order ?? null,
+                is_active !== undefined ? (is_active ? 1 : 0) : null,
+                id,
+                companyId
+            ],
+            type: QueryTypes.UPDATE,
+        }
+    );
+
+    const [updated] = await sequelize.query(
+        'SELECT * FROM company_website_faq_categories WHERE id = ?',
+        { replacements: [id], type: QueryTypes.SELECT }
+    );
+    return ApiResponse.success(res, updated, 'FAQ Category updated successfully');
+});
+
+const deleteWebsiteFaqCategory = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    await sequelize.query(
+        'DELETE FROM company_website_faq_categories WHERE id = ? AND company_id = ?',
+        { replacements: [id, companyId], type: QueryTypes.DELETE }
+    );
+    return ApiResponse.success(res, null, 'FAQ Category deleted successfully');
+});
+
+// ─── WEBSITE BUILDER FAQS ───────────────────────────────────────────────────
+
+const getWebsiteFaqs = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { search, category_id, is_active } = req.query;
+
+    let query = `
+        SELECT f.*, c.name as category_name, c.icon as category_icon, c.color as category_color 
+        FROM company_website_faqs f 
+        LEFT JOIN company_website_faq_categories c ON f.faq_category_id = c.id 
+        WHERE f.company_id = ?
+    `;
+    const replacements = [companyId];
+
+    if (search) {
+        query += ' AND (f.question LIKE ? OR f.answer LIKE ? OR f.tags LIKE ?)';
+        replacements.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    }
+    if (category_id && category_id !== 'all') {
+        query += ' AND f.faq_category_id = ?';
+        replacements.push(category_id);
+    }
+    if (is_active !== undefined && is_active !== '' && is_active !== 'all') {
+        query += ' AND f.is_active = ?';
+        replacements.push(is_active === 'true' || is_active === '1' ? 1 : 0);
+    }
+
+    query += ' ORDER BY f.sort_order ASC, f.id DESC';
+
+    const rows = await sequelize.query(query, { replacements, type: QueryTypes.SELECT });
+
+    const faqs = rows.map(r => ({
+        ...r,
+        category: r.category_name ? {
+            id: r.faq_category_id,
+            name: r.category_name,
+            icon: r.category_icon,
+            color: r.category_color
+        } : null
+    }));
+
+    return ApiResponse.success(res, faqs, 'FAQs retrieved');
+});
+
+const getWebsiteFaqById = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    const rows = await sequelize.query(
+        'SELECT * FROM company_website_faqs WHERE id = ? AND company_id = ? LIMIT 1',
+        { replacements: [id, companyId], type: QueryTypes.SELECT }
+    );
+    if (!rows[0]) return ApiResponse.error(res, 'FAQ not found', 404);
+    return ApiResponse.success(res, rows[0], 'FAQ details retrieved');
+});
+
+const createWebsiteFaq = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { faq_category_id, question, answer, tags, is_featured, sort_order, is_active } = req.body || {};
+
+    const [id] = await sequelize.query(
+        'INSERT INTO company_website_faqs (company_id, faq_category_id, question, answer, tags, is_featured, sort_order, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        {
+            replacements: [
+                companyId,
+                faq_category_id || 1,
+                question || '',
+                answer || '',
+                tags || null,
+                is_featured ? 1 : 0,
+                sort_order || 0,
+                is_active !== false ? 1 : 0
+            ],
+            type: QueryTypes.INSERT,
+        }
+    );
+
+    const [created] = await sequelize.query(
+        'SELECT * FROM company_website_faqs WHERE id = ?',
+        { replacements: [id], type: QueryTypes.SELECT }
+    );
+    return ApiResponse.created(res, created, 'FAQ created successfully');
+});
+
+const updateWebsiteFaq = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    const { faq_category_id, question, answer, tags, is_featured, sort_order, is_active } = req.body || {};
+
+    await sequelize.query(
+        `UPDATE company_website_faqs SET 
+            faq_category_id = COALESCE(?, faq_category_id),
+            question = COALESCE(?, question),
+            answer = COALESCE(?, answer),
+            tags = ?,
+            is_featured = COALESCE(?, is_featured),
+            sort_order = COALESCE(?, sort_order),
+            is_active = COALESCE(?, is_active)
+        WHERE id = ? AND company_id = ?`,
+        {
+            replacements: [
+                faq_category_id ?? null,
+                question ?? null,
+                answer ?? null,
+                tags ?? null,
+                is_featured !== undefined ? (is_featured ? 1 : 0) : null,
+                sort_order ?? null,
+                is_active !== undefined ? (is_active ? 1 : 0) : null,
+                id,
+                companyId
+            ],
+            type: QueryTypes.UPDATE,
+        }
+    );
+
+    const [updated] = await sequelize.query(
+        'SELECT * FROM company_website_faqs WHERE id = ?',
+        { replacements: [id], type: QueryTypes.SELECT }
+    );
+    return ApiResponse.success(res, updated, 'FAQ updated successfully');
+});
+
+const deleteWebsiteFaq = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    await sequelize.query(
+        'DELETE FROM company_website_faqs WHERE id = ? AND company_id = ?',
+        { replacements: [id, companyId], type: QueryTypes.DELETE }
+    );
+    return ApiResponse.success(res, null, 'FAQ deleted successfully');
+});
+
 module.exports = {
     getUiBlocks,
     saveUiBlocks,
@@ -623,5 +829,14 @@ module.exports = {
     updateHowItWorksStep,
     deleteHowItWorksStep,
     replaceHowItWorksSteps,
+    getWebsiteFaqCategories,
+    createWebsiteFaqCategory,
+    updateWebsiteFaqCategory,
+    deleteWebsiteFaqCategory,
+    getWebsiteFaqs,
+    getWebsiteFaqById,
+    createWebsiteFaq,
+    updateWebsiteFaq,
+    deleteWebsiteFaq,
 };
 

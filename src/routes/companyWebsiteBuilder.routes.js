@@ -51,4 +51,17 @@ router.put('/how-it-works/:id', controller.updateHowItWorksStep);
 router.delete('/how-it-works/:id', controller.deleteHowItWorksStep);
 router.put('/how-it-works', controller.replaceHowItWorksSteps);
 
+// FAQ Categories
+router.get('/faq-categories', controller.getWebsiteFaqCategories);
+router.post('/faq-categories', controller.createWebsiteFaqCategory);
+router.put('/faq-categories/:id', controller.updateWebsiteFaqCategory);
+router.delete('/faq-categories/:id', controller.deleteWebsiteFaqCategory);
+
+// FAQs
+router.get('/faqs', controller.getWebsiteFaqs);
+router.get('/faqs/:id', controller.getWebsiteFaqById);
+router.post('/faqs', controller.createWebsiteFaq);
+router.put('/faqs/:id', controller.updateWebsiteFaq);
+router.delete('/faqs/:id', controller.deleteWebsiteFaq);
+
 module.exports = router;
