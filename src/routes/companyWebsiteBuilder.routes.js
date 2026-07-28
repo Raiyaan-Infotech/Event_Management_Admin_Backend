@@ -31,6 +31,8 @@ router.put('/pricing/matrix-features', controller.savePricingMatrixFeatures);
 router.get('/features', controller.getFeatures);
 router.post('/features', controller.createFeature);
 router.put('/features/:id', controller.updateFeature);
+router.patch('/features/:id/status', controller.updateFeatureStatus);
+router.put('/features/:id/status', controller.updateFeatureStatus);
 router.delete('/features/:id', controller.deleteFeature);
 router.put('/features', controller.replaceFeatures);
 
@@ -56,12 +58,16 @@ router.get('/how-it-works', controller.getHowItWorksSteps);
 router.post('/how-it-works', controller.createHowItWorksStep);
 router.put('/how-it-works', controller.replaceHowItWorksSteps);
 router.put('/how-it-works/:id', controller.updateHowItWorksStep);
+router.patch('/how-it-works/:id/status', controller.updateHowItWorksStepStatus);
+router.put('/how-it-works/:id/status', controller.updateHowItWorksStepStatus);
 router.delete('/how-it-works/:id', controller.deleteHowItWorksStep);
 
 // FAQ Categories
 router.get('/faq-categories', controller.getWebsiteFaqCategories);
 router.post('/faq-categories', controller.createWebsiteFaqCategory);
 router.put('/faq-categories/:id', controller.updateWebsiteFaqCategory);
+router.patch('/faq-categories/:id/status', controller.updateWebsiteFaqCategoryStatus);
+router.put('/faq-categories/:id/status', controller.updateWebsiteFaqCategoryStatus);
 router.delete('/faq-categories/:id', controller.deleteWebsiteFaqCategory);
 
 // FAQs
@@ -69,6 +75,8 @@ router.get('/faqs', controller.getWebsiteFaqs);
 router.get('/faqs/:id', controller.getWebsiteFaqById);
 router.post('/faqs', controller.createWebsiteFaq);
 router.put('/faqs/:id', controller.updateWebsiteFaq);
+router.patch('/faqs/:id/status', controller.updateWebsiteFaqStatus);
+router.put('/faqs/:id/status', controller.updateWebsiteFaqStatus);
 router.delete('/faqs/:id', controller.deleteWebsiteFaq);
 
 module.exports = router;

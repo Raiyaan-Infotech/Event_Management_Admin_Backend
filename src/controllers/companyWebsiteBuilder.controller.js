@@ -319,6 +319,27 @@ const deleteFeature = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, null, 'Feature deleted');
 });
 
+const updateFeatureStatus = asyncHandler(async (req, res) => {
+    await ensureFeaturesTable();
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    const { is_active, status } = req.body || {};
+
+    const activeBool = is_active !== undefined ? (is_active === true || is_active === 1 || is_active === '1') : (status === 'Active');
+    const isActiveVal = activeBool ? 1 : 0;
+    const statusStr = status || (activeBool ? 'Active' : 'Inactive');
+
+    await sequelize.query(
+        'UPDATE company_website_features SET is_active = ?, status = ? WHERE id = ? AND company_id = ?',
+        {
+            replacements: [isActiveVal, statusStr, id, companyId],
+            type: QueryTypes.UPDATE,
+        }
+    );
+
+    return ApiResponse.success(res, { id, is_active: isActiveVal === 1, status: statusStr }, 'Feature status updated successfully');
+});
+
 const replaceFeatures = asyncHandler(async (req, res) => {
     await ensureFeaturesTable();
     const companyId = getCompanyId(req);
@@ -730,6 +751,25 @@ const updateHowItWorksStep = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, { id, ...s }, 'Step updated successfully');
 });
 
+const updateHowItWorksStepStatus = asyncHandler(async (req, res) => {
+    await ensureHowItWorksTable();
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    const { is_active } = req.body || {};
+
+    const isActiveVal = (is_active === false || is_active === 0 || is_active === '0') ? 0 : 1;
+
+    await sequelize.query(
+        'UPDATE company_website_how_it_works SET is_active = ? WHERE id = ? AND company_id = ?',
+        {
+            replacements: [isActiveVal, id, companyId],
+            type: QueryTypes.UPDATE,
+        }
+    );
+
+    return ApiResponse.success(res, { id, is_active: isActiveVal === 1 }, 'Step status updated successfully');
+});
+
 const deleteHowItWorksStep = asyncHandler(async (req, res) => {
     await ensureHowItWorksTable();
     const companyId = getCompanyId(req);
@@ -986,6 +1026,40 @@ const deleteWebsiteFaq = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, null, 'FAQ deleted successfully');
 });
 
+const updateWebsiteFaqCategoryStatus = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    const { is_active } = req.body || {};
+    const isActiveVal = (is_active === false || is_active === 0 || is_active === '0') ? 0 : 1;
+
+    await sequelize.query(
+        'UPDATE company_website_faq_categories SET is_active = ? WHERE id = ? AND company_id = ?',
+        {
+            replacements: [isActiveVal, id, companyId],
+            type: QueryTypes.UPDATE,
+        }
+    );
+
+    return ApiResponse.success(res, { id, is_active: isActiveVal === 1 }, 'FAQ category status updated successfully');
+});
+
+const updateWebsiteFaqStatus = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    const { is_active } = req.body || {};
+    const isActiveVal = (is_active === false || is_active === 0 || is_active === '0') ? 0 : 1;
+
+    await sequelize.query(
+        'UPDATE company_website_faqs SET is_active = ? WHERE id = ? AND company_id = ?',
+        {
+            replacements: [isActiveVal, id, companyId],
+            type: QueryTypes.UPDATE,
+        }
+    );
+
+    return ApiResponse.success(res, { id, is_active: isActiveVal === 1 }, 'FAQ status updated successfully');
+});
+
 module.exports = {
     getUiBlocks,
     saveUiBlocks,
@@ -1000,6 +1074,7 @@ module.exports = {
     getFeatures,
     createFeature,
     updateFeature,
+    updateFeatureStatus,
     deleteFeature,
     replaceFeatures,
     getTemplateCategories,
@@ -1016,16 +1091,19 @@ module.exports = {
     getHowItWorksSteps,
     createHowItWorksStep,
     updateHowItWorksStep,
+    updateHowItWorksStepStatus,
     deleteHowItWorksStep,
     replaceHowItWorksSteps,
     getWebsiteFaqCategories,
     createWebsiteFaqCategory,
     updateWebsiteFaqCategory,
+    updateWebsiteFaqCategoryStatus,
     deleteWebsiteFaqCategory,
     getWebsiteFaqs,
     getWebsiteFaqById,
     createWebsiteFaq,
     updateWebsiteFaq,
+    updateWebsiteFaqStatus,
     deleteWebsiteFaq,
 };
 
