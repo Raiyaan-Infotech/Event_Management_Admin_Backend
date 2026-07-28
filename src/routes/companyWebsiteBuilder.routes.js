@@ -30,11 +30,11 @@ router.put('/pricing/matrix-features', controller.savePricingMatrixFeatures);
 // Features
 router.get('/features', controller.getFeatures);
 router.post('/features', controller.createFeature);
+router.put('/features', controller.replaceFeatures);
 router.put('/features/:id', controller.updateFeature);
 router.patch('/features/:id/status', controller.updateFeatureStatus);
 router.put('/features/:id/status', controller.updateFeatureStatus);
 router.delete('/features/:id', controller.deleteFeature);
-router.put('/features', controller.replaceFeatures);
 
 // Template Categories
 router.get('/templates/categories', controller.getTemplateCategories);

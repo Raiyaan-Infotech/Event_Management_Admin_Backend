@@ -289,7 +289,33 @@ const updateFeature = asyncHandler(async (req, res) => {
     const companyId = getCompanyId(req);
     const { id } = req.params;
     const f = req.body || {};
-    const imgUrl = f.image_url || f.feature_image_url || null;
+
+    const [existing] = await sequelize.query(
+        'SELECT * FROM company_website_features WHERE id = ? AND company_id = ?',
+        { replacements: [id, companyId], type: QueryTypes.SELECT }
+    );
+
+    if (!existing) {
+        return ApiResponse.error(res, 'Feature not found', 404);
+    }
+
+    const title = f.title !== undefined ? f.title : existing.title;
+    const short_description = f.short_description !== undefined ? f.short_description : existing.short_description;
+    const detailed_description = f.detailed_description !== undefined ? f.detailed_description : existing.detailed_description;
+    const icon = f.icon !== undefined ? f.icon : (existing.icon || 'calendar');
+    const custom_icon_url = f.custom_icon_url !== undefined ? f.custom_icon_url : existing.custom_icon_url;
+    const imgUrl = f.image_url !== undefined ? f.image_url : (f.feature_image_url !== undefined ? f.feature_image_url : existing.feature_image_url);
+    let bullet_points_json = existing.bullet_points_json;
+    if (f.bullet_points_json !== undefined) {
+        bullet_points_json = typeof f.bullet_points_json === 'string' ? f.bullet_points_json : JSON.stringify(f.bullet_points_json || []);
+    } else if (typeof bullet_points_json !== 'string') {
+        bullet_points_json = JSON.stringify(bullet_points_json || []);
+    }
+    const show_in_menu = f.show_in_menu !== undefined ? (f.show_in_menu ? 1 : 0) : (existing.show_in_menu !== undefined ? existing.show_in_menu : 1);
+    const menu_order = f.menu_order !== undefined ? f.menu_order : (existing.menu_order || 1);
+    const status = f.status !== undefined ? f.status : (existing.status || 'Active');
+    const sort_order = f.sort_order !== undefined ? f.sort_order : (existing.sort_order || 0);
+
     await sequelize.query(
         `UPDATE company_website_features SET
          title=?, short_description=?, detailed_description=?, icon=?, custom_icon_url=?,
@@ -297,15 +323,14 @@ const updateFeature = asyncHandler(async (req, res) => {
          WHERE id=? AND company_id=?`,
         {
             replacements: [
-                f.title, f.short_description, f.detailed_description || null,
-                f.icon || 'calendar', f.custom_icon_url || null, imgUrl,
-                JSON.stringify(f.bullet_points_json || []), f.show_in_menu ? 1 : 0,
-                f.menu_order || 1, f.status || 'Active', f.sort_order || 0, id, companyId,
+                title, short_description, detailed_description, icon, custom_icon_url,
+                imgUrl, bullet_points_json, show_in_menu, menu_order, status, sort_order,
+                id, companyId,
             ],
             type: QueryTypes.UPDATE,
         }
     );
-    return ApiResponse.success(res, { id, ...f }, 'Feature updated');
+    return ApiResponse.success(res, { id, title, show_in_menu, status }, 'Feature updated');
 });
 
 const deleteFeature = asyncHandler(async (req, res) => {
