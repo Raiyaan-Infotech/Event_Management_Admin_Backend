@@ -128,6 +128,8 @@ const savePricingPlans = asyncHandler(async (req, res) => {
 
     for (let i = 0; i < items.length; i++) {
         const p = items[i];
+        const isActiveVal = (p.is_active === false || p.is_active === 0 || p.is_active === '0') ? 0 : 1;
+        const isPopularVal = (p.is_popular === true || p.is_popular === 1 || p.is_popular === '1') ? 1 : 0;
         await sequelize.query(
             `INSERT INTO company_website_pricing_plans
              (company_id, plan_name, subtitle, target_type, currency, price_monthly, price_yearly,
@@ -138,14 +140,43 @@ const savePricingPlans = asyncHandler(async (req, res) => {
                     companyId, p.plan_name, p.subtitle || '', p.target_type || 'individuals',
                     p.currency || '₹', p.price_monthly || 0, p.price_yearly || 0,
                     p.period_label || '/Month', p.badge_text || '', p.badge_style || 'filled',
-                    p.is_popular ? 1 : 0, JSON.stringify(p.features_json || []),
-                    p.is_active !== false ? 1 : 0, i,
+                    isPopularVal, JSON.stringify(p.features_json || []),
+                    isActiveVal, i,
                 ],
                 type: QueryTypes.INSERT,
             }
         );
     }
     return ApiResponse.success(res, items, 'Pricing plans saved');
+});
+
+const updatePricingPlanStatus = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    const { is_active } = req.body;
+    const isActiveVal = (is_active === false || is_active === 0 || is_active === '0') ? 0 : 1;
+
+    await sequelize.query(
+        'UPDATE company_website_pricing_plans SET is_active = ? WHERE id = ? AND company_id = ?',
+        {
+            replacements: [isActiveVal, id, companyId],
+            type: QueryTypes.UPDATE,
+        }
+    );
+
+    return ApiResponse.success(res, { id, is_active: isActiveVal === 1 }, 'Pricing plan status updated successfully');
+});
+
+const deletePricingPlan = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+
+    await sequelize.query(
+        'DELETE FROM company_website_pricing_plans WHERE id = ? AND company_id = ?',
+        { replacements: [id, companyId], type: QueryTypes.DELETE }
+    );
+
+    return ApiResponse.success(res, null, 'Pricing plan deleted successfully');
 });
 
 // ─── PRICING MATRIX FEATURES ──────────────────────────────────────────────────
@@ -185,7 +216,43 @@ const savePricingMatrixFeatures = asyncHandler(async (req, res) => {
 
 // ─── FEATURES ─────────────────────────────────────────────────────────────────
 
+const ensureFeaturesTable = async () => {
+    try {
+        await sequelize.query(`
+            CREATE TABLE IF NOT EXISTS company_website_features (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                company_id INT NOT NULL DEFAULT 1,
+                title VARCHAR(255) NOT NULL,
+                short_description LONGTEXT NULL,
+                detailed_description LONGTEXT NULL,
+                icon LONGTEXT NULL,
+                custom_icon_url LONGTEXT NULL,
+                feature_image_url LONGTEXT NULL,
+                image_url LONGTEXT NULL,
+                bullet_points_json LONGTEXT NULL,
+                show_in_menu TINYINT(1) DEFAULT 1,
+                menu_order INT DEFAULT 1,
+                status VARCHAR(50) DEFAULT 'Active',
+                is_active TINYINT(1) DEFAULT 1,
+                sort_order INT DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        `);
+
+        const alterCols = ['icon', 'custom_icon_url', 'feature_image_url', 'image_url', 'short_description', 'detailed_description'];
+        for (const col of alterCols) {
+            try {
+                await sequelize.query(`ALTER TABLE company_website_features MODIFY COLUMN ${col} LONGTEXT NULL;`);
+            } catch (_) {}
+        }
+    } catch (err) {
+        console.error('Error ensuring company_website_features table:', err);
+    }
+};
+
 const getFeatures = asyncHandler(async (req, res) => {
+    await ensureFeaturesTable();
     const companyId = getCompanyId(req);
     const rows = await sequelize.query(
         'SELECT * FROM company_website_features WHERE company_id = ? ORDER BY sort_order ASC, id ASC',
@@ -195,8 +262,10 @@ const getFeatures = asyncHandler(async (req, res) => {
 });
 
 const createFeature = asyncHandler(async (req, res) => {
+    await ensureFeaturesTable();
     const companyId = getCompanyId(req);
     const f = req.body || {};
+    const imgUrl = f.image_url || f.feature_image_url || null;
     const [, meta] = await sequelize.query(
         `INSERT INTO company_website_features
          (company_id, title, short_description, detailed_description, icon, custom_icon_url,
@@ -205,7 +274,7 @@ const createFeature = asyncHandler(async (req, res) => {
         {
             replacements: [
                 companyId, f.title, f.short_description, f.detailed_description || null,
-                f.icon || 'calendar', f.custom_icon_url || null, f.feature_image_url || null,
+                f.icon || 'calendar', f.custom_icon_url || null, imgUrl,
                 JSON.stringify(f.bullet_points_json || []), f.show_in_menu ? 1 : 0,
                 f.menu_order || 1, f.status || 'Active', f.sort_order || 0, 1,
             ],
@@ -216,9 +285,11 @@ const createFeature = asyncHandler(async (req, res) => {
 });
 
 const updateFeature = asyncHandler(async (req, res) => {
+    await ensureFeaturesTable();
     const companyId = getCompanyId(req);
     const { id } = req.params;
     const f = req.body || {};
+    const imgUrl = f.image_url || f.feature_image_url || null;
     await sequelize.query(
         `UPDATE company_website_features SET
          title=?, short_description=?, detailed_description=?, icon=?, custom_icon_url=?,
@@ -227,7 +298,7 @@ const updateFeature = asyncHandler(async (req, res) => {
         {
             replacements: [
                 f.title, f.short_description, f.detailed_description || null,
-                f.icon || 'calendar', f.custom_icon_url || null, f.feature_image_url || null,
+                f.icon || 'calendar', f.custom_icon_url || null, imgUrl,
                 JSON.stringify(f.bullet_points_json || []), f.show_in_menu ? 1 : 0,
                 f.menu_order || 1, f.status || 'Active', f.sort_order || 0, id, companyId,
             ],
@@ -238,6 +309,7 @@ const updateFeature = asyncHandler(async (req, res) => {
 });
 
 const deleteFeature = asyncHandler(async (req, res) => {
+    await ensureFeaturesTable();
     const companyId = getCompanyId(req);
     const { id } = req.params;
     await sequelize.query(
@@ -248,6 +320,7 @@ const deleteFeature = asyncHandler(async (req, res) => {
 });
 
 const replaceFeatures = asyncHandler(async (req, res) => {
+    await ensureFeaturesTable();
     const companyId = getCompanyId(req);
     const items = Array.isArray(req.body?.items) ? req.body.items : (Array.isArray(req.body) ? req.body : []);
 
@@ -258,6 +331,7 @@ const replaceFeatures = asyncHandler(async (req, res) => {
 
     for (let i = 0; i < items.length; i++) {
         const f = items[i];
+        const imgUrl = f.image_url || f.feature_image_url || null;
         await sequelize.query(
             `INSERT INTO company_website_features
              (company_id, title, short_description, detailed_description, icon, custom_icon_url,
@@ -266,7 +340,7 @@ const replaceFeatures = asyncHandler(async (req, res) => {
             {
                 replacements: [
                     companyId, f.title, f.short_description, f.detailed_description || null,
-                    f.icon || 'calendar', f.custom_icon_url || null, f.feature_image_url || null,
+                    f.icon || 'calendar', f.custom_icon_url || null, imgUrl,
                     JSON.stringify(f.bullet_points_json || []), f.show_in_menu ? 1 : 0,
                     f.menu_order || 1, f.status || 'Active', i, 1,
                 ],
@@ -342,6 +416,7 @@ const updateTemplateCategory = asyncHandler(async (req, res) => {
     const { id } = req.params;
     const c = req.body || {};
     const slug = c.slug || String(c.name || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const isActiveVal = (c.is_active === false || c.is_active === 0 || c.is_active === '0') ? 0 : 1;
     await sequelize.query(
         `UPDATE company_template_categories SET
          name=?, slug=?, description=?, icon=?, color=?, sort_order=?, is_active=?
@@ -349,12 +424,29 @@ const updateTemplateCategory = asyncHandler(async (req, res) => {
         {
             replacements: [
                 c.name, slug, c.description || null, c.icon || 'tag',
-                c.color || '#6A38F5', c.sort_order || 0, c.is_active !== false ? 1 : 0, id, companyId,
+                c.color || '#6A38F5', c.sort_order || 0, isActiveVal, id, companyId,
             ],
             type: QueryTypes.UPDATE,
         }
     );
     return ApiResponse.success(res, { id, ...c, slug }, 'Template category updated');
+});
+
+const updateTemplateCategoryStatus = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    const { is_active } = req.body;
+    const isActiveVal = (is_active === false || is_active === 0 || is_active === '0') ? 0 : 1;
+
+    await sequelize.query(
+        'UPDATE company_template_categories SET is_active = ? WHERE id = ? AND company_id = ?',
+        {
+            replacements: [isActiveVal, id, companyId],
+            type: QueryTypes.UPDATE,
+        }
+    );
+
+    return ApiResponse.success(res, { id, is_active: isActiveVal === 1 }, 'Template category status updated successfully');
 });
 
 const deleteTemplateCategory = asyncHandler(async (req, res) => {
@@ -369,7 +461,45 @@ const deleteTemplateCategory = asyncHandler(async (req, res) => {
 
 // ─── TEMPLATES ────────────────────────────────────────────────────────────────
 
+const ensureTemplatesTable = async () => {
+    try {
+        await sequelize.query(`
+            CREATE TABLE IF NOT EXISTS company_templates (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                company_id INT NOT NULL DEFAULT 1,
+                category_id INT NULL,
+                template_name VARCHAR(255) NOT NULL,
+                slug VARCHAR(255) NULL,
+                description LONGTEXT NULL,
+                template_type VARCHAR(100) DEFAULT 'wedding',
+                design_style VARCHAR(100) DEFAULT 'classic',
+                primary_color VARCHAR(50) DEFAULT '#6A38F5',
+                thumbnail_url LONGTEXT NULL,
+                template_file_url LONGTEXT NULL,
+                preview_url LONGTEXT NULL,
+                is_active TINYINT(1) DEFAULT 1,
+                allow_customize TINYINT(1) DEFAULT 1,
+                is_draft TINYINT(1) DEFAULT 0,
+                is_popular TINYINT(1) DEFAULT 0,
+                sort_order INT DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        `);
+
+        const alterCols = ['thumbnail_url', 'template_file_url', 'preview_url', 'description'];
+        for (const col of alterCols) {
+            try {
+                await sequelize.query(`ALTER TABLE company_templates MODIFY COLUMN ${col} LONGTEXT NULL;`);
+            } catch (_) {}
+        }
+    } catch (err) {
+        console.error('Error ensuring company_templates table:', err);
+    }
+};
+
 const getTemplates = asyncHandler(async (req, res) => {
+    await ensureTemplatesTable();
     const companyId = getCompanyId(req);
     const { category_id, template_type, search } = req.query;
 
@@ -396,6 +526,7 @@ const getTemplates = asyncHandler(async (req, res) => {
 });
 
 const getTemplateById = asyncHandler(async (req, res) => {
+    await ensureTemplatesTable();
     const companyId = getCompanyId(req);
     const { id } = req.params;
     const rows = await sequelize.query(
@@ -409,6 +540,7 @@ const getTemplateById = asyncHandler(async (req, res) => {
 });
 
 const createTemplate = asyncHandler(async (req, res) => {
+    await ensureTemplatesTable();
     const companyId = getCompanyId(req);
     const t = req.body || {};
     const slug = t.slug || String(t.template_name || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -434,10 +566,14 @@ const createTemplate = asyncHandler(async (req, res) => {
 });
 
 const updateTemplate = asyncHandler(async (req, res) => {
+    await ensureTemplatesTable();
     const companyId = getCompanyId(req);
     const { id } = req.params;
     const t = req.body || {};
     const slug = t.slug || String(t.template_name || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+    const isActiveVal = (t.is_active === false || t.is_active === 0 || t.is_active === '0') ? 0 : 1;
+    const allowCustomizeVal = (t.allow_customize === false || t.allow_customize === 0 || t.allow_customize === '0') ? 0 : 1;
 
     await sequelize.query(
         `UPDATE company_templates SET
@@ -450,13 +586,30 @@ const updateTemplate = asyncHandler(async (req, res) => {
                 t.category_id || null, t.template_name, slug, t.description || null,
                 t.template_type || 'wedding', t.design_style || 'classic', t.primary_color || '#6A38F5',
                 t.thumbnail_url || null, t.template_file_url || null, t.preview_url || null,
-                t.is_active !== false ? 1 : 0, t.allow_customize !== false ? 1 : 0,
+                isActiveVal, allowCustomizeVal,
                 t.is_draft ? 1 : 0, t.is_popular ? 1 : 0, t.sort_order || 0, id, companyId,
             ],
             type: QueryTypes.UPDATE,
         }
     );
     return ApiResponse.success(res, { id, ...t, slug }, 'Template updated');
+});
+
+const updateTemplateStatus = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    const { is_active } = req.body;
+    const isActiveVal = (is_active === false || is_active === 0 || is_active === '0') ? 0 : 1;
+
+    await sequelize.query(
+        'UPDATE company_templates SET is_active = ? WHERE id = ? AND company_id = ?',
+        {
+            replacements: [isActiveVal, id, companyId],
+            type: QueryTypes.UPDATE,
+        }
+    );
+
+    return ApiResponse.success(res, { id, is_active: isActiveVal === 1 }, 'Template status updated successfully');
 });
 
 const deleteTemplate = asyncHandler(async (req, res) => {
@@ -471,7 +624,35 @@ const deleteTemplate = asyncHandler(async (req, res) => {
 
 // ─── HOW IT WORKS ─────────────────────────────────────────────────────────────
 
+const ensureHowItWorksTable = async () => {
+    try {
+        await sequelize.query(`
+            CREATE TABLE IF NOT EXISTS company_website_how_it_works (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                company_id INT NOT NULL DEFAULT 1,
+                step_number INT NOT NULL DEFAULT 1,
+                title VARCHAR(255) NOT NULL,
+                description TEXT NULL,
+                highlight_title VARCHAR(255) NULL,
+                highlight_subtext VARCHAR(255) NULL,
+                icon LONGTEXT NULL,
+                illustration_url LONGTEXT NULL,
+                is_active TINYINT(1) DEFAULT 1,
+                sort_order INT DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        `);
+        await sequelize.query(`ALTER TABLE company_website_how_it_works MODIFY COLUMN illustration_url LONGTEXT NULL;`).catch(() => {});
+        await sequelize.query(`ALTER TABLE company_website_how_it_works MODIFY COLUMN icon LONGTEXT NULL;`).catch(() => {});
+        await sequelize.query(`ALTER TABLE company_website_how_it_works MODIFY COLUMN description TEXT NULL;`).catch(() => {});
+    } catch (e) {
+        // Ignore alter error if table already matches
+    }
+};
+
 const getHowItWorksSteps = asyncHandler(async (req, res) => {
+    await ensureHowItWorksTable();
     const companyId = getCompanyId(req);
     const rows = await sequelize.query(
         'SELECT * FROM company_website_how_it_works WHERE company_id = ? ORDER BY sort_order ASC, id ASC',
@@ -481,6 +662,7 @@ const getHowItWorksSteps = asyncHandler(async (req, res) => {
 });
 
 const createHowItWorksStep = asyncHandler(async (req, res) => {
+    await ensureHowItWorksTable();
     const companyId = getCompanyId(req);
     const s = req.body || {};
 
@@ -489,8 +671,8 @@ const createHowItWorksStep = asyncHandler(async (req, res) => {
         { replacements: [companyId], type: QueryTypes.SELECT }
     );
 
-    const stepNum = s.step_number || (existingCount[0].cnt + 1);
-    const sortOrder = s.sort_order || (existingCount[0].cnt + 1);
+    const stepNum = s.step_number || (existingCount[0]?.cnt ? Number(existingCount[0].cnt) + 1 : 1);
+    const sortOrder = s.sort_order || stepNum;
 
     const [insertId] = await sequelize.query(
         `INSERT INTO company_website_how_it_works 
@@ -517,6 +699,7 @@ const createHowItWorksStep = asyncHandler(async (req, res) => {
 });
 
 const updateHowItWorksStep = asyncHandler(async (req, res) => {
+    await ensureHowItWorksTable();
     const companyId = getCompanyId(req);
     const { id } = req.params;
     const s = req.body || {};
@@ -548,6 +731,7 @@ const updateHowItWorksStep = asyncHandler(async (req, res) => {
 });
 
 const deleteHowItWorksStep = asyncHandler(async (req, res) => {
+    await ensureHowItWorksTable();
     const companyId = getCompanyId(req);
     const { id } = req.params;
 
@@ -560,6 +744,7 @@ const deleteHowItWorksStep = asyncHandler(async (req, res) => {
 });
 
 const replaceHowItWorksSteps = asyncHandler(async (req, res) => {
+    await ensureHowItWorksTable();
     const companyId = getCompanyId(req);
     const items = Array.isArray(req.body?.items) ? req.body.items : (Array.isArray(req.body) ? req.body : []);
 
@@ -808,6 +993,8 @@ module.exports = {
     savePricingSettings,
     getPricingPlans,
     savePricingPlans,
+    updatePricingPlanStatus,
+    deletePricingPlan,
     getPricingMatrixFeatures,
     savePricingMatrixFeatures,
     getFeatures,
@@ -818,11 +1005,13 @@ module.exports = {
     getTemplateCategories,
     createTemplateCategory,
     updateTemplateCategory,
+    updateTemplateCategoryStatus,
     deleteTemplateCategory,
     getTemplates,
     getTemplateById,
     createTemplate,
     updateTemplate,
+    updateTemplateStatus,
     deleteTemplate,
     getHowItWorksSteps,
     createHowItWorksStep,

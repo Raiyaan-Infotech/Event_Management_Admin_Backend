@@ -19,6 +19,9 @@ router.put('/pricing/settings', controller.savePricingSettings);
 // Pricing Plans
 router.get('/pricing/plans', controller.getPricingPlans);
 router.put('/pricing/plans', controller.savePricingPlans);
+router.patch('/pricing/plans/:id/status', controller.updatePricingPlanStatus);
+router.put('/pricing/plans/:id/status', controller.updatePricingPlanStatus);
+router.delete('/pricing/plans/:id', controller.deletePricingPlan);
 
 // Pricing Matrix Features
 router.get('/pricing/matrix-features', controller.getPricingMatrixFeatures);
@@ -35,6 +38,8 @@ router.put('/features', controller.replaceFeatures);
 router.get('/templates/categories', controller.getTemplateCategories);
 router.post('/templates/categories', controller.createTemplateCategory);
 router.put('/templates/categories/:id', controller.updateTemplateCategory);
+router.patch('/templates/categories/:id/status', controller.updateTemplateCategoryStatus);
+router.put('/templates/categories/:id/status', controller.updateTemplateCategoryStatus);
 router.delete('/templates/categories/:id', controller.deleteTemplateCategory);
 
 // Templates
@@ -42,14 +47,16 @@ router.get('/templates', controller.getTemplates);
 router.get('/templates/:id', controller.getTemplateById);
 router.post('/templates', controller.createTemplate);
 router.put('/templates/:id', controller.updateTemplate);
+router.patch('/templates/:id/status', controller.updateTemplateStatus);
+router.put('/templates/:id/status', controller.updateTemplateStatus);
 router.delete('/templates/:id', controller.deleteTemplate);
 
 // How It Works
 router.get('/how-it-works', controller.getHowItWorksSteps);
 router.post('/how-it-works', controller.createHowItWorksStep);
+router.put('/how-it-works', controller.replaceHowItWorksSteps);
 router.put('/how-it-works/:id', controller.updateHowItWorksStep);
 router.delete('/how-it-works/:id', controller.deleteHowItWorksStep);
-router.put('/how-it-works', controller.replaceHowItWorksSteps);
 
 // FAQ Categories
 router.get('/faq-categories', controller.getWebsiteFaqCategories);
