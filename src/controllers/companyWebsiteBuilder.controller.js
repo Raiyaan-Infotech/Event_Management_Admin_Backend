@@ -1,6 +1,7 @@
 const ApiResponse = require('../utils/apiResponse');
 const { asyncHandler } = require('../utils/helpers');
 const { sequelize, Sequelize } = require('../models');
+const websiteService = require('../services/companyWebsiteBuilder.service');
 
 const { QueryTypes } = Sequelize;
 
@@ -1632,6 +1633,52 @@ const updateVideoTutorialStatus = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, { id, is_active: isActiveVal === 1 }, 'Video tutorial status updated successfully');
 });
 
+// ─── GENERIC SINGLETON & LIST CONTROLLER HELPERS ─────────────────────────────
+
+const getSingleton = (tableKey, message) => asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const data = await websiteService.getSingleton(tableKey, companyId);
+    return ApiResponse.success(res, data, message || 'Section retrieved');
+});
+
+const saveSingleton = (tableKey, message) => asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const data = await websiteService.upsertSingleton(tableKey, companyId, req.body || {});
+    return ApiResponse.success(res, data, message || 'Section saved');
+});
+
+const listItems = (tableKey, message) => asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const data = await websiteService.getList(tableKey, companyId);
+    return ApiResponse.success(res, data, message || 'Items retrieved');
+});
+
+const replaceItems = (tableKey, message) => asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const items = Array.isArray(req.body) ? req.body : (Array.isArray(req.body?.items) ? req.body.items : []);
+    const data = await websiteService.replaceList(tableKey, companyId, items);
+    return ApiResponse.success(res, data, message || 'Items saved');
+});
+
+const createItem = (tableKey, message, getExtra = null) => asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const extra = getExtra ? getExtra(req) : {};
+    const data = await websiteService.createListItem(tableKey, companyId, req.body || {}, extra);
+    return ApiResponse.created(res, data, message || 'Item created');
+});
+
+const updateItem = (tableKey, message) => asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const data = await websiteService.updateListItem(tableKey, req.params.id, companyId, req.body || {});
+    return ApiResponse.success(res, data, message || 'Item updated');
+});
+
+const deleteItem = (tableKey, message) => asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const data = await websiteService.deleteListItem(tableKey, req.params.id, companyId);
+    return ApiResponse.success(res, data, message || 'Item deleted');
+});
+
 const deleteVideoTutorial = asyncHandler(async (req, res) => {
     const companyId = getCompanyId(req);
     const { id } = req.params;
@@ -1643,8 +1690,65 @@ const deleteVideoTutorial = asyncHandler(async (req, res) => {
 });
 
 
- 
- 
+// ─── COMPANY SCOPED SINGLETON & LIST CONTROLLERS ─────────────────────────────
+
+const getBasicInformation = getSingleton('basicInformation', 'Basic information retrieved');
+const saveBasicInformation = saveSingleton('basicInformation', 'Basic information saved');
+const getHeroSection = getSingleton('heroSection', 'Hero section retrieved');
+const saveHeroSection = saveSingleton('heroSection', 'Hero section saved');
+const getFooter = getSingleton('footer', 'Footer settings retrieved');
+const saveFooter = saveSingleton('footer', 'Footer settings saved');
+const getSeo = getSingleton('seo', 'SEO settings retrieved');
+const saveSeo = saveSingleton('seo', 'SEO settings saved');
+const getLoginSettings = getSingleton('loginSettings', 'Login settings retrieved');
+const saveLoginSettings = saveSingleton('loginSettings', 'Login settings saved');
+const getThemeSettings = getSingleton('themeSettings', 'Theme settings retrieved');
+const saveThemeSettings = saveSingleton('themeSettings', 'Theme settings saved');
+const listSocialLinks = listItems('socialLinks', 'Social links retrieved');
+const saveSocialLinks = replaceItems('socialLinks', 'Social links saved');
+const listPages = listItems('pages', 'Pages retrieved');
+const createPage = createItem('pages', 'Page created');
+const updatePage = updateItem('pages', 'Page updated');
+const deletePage = deleteItem('pages', 'Page deleted');
+const listMenuItems = listItems('menuItems', 'Menu items retrieved');
+const saveMenuItems = replaceItems('menuItems', 'Menu items saved');
+const listCompanyUiBlocks = listItems('uiBlocks', 'UI blocks retrieved');
+const saveCompanyUiBlocks = replaceItems('uiBlocks', 'UI blocks saved');
+const listSliders = listItems('sliders', 'Sliders retrieved');
+const createSlider = createItem('sliders', 'Slider created');
+const updateSlider = updateItem('sliders', 'Slider updated');
+const deleteSlider = deleteItem('sliders', 'Slider deleted');
+const listGalleryCategories = listItems('galleryCategories', 'Gallery categories retrieved');
+const createGalleryCategory = createItem('galleryCategories', 'Gallery category created');
+const updateGalleryCategory = updateItem('galleryCategories', 'Gallery category updated');
+const deleteGalleryCategory = deleteItem('galleryCategories', 'Gallery category deleted');
+const listGalleryItems = listItems('galleryItems', 'Gallery items retrieved');
+const createGalleryItem = createItem('galleryItems', 'Gallery item created');
+const updateGalleryItem = updateItem('galleryItems', 'Gallery item updated');
+const deleteGalleryItem = deleteItem('galleryItems', 'Gallery item deleted');
+const getContactSettings = getSingleton('contactSettings', 'Contact settings retrieved');
+const saveContactSettings = saveSingleton('contactSettings', 'Contact settings saved');
+const listContactCategories = listItems('contactCategories', 'Contact categories retrieved');
+const createContactCategory = createItem('contactCategories', 'Contact category created');
+const updateContactCategory = updateItem('contactCategories', 'Contact category updated');
+const deleteContactCategory = deleteItem('contactCategories', 'Contact category deleted');
+const listContactMessages = listItems('contactMessages', 'Contact messages retrieved');
+const createContactMessage = createItem('contactMessages', 'Contact message created');
+const updateContactMessage = updateItem('contactMessages', 'Contact message updated');
+const deleteContactMessage = deleteItem('contactMessages', 'Contact message deleted');
+const listTestimonials = listItems('testimonials', 'Testimonials retrieved');
+const createTestimonial = createItem('testimonials', 'Testimonial created');
+const updateTestimonial = updateItem('testimonials', 'Testimonial updated');
+const deleteTestimonial = deleteItem('testimonials', 'Testimonial deleted');
+const listClients = listItems('clients', 'Clients retrieved');
+const createClient = createItem('clients', 'Client created');
+const updateClient = updateItem('clients', 'Client updated');
+const deleteClient = deleteItem('clients', 'Client deleted');
+const listSponsors = listItems('sponsors', 'Sponsors retrieved');
+const createSponsor = createItem('sponsors', 'Sponsor created');
+const updateSponsor = updateItem('sponsors', 'Sponsor updated');
+const deleteSponsor = deleteItem('sponsors', 'Sponsor deleted');
+
 module.exports = {
     getUiBlocks,
     saveUiBlocks,
@@ -1690,15 +1794,89 @@ module.exports = {
     updateWebsiteFaq,
     updateWebsiteFaqStatus,
     deleteWebsiteFaq,
-    getVideoTutorialCategories, createVideoTutorialCategory, updateVideoTutorialCategory,
- updateVideoTutorialCategoryStatus, deleteVideoTutorialCategory,
- getVideoTutorialSubCategories, createVideoTutorialSubCategory, updateVideoTutorialSubCategory,
- updateVideoTutorialSubCategoryStatus, deleteVideoTutorialSubCategory,
- getVideoTutorialDifficultyLevels, createVideoTutorialDifficultyLevel, updateVideoTutorialDifficultyLevel,
- updateVideoTutorialDifficultyLevelStatus, deleteVideoTutorialDifficultyLevel,
- getVideoTutorialTypes, createVideoTutorialType, updateVideoTutorialType,
- updateVideoTutorialTypeStatus, deleteVideoTutorialType,
- getVideoTutorials, getVideoTutorialById, createVideoTutorial, updateVideoTutorial,
- updateVideoTutorialStatus, deleteVideoTutorial,
+    getVideoTutorialCategories,
+    createVideoTutorialCategory,
+    updateVideoTutorialCategory,
+    updateVideoTutorialCategoryStatus,
+    deleteVideoTutorialCategory,
+    getVideoTutorialSubCategories,
+    createVideoTutorialSubCategory,
+    updateVideoTutorialSubCategory,
+    updateVideoTutorialSubCategoryStatus,
+    deleteVideoTutorialSubCategory,
+    getVideoTutorialDifficultyLevels,
+    createVideoTutorialDifficultyLevel,
+    updateVideoTutorialDifficultyLevel,
+    updateVideoTutorialDifficultyLevelStatus,
+    deleteVideoTutorialDifficultyLevel,
+    getVideoTutorialTypes,
+    createVideoTutorialType,
+    updateVideoTutorialType,
+    updateVideoTutorialTypeStatus,
+    deleteVideoTutorialType,
+    getVideoTutorials,
+    getVideoTutorialById,
+    createVideoTutorial,
+    updateVideoTutorial,
+    updateVideoTutorialStatus,
+    deleteVideoTutorial,
+
+    // Export Company Scoped Singletons & Lists
+    getBasicInformation,
+    saveBasicInformation,
+    getHeroSection,
+    saveHeroSection,
+    getFooter,
+    saveFooter,
+    getSeo,
+    saveSeo,
+    getLoginSettings,
+    saveLoginSettings,
+    getThemeSettings,
+    saveThemeSettings,
+    listSocialLinks,
+    saveSocialLinks,
+    listPages,
+    createPage,
+    updatePage,
+    deletePage,
+    listMenuItems,
+    saveMenuItems,
+    listCompanyUiBlocks,
+    saveCompanyUiBlocks,
+    listSliders,
+    createSlider,
+    updateSlider,
+    deleteSlider,
+    listGalleryCategories,
+    createGalleryCategory,
+    updateGalleryCategory,
+    deleteGalleryCategory,
+    listGalleryItems,
+    createGalleryItem,
+    updateGalleryItem,
+    deleteGalleryItem,
+    getContactSettings,
+    saveContactSettings,
+    listContactCategories,
+    createContactCategory,
+    updateContactCategory,
+    deleteContactCategory,
+    listContactMessages,
+    createContactMessage,
+    updateContactMessage,
+    deleteContactMessage,
+    listTestimonials,
+    createTestimonial,
+    updateTestimonial,
+    deleteTestimonial,
+    listClients,
+    createClient,
+    updateClient,
+    deleteClient,
+    listSponsors,
+    createSponsor,
+    updateSponsor,
+    deleteSponsor,
 };
 

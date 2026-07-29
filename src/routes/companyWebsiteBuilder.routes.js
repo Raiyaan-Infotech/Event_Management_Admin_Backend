@@ -118,4 +118,81 @@ router.put('/video-tutorials/:id', controller.updateVideoTutorial);
 router.patch('/video-tutorials/:id/status', controller.updateVideoTutorialStatus);
 router.put('/video-tutorials/:id/status', controller.updateVideoTutorialStatus);
 router.delete('/video-tutorials/:id', controller.deleteVideoTutorial);
+
+// ── Company-Scoped Website Builder Modules ─────────────────
+router.get('/basic-information', controller.getBasicInformation);
+router.put('/basic-information', controller.saveBasicInformation);
+
+router.get('/hero-section', controller.getHeroSection);
+router.put('/hero-section', controller.saveHeroSection);
+
+router.get('/footer', controller.getFooter);
+router.put('/footer', controller.saveFooter);
+
+router.get('/seo', controller.getSeo);
+router.put('/seo', controller.saveSeo);
+
+router.get('/login-settings', controller.getLoginSettings);
+router.put('/login-settings', controller.saveLoginSettings);
+
+router.get('/theme-settings', controller.getThemeSettings);
+router.put('/theme-settings', controller.saveThemeSettings);
+
+router.get('/social-links', controller.listSocialLinks);
+router.put('/social-links', controller.saveSocialLinks);
+
+router.get('/pages', controller.listPages);
+router.post('/pages', controller.createPage);
+router.put('/pages/:id', controller.updatePage);
+router.delete('/pages/:id', controller.deletePage);
+
+router.get('/menu-items', controller.listMenuItems);
+router.put('/menu-items', controller.saveMenuItems);
+
+router.get('/company-ui-blocks', controller.listCompanyUiBlocks);
+router.put('/company-ui-blocks', controller.saveCompanyUiBlocks);
+
+router.get('/sliders', controller.listSliders);
+router.post('/sliders', controller.createSlider);
+router.put('/sliders/:id', controller.updateSlider);
+router.delete('/sliders/:id', controller.deleteSlider);
+
+router.get('/gallery-categories', controller.listGalleryCategories);
+router.post('/gallery-categories', controller.createGalleryCategory);
+router.put('/gallery-categories/:id', controller.updateGalleryCategory);
+router.delete('/gallery-categories/:id', controller.deleteGalleryCategory);
+
+router.get('/gallery-items', controller.listGalleryItems);
+router.post('/gallery-items', controller.createGalleryItem);
+router.put('/gallery-items/:id', controller.updateGalleryItem);
+router.delete('/gallery-items/:id', controller.deleteGalleryItem);
+
+router.get('/contact-settings', controller.getContactSettings);
+router.put('/contact-settings', controller.saveContactSettings);
+
+router.get('/contact-categories', controller.listContactCategories);
+router.post('/contact-categories', controller.createContactCategory);
+router.put('/contact-categories/:id', controller.updateContactCategory);
+router.delete('/contact-categories/:id', controller.deleteContactCategory);
+
+router.get('/contact-messages', controller.listContactMessages);
+router.post('/contact-messages', controller.createContactMessage);
+router.put('/contact-messages/:id', controller.updateContactMessage);
+router.delete('/contact-messages/:id', controller.deleteContactMessage);
+
+router.get('/testimonials', controller.listTestimonials);
+router.post('/testimonials', controller.createTestimonial);
+router.put('/testimonials/:id', controller.updateTestimonial);
+router.delete('/testimonials/:id', controller.deleteTestimonial);
+
+router.get('/clients', controller.listClients);
+router.post('/clients', controller.createClient);
+router.put('/clients/:id', controller.updateClient);
+router.delete('/clients/:id', controller.deleteClient);
+
+router.get('/sponsors', controller.listSponsors);
+router.post('/sponsors', controller.createSponsor);
+router.put('/sponsors/:id', controller.updateSponsor);
+router.delete('/sponsors/:id', controller.deleteSponsor);
+
 module.exports = router;
