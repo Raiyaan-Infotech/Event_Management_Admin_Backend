@@ -79,4 +79,43 @@ router.patch('/faqs/:id/status', controller.updateWebsiteFaqStatus);
 router.put('/faqs/:id/status', controller.updateWebsiteFaqStatus);
 router.delete('/faqs/:id', controller.deleteWebsiteFaq);
 
+router.get('/video-tutorial-categories', controller.getVideoTutorialCategories);
+router.post('/video-tutorial-categories', controller.createVideoTutorialCategory);
+router.put('/video-tutorial-categories/:id', controller.updateVideoTutorialCategory);
+router.patch('/video-tutorial-categories/:id/status', controller.updateVideoTutorialCategoryStatus);
+router.put('/video-tutorial-categories/:id/status', controller.updateVideoTutorialCategoryStatus);
+router.delete('/video-tutorial-categories/:id', controller.deleteVideoTutorialCategory);
+
+// ── Video Tutorial Sub Categories ──────────────────────────
+router.get('/video-tutorial-subcategories', controller.getVideoTutorialSubCategories);
+router.post('/video-tutorial-subcategories', controller.createVideoTutorialSubCategory);
+router.put('/video-tutorial-subcategories/:id', controller.updateVideoTutorialSubCategory);
+router.patch('/video-tutorial-subcategories/:id/status', controller.updateVideoTutorialSubCategoryStatus);
+router.put('/video-tutorial-subcategories/:id/status', controller.updateVideoTutorialSubCategoryStatus);
+router.delete('/video-tutorial-subcategories/:id', controller.deleteVideoTutorialSubCategory);
+
+// ── Difficulty Levels ───────────────────────────────────────
+router.get('/video-tutorial-difficulty-levels', controller.getVideoTutorialDifficultyLevels);
+router.post('/video-tutorial-difficulty-levels', controller.createVideoTutorialDifficultyLevel);
+router.put('/video-tutorial-difficulty-levels/:id', controller.updateVideoTutorialDifficultyLevel);
+router.patch('/video-tutorial-difficulty-levels/:id/status', controller.updateVideoTutorialDifficultyLevelStatus);
+router.put('/video-tutorial-difficulty-levels/:id/status', controller.updateVideoTutorialDifficultyLevelStatus);
+router.delete('/video-tutorial-difficulty-levels/:id', controller.deleteVideoTutorialDifficultyLevel);
+
+// ── Tutorial Types ──────────────────────────────────────────
+router.get('/video-tutorial-types', controller.getVideoTutorialTypes);
+router.post('/video-tutorial-types', controller.createVideoTutorialType);
+router.put('/video-tutorial-types/:id', controller.updateVideoTutorialType);
+router.patch('/video-tutorial-types/:id/status', controller.updateVideoTutorialTypeStatus);
+router.put('/video-tutorial-types/:id/status', controller.updateVideoTutorialTypeStatus);
+router.delete('/video-tutorial-types/:id', controller.deleteVideoTutorialType);
+
+// ── Video Tutorials (main entity) ──────────────────────────
+router.get('/video-tutorials', controller.getVideoTutorials);
+router.post('/video-tutorials', controller.createVideoTutorial);
+router.get('/video-tutorials/:id', controller.getVideoTutorialById);
+router.put('/video-tutorials/:id', controller.updateVideoTutorial);
+router.patch('/video-tutorials/:id/status', controller.updateVideoTutorialStatus);
+router.put('/video-tutorials/:id/status', controller.updateVideoTutorialStatus);
+router.delete('/video-tutorials/:id', controller.deleteVideoTutorial);
 module.exports = router;

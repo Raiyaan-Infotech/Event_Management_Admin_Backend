@@ -12,7 +12,7 @@ const { QueryTypes } = Sequelize;
 
 const getCompanyId = (req) => req.companyId || req.user?.company_id || 1;
 
-const JSON_COLS = new Set(['features_json', 'plan_values_json', 'bullet_points_json']);
+const JSON_COLS = new Set(['features_json', 'plan_values_json', 'bullet_points_json', 'tags_json']);
 
 const parseRow = (row) => {
     if (!row) return row;
@@ -1085,6 +1085,566 @@ const updateWebsiteFaqStatus = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, { id, is_active: isActiveVal === 1 }, 'FAQ status updated successfully');
 });
 
+
+
+
+// ─── WEBSITE BUILDER VIDEO TUTORIAL CATEGORIES ──────────────────────────────
+
+const getVideoTutorialCategories = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const rows = await sequelize.query(
+        'SELECT * FROM company_website_video_tutorial_categories WHERE company_id = ? ORDER BY sort_order ASC, id ASC',
+        { replacements: [companyId], type: QueryTypes.SELECT }
+    );
+    return ApiResponse.success(res, rows, 'Video tutorial categories retrieved');
+});
+
+const createVideoTutorialCategory = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { name, description, icon, color, sort_order, is_active } = req.body || {};
+    const [id] = await sequelize.query(
+        'INSERT INTO company_website_video_tutorial_categories (company_id, name, description, icon, color, sort_order, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        {
+            replacements: [
+                companyId,
+                name || 'New Category',
+                description || null,
+                icon || 'video',
+                color || '#7C3AED',
+                sort_order || 0,
+                is_active !== false ? 1 : 0,
+            ],
+            type: QueryTypes.INSERT,
+        }
+    );
+    const [created] = await sequelize.query(
+        'SELECT * FROM company_website_video_tutorial_categories WHERE id = ?',
+        { replacements: [id], type: QueryTypes.SELECT }
+    );
+    return ApiResponse.created(res, created, 'Video tutorial category created successfully');
+});
+
+const updateVideoTutorialCategory = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    const { name, description, icon, color, sort_order, is_active } = req.body || {};
+    await sequelize.query(
+        'UPDATE company_website_video_tutorial_categories SET name = COALESCE(?, name), description = ?, icon = COALESCE(?, icon), color = COALESCE(?, color), sort_order = COALESCE(?, sort_order), is_active = COALESCE(?, is_active) WHERE id = ? AND company_id = ?',
+        {
+            replacements: [
+                name ?? null,
+                description ?? null,
+                icon ?? null,
+                color ?? null,
+                sort_order ?? null,
+                is_active !== undefined ? (is_active ? 1 : 0) : null,
+                id,
+                companyId,
+            ],
+            type: QueryTypes.UPDATE,
+        }
+    );
+    const [updated] = await sequelize.query(
+        'SELECT * FROM company_website_video_tutorial_categories WHERE id = ?',
+        { replacements: [id], type: QueryTypes.SELECT }
+    );
+    return ApiResponse.success(res, updated, 'Video tutorial category updated successfully');
+});
+
+const updateVideoTutorialCategoryStatus = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    const { is_active } = req.body || {};
+    const isActiveVal = (is_active === false || is_active === 0 || is_active === '0') ? 0 : 1;
+    await sequelize.query(
+        'UPDATE company_website_video_tutorial_categories SET is_active = ? WHERE id = ? AND company_id = ?',
+        { replacements: [isActiveVal, id, companyId], type: QueryTypes.UPDATE }
+    );
+    return ApiResponse.success(res, { id, is_active: isActiveVal === 1 }, 'Video tutorial category status updated successfully');
+});
+
+const deleteVideoTutorialCategory = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    await sequelize.query(
+        'DELETE FROM company_website_video_tutorial_categories WHERE id = ? AND company_id = ?',
+        { replacements: [id, companyId], type: QueryTypes.DELETE }
+    );
+    return ApiResponse.success(res, null, 'Video tutorial category deleted successfully');
+});
+
+// ─── WEBSITE BUILDER VIDEO TUTORIAL SUB CATEGORIES ──────────────────────────
+
+const getVideoTutorialSubCategories = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    await seedVideoTutorialDataIfEmpty(companyId);
+    const { category_id } = req.query;
+    let query = 'SELECT sc.*, c.name as category_name FROM company_website_video_tutorial_subcategories sc LEFT JOIN company_website_video_tutorial_categories c ON sc.category_id = c.id WHERE sc.company_id = ?';
+    const replacements = [companyId];
+    if (category_id && category_id !== 'all') {
+        query += ' AND sc.category_id = ?';
+        replacements.push(category_id);
+    }
+    query += ' ORDER BY sc.sort_order ASC, sc.id ASC';
+    const rows = await sequelize.query(query, { replacements, type: QueryTypes.SELECT });
+    return ApiResponse.success(res, rows, 'Video tutorial sub categories retrieved');
+});
+
+const createVideoTutorialSubCategory = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { category_id, name, description, icon, color, sort_order, is_active } = req.body || {};
+    const [id] = await sequelize.query(
+        'INSERT INTO company_website_video_tutorial_subcategories (company_id, category_id, name, description, icon, color, sort_order, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        {
+            replacements: [
+                companyId,
+                category_id || null,
+                name || 'New Sub Category',
+                description || null,
+                icon || 'file-text',
+                color || '#7C3AED',
+                sort_order || 0,
+                is_active !== false ? 1 : 0,
+            ],
+            type: QueryTypes.INSERT,
+        }
+    );
+    const [created] = await sequelize.query(
+        'SELECT * FROM company_website_video_tutorial_subcategories WHERE id = ?',
+        { replacements: [id], type: QueryTypes.SELECT }
+    );
+    return ApiResponse.created(res, created, 'Video tutorial sub category created successfully');
+});
+
+const updateVideoTutorialSubCategory = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    const { category_id, name, description, icon, color, sort_order, is_active } = req.body || {};
+    await sequelize.query(
+        'UPDATE company_website_video_tutorial_subcategories SET category_id = COALESCE(?, category_id), name = COALESCE(?, name), description = ?, icon = COALESCE(?, icon), color = COALESCE(?, color), sort_order = COALESCE(?, sort_order), is_active = COALESCE(?, is_active) WHERE id = ? AND company_id = ?',
+        {
+            replacements: [
+                category_id ?? null,
+                name ?? null,
+                description ?? null,
+                icon ?? null,
+                color ?? null,
+                sort_order ?? null,
+                is_active !== undefined ? (is_active ? 1 : 0) : null,
+                id,
+                companyId,
+            ],
+            type: QueryTypes.UPDATE,
+        }
+    );
+    const [updated] = await sequelize.query(
+        'SELECT * FROM company_website_video_tutorial_subcategories WHERE id = ?',
+        { replacements: [id], type: QueryTypes.SELECT }
+    );
+    return ApiResponse.success(res, updated, 'Video tutorial sub category updated successfully');
+});
+
+const updateVideoTutorialSubCategoryStatus = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    const { is_active } = req.body || {};
+    const isActiveVal = (is_active === false || is_active === 0 || is_active === '0') ? 0 : 1;
+    await sequelize.query(
+        'UPDATE company_website_video_tutorial_subcategories SET is_active = ? WHERE id = ? AND company_id = ?',
+        { replacements: [isActiveVal, id, companyId], type: QueryTypes.UPDATE }
+    );
+    return ApiResponse.success(res, { id, is_active: isActiveVal === 1 }, 'Video tutorial sub category status updated successfully');
+});
+
+const deleteVideoTutorialSubCategory = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    await sequelize.query(
+        'DELETE FROM company_website_video_tutorial_subcategories WHERE id = ? AND company_id = ?',
+        { replacements: [id, companyId], type: QueryTypes.DELETE }
+    );
+    return ApiResponse.success(res, null, 'Video tutorial sub category deleted successfully');
+});
+
+// ─── WEBSITE BUILDER VIDEO TUTORIAL DIFFICULTY LEVELS ───────────────────────
+
+const getVideoTutorialDifficultyLevels = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    await seedVideoTutorialDataIfEmpty(companyId);
+    const rows = await sequelize.query(
+        'SELECT * FROM company_website_video_tutorial_difficulty_levels WHERE company_id = ? ORDER BY sort_order ASC, id ASC',
+        { replacements: [companyId], type: QueryTypes.SELECT }
+    );
+    return ApiResponse.success(res, rows, 'Difficulty levels retrieved');
+});
+
+const createVideoTutorialDifficultyLevel = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { name, description, icon, color, sort_order, is_active } = req.body || {};
+    const [id] = await sequelize.query(
+        'INSERT INTO company_website_video_tutorial_difficulty_levels (company_id, name, description, icon, color, sort_order, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        {
+            replacements: [
+                companyId,
+                name || 'New Level',
+                description || null,
+                icon || 'bar-chart',
+                color || '#22C55E',
+                sort_order || 0,
+                is_active !== false ? 1 : 0,
+            ],
+            type: QueryTypes.INSERT,
+        }
+    );
+    const [created] = await sequelize.query(
+        'SELECT * FROM company_website_video_tutorial_difficulty_levels WHERE id = ?',
+        { replacements: [id], type: QueryTypes.SELECT }
+    );
+    return ApiResponse.created(res, created, 'Difficulty level created successfully');
+});
+
+const updateVideoTutorialDifficultyLevel = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    const { name, description, icon, color, sort_order, is_active } = req.body || {};
+    await sequelize.query(
+        'UPDATE company_website_video_tutorial_difficulty_levels SET name = COALESCE(?, name), description = ?, icon = COALESCE(?, icon), color = COALESCE(?, color), sort_order = COALESCE(?, sort_order), is_active = COALESCE(?, is_active) WHERE id = ? AND company_id = ?',
+        {
+            replacements: [
+                name ?? null,
+                description ?? null,
+                icon ?? null,
+                color ?? null,
+                sort_order ?? null,
+                is_active !== undefined ? (is_active ? 1 : 0) : null,
+                id,
+                companyId,
+            ],
+            type: QueryTypes.UPDATE,
+        }
+    );
+    const [updated] = await sequelize.query(
+        'SELECT * FROM company_website_video_tutorial_difficulty_levels WHERE id = ?',
+        { replacements: [id], type: QueryTypes.SELECT }
+    );
+    return ApiResponse.success(res, updated, 'Difficulty level updated successfully');
+});
+
+const updateVideoTutorialDifficultyLevelStatus = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    const { is_active } = req.body || {};
+    const isActiveVal = (is_active === false || is_active === 0 || is_active === '0') ? 0 : 1;
+    await sequelize.query(
+        'UPDATE company_website_video_tutorial_difficulty_levels SET is_active = ? WHERE id = ? AND company_id = ?',
+        { replacements: [isActiveVal, id, companyId], type: QueryTypes.UPDATE }
+    );
+    return ApiResponse.success(res, { id, is_active: isActiveVal === 1 }, 'Difficulty level status updated successfully');
+});
+
+const deleteVideoTutorialDifficultyLevel = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    await sequelize.query(
+        'DELETE FROM company_website_video_tutorial_difficulty_levels WHERE id = ? AND company_id = ?',
+        { replacements: [id, companyId], type: QueryTypes.DELETE }
+    );
+    return ApiResponse.success(res, null, 'Difficulty level deleted successfully');
+});
+
+// ─── WEBSITE BUILDER VIDEO TUTORIAL TYPES ───────────────────────────────────
+
+const getVideoTutorialTypes = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    await seedVideoTutorialDataIfEmpty(companyId);
+    const rows = await sequelize.query(
+        'SELECT * FROM company_website_video_tutorial_types WHERE company_id = ? ORDER BY sort_order ASC, id ASC',
+        { replacements: [companyId], type: QueryTypes.SELECT }
+    );
+    return ApiResponse.success(res, rows, 'Tutorial types retrieved');
+});
+
+const createVideoTutorialType = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { name, description, icon, color, sort_order, is_active } = req.body || {};
+    const [id] = await sequelize.query(
+        'INSERT INTO company_website_video_tutorial_types (company_id, name, description, icon, color, sort_order, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        {
+            replacements: [
+                companyId,
+                name || 'New Type',
+                description || null,
+                icon || 'list',
+                color || '#F97316',
+                sort_order || 0,
+                is_active !== false ? 1 : 0,
+            ],
+            type: QueryTypes.INSERT,
+        }
+    );
+    const [created] = await sequelize.query(
+        'SELECT * FROM company_website_video_tutorial_types WHERE id = ?',
+        { replacements: [id], type: QueryTypes.SELECT }
+    );
+    return ApiResponse.created(res, created, 'Tutorial type created successfully');
+});
+
+const updateVideoTutorialType = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    const { name, description, icon, color, sort_order, is_active } = req.body || {};
+    await sequelize.query(
+        'UPDATE company_website_video_tutorial_types SET name = COALESCE(?, name), description = ?, icon = COALESCE(?, icon), color = COALESCE(?, color), sort_order = COALESCE(?, sort_order), is_active = COALESCE(?, is_active) WHERE id = ? AND company_id = ?',
+        {
+            replacements: [
+                name ?? null,
+                description ?? null,
+                icon ?? null,
+                color ?? null,
+                sort_order ?? null,
+                is_active !== undefined ? (is_active ? 1 : 0) : null,
+                id,
+                companyId,
+            ],
+            type: QueryTypes.UPDATE,
+        }
+    );
+    const [updated] = await sequelize.query(
+        'SELECT * FROM company_website_video_tutorial_types WHERE id = ?',
+        { replacements: [id], type: QueryTypes.SELECT }
+    );
+    return ApiResponse.success(res, updated, 'Tutorial type updated successfully');
+});
+
+const updateVideoTutorialTypeStatus = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    const { is_active } = req.body || {};
+    const isActiveVal = (is_active === false || is_active === 0 || is_active === '0') ? 0 : 1;
+    await sequelize.query(
+        'UPDATE company_website_video_tutorial_types SET is_active = ? WHERE id = ? AND company_id = ?',
+        { replacements: [isActiveVal, id, companyId], type: QueryTypes.UPDATE }
+    );
+    return ApiResponse.success(res, { id, is_active: isActiveVal === 1 }, 'Tutorial type status updated successfully');
+});
+
+const deleteVideoTutorialType = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    await sequelize.query(
+        'DELETE FROM company_website_video_tutorial_types WHERE id = ? AND company_id = ?',
+        { replacements: [id, companyId], type: QueryTypes.DELETE }
+    );
+    return ApiResponse.success(res, null, 'Tutorial type deleted successfully');
+});
+
+// ─── WEBSITE BUILDER VIDEO TUTORIALS (main entity) ──────────────────────────
+
+const getVideoTutorials = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    await seedVideoTutorialDataIfEmpty(companyId);
+    const { search, category_id, subcategory_id, difficulty_level_id, tutorial_type_id, is_active } = req.query;
+
+    let query = `
+        SELECT vt.*, c.name as category_name, sc.name as subcategory_name,
+               d.name as difficulty_name, d.color as difficulty_color, t.name as type_name
+        FROM company_website_video_tutorials vt
+        LEFT JOIN company_website_video_tutorial_categories c ON vt.category_id = c.id
+        LEFT JOIN company_website_video_tutorial_subcategories sc ON vt.subcategory_id = sc.id
+        LEFT JOIN company_website_video_tutorial_difficulty_levels d ON vt.difficulty_level_id = d.id
+        LEFT JOIN company_website_video_tutorial_types t ON vt.tutorial_type_id = t.id
+        WHERE vt.company_id = ?
+    `;
+    const replacements = [companyId];
+
+    if (search) {
+        query += ' AND (vt.title LIKE ? OR vt.short_description LIKE ?)';
+        replacements.push(`%${search}%`, `%${search}%`);
+    }
+    if (category_id && category_id !== 'all') { query += ' AND vt.category_id = ?'; replacements.push(category_id); }
+    if (subcategory_id && subcategory_id !== 'all') { query += ' AND vt.subcategory_id = ?'; replacements.push(subcategory_id); }
+    if (difficulty_level_id && difficulty_level_id !== 'all') { query += ' AND vt.difficulty_level_id = ?'; replacements.push(difficulty_level_id); }
+    if (tutorial_type_id && tutorial_type_id !== 'all') { query += ' AND vt.tutorial_type_id = ?'; replacements.push(tutorial_type_id); }
+    if (is_active !== undefined && is_active !== '' && is_active !== 'all') {
+        query += ' AND vt.is_active = ?';
+        replacements.push(is_active === 'true' || is_active === '1' ? 1 : 0);
+    }
+
+    query += ' ORDER BY vt.sort_order ASC, vt.id DESC';
+
+    const rows = await sequelize.query(query, { replacements, type: QueryTypes.SELECT });
+
+    // Matches getWebsiteFaqs: plain array in `data`, no server-side pagination.
+    // Your list table's "10 per page" control paginates client-side, same as
+    // it must already do for FAQs/Categories. Add LIMIT/OFFSET here later if
+    // the dataset grows large enough to need real server-side paging.
+    return ApiResponse.success(res, rows.map(parseRow), 'Video tutorials retrieved');
+});
+
+const getVideoTutorialById = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    const rows = await sequelize.query(
+        'SELECT * FROM company_website_video_tutorials WHERE id = ? AND company_id = ? LIMIT 1',
+        { replacements: [id, companyId], type: QueryTypes.SELECT }
+    );
+    if (!rows[0]) return ApiResponse.error(res, 'Video tutorial not found', 404);
+    return ApiResponse.success(res, parseRow(rows[0]), 'Video tutorial details retrieved');
+});
+
+const createVideoTutorial = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const {
+        title, short_description, category_id, subcategory_id, tags_json, tags,
+        video_source, video_url, video_file_url, duration_seconds,
+        difficulty_level_id, tutorial_type_id, key_takeaways, thumbnail_url,
+        is_featured, publish_date, sort_order, is_active,
+    } = req.body || {};
+
+    let parsedTags = [];
+    if (Array.isArray(tags_json)) {
+        parsedTags = tags_json;
+    } else if (typeof tags === 'string' && tags.trim()) {
+        parsedTags = tags.split(',').map(t => t.trim()).filter(Boolean);
+    } else if (typeof tags_json === 'string' && tags_json.trim()) {
+        parsedTags = tags_json.split(',').map(t => t.trim()).filter(Boolean);
+    }
+
+    const [id] = await sequelize.query(
+        `INSERT INTO company_website_video_tutorials
+         (company_id, title, short_description, category_id, subcategory_id, tags_json,
+          video_source, video_url, video_file_url, duration_seconds, difficulty_level_id,
+          tutorial_type_id, key_takeaways, thumbnail_url, is_featured, publish_date, sort_order, is_active)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        {
+            replacements: [
+                companyId,
+                title || 'New Tutorial',
+                short_description || null,
+                category_id ? Number(category_id) : null,
+                subcategory_id ? Number(subcategory_id) : null,
+                JSON.stringify(parsedTags),
+                video_source || 'upload',
+                video_url || null,
+                video_file_url || null,
+                duration_seconds || 0,
+                difficulty_level_id ? Number(difficulty_level_id) : null,
+                tutorial_type_id ? Number(tutorial_type_id) : null,
+                key_takeaways || null,
+                thumbnail_url || null,
+                is_featured ? 1 : 0,
+                publish_date || null,
+                sort_order || 0,
+                is_active !== false ? 1 : 0,
+            ],
+            type: QueryTypes.INSERT,
+        }
+    );
+
+    const [created] = await sequelize.query(
+        'SELECT * FROM company_website_video_tutorials WHERE id = ?',
+        { replacements: [id], type: QueryTypes.SELECT }
+    );
+    return ApiResponse.created(res, parseRow(created), 'Video tutorial created successfully');
+});
+
+const updateVideoTutorial = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    const {
+        title, short_description, category_id, subcategory_id, tags_json, tags,
+        video_source, video_url, video_file_url, duration_seconds,
+        difficulty_level_id, tutorial_type_id, key_takeaways, thumbnail_url,
+        is_featured, publish_date, sort_order, is_active,
+    } = req.body || {};
+
+    let parsedTags = undefined;
+    if (Array.isArray(tags_json)) {
+        parsedTags = JSON.stringify(tags_json);
+    } else if (typeof tags === 'string') {
+        parsedTags = JSON.stringify(tags.split(',').map(t => t.trim()).filter(Boolean));
+    } else if (typeof tags_json === 'string') {
+        parsedTags = JSON.stringify(tags_json.split(',').map(t => t.trim()).filter(Boolean));
+    }
+
+    await sequelize.query(
+        `UPDATE company_website_video_tutorials SET
+            title = COALESCE(?, title),
+            short_description = COALESCE(?, short_description),
+            category_id = COALESCE(?, category_id),
+            subcategory_id = COALESCE(?, subcategory_id),
+            tags_json = COALESCE(?, tags_json),
+            video_source = COALESCE(?, video_source),
+            video_url = COALESCE(?, video_url),
+            video_file_url = COALESCE(?, video_file_url),
+            duration_seconds = COALESCE(?, duration_seconds),
+            difficulty_level_id = COALESCE(?, difficulty_level_id),
+            tutorial_type_id = COALESCE(?, tutorial_type_id),
+            key_takeaways = COALESCE(?, key_takeaways),
+            thumbnail_url = COALESCE(?, thumbnail_url),
+            is_featured = COALESCE(?, is_featured),
+            publish_date = COALESCE(?, publish_date),
+            sort_order = COALESCE(?, sort_order),
+            is_active = COALESCE(?, is_active)
+         WHERE id = ? AND company_id = ?`,
+        {
+            replacements: [
+                title ?? null,
+                short_description ?? null,
+                category_id ? Number(category_id) : null,
+                subcategory_id ? Number(subcategory_id) : null,
+                parsedTags ?? null,
+                video_source ?? null,
+                video_url ?? null,
+                video_file_url ?? null,
+                duration_seconds ?? null,
+                difficulty_level_id ? Number(difficulty_level_id) : null,
+                tutorial_type_id ? Number(tutorial_type_id) : null,
+                key_takeaways ?? null,
+                thumbnail_url ?? null,
+                is_featured !== undefined ? (is_featured ? 1 : 0) : null,
+                publish_date ?? null,
+                sort_order ?? null,
+                is_active !== undefined ? (is_active ? 1 : 0) : null,
+                id,
+                companyId,
+            ],
+            type: QueryTypes.UPDATE,
+        }
+    );
+
+    const [updated] = await sequelize.query(
+        'SELECT * FROM company_website_video_tutorials WHERE id = ?',
+        { replacements: [id], type: QueryTypes.SELECT }
+    );
+    return ApiResponse.success(res, parseRow(updated), 'Video tutorial updated successfully');
+});
+
+const updateVideoTutorialStatus = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    const { is_active } = req.body || {};
+    const isActiveVal = (is_active === false || is_active === 0 || is_active === '0') ? 0 : 1;
+    await sequelize.query(
+        'UPDATE company_website_video_tutorials SET is_active = ? WHERE id = ? AND company_id = ?',
+        { replacements: [isActiveVal, id, companyId], type: QueryTypes.UPDATE }
+    );
+    return ApiResponse.success(res, { id, is_active: isActiveVal === 1 }, 'Video tutorial status updated successfully');
+});
+
+const deleteVideoTutorial = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    await sequelize.query(
+        'DELETE FROM company_website_video_tutorials WHERE id = ? AND company_id = ?',
+        { replacements: [id, companyId], type: QueryTypes.DELETE }
+    );
+    return ApiResponse.success(res, null, 'Video tutorial deleted successfully');
+});
+
+
+ 
+ 
 module.exports = {
     getUiBlocks,
     saveUiBlocks,
@@ -1130,5 +1690,15 @@ module.exports = {
     updateWebsiteFaq,
     updateWebsiteFaqStatus,
     deleteWebsiteFaq,
+    getVideoTutorialCategories, createVideoTutorialCategory, updateVideoTutorialCategory,
+ updateVideoTutorialCategoryStatus, deleteVideoTutorialCategory,
+ getVideoTutorialSubCategories, createVideoTutorialSubCategory, updateVideoTutorialSubCategory,
+ updateVideoTutorialSubCategoryStatus, deleteVideoTutorialSubCategory,
+ getVideoTutorialDifficultyLevels, createVideoTutorialDifficultyLevel, updateVideoTutorialDifficultyLevel,
+ updateVideoTutorialDifficultyLevelStatus, deleteVideoTutorialDifficultyLevel,
+ getVideoTutorialTypes, createVideoTutorialType, updateVideoTutorialType,
+ updateVideoTutorialTypeStatus, deleteVideoTutorialType,
+ getVideoTutorials, getVideoTutorialById, createVideoTutorial, updateVideoTutorial,
+ updateVideoTutorialStatus, deleteVideoTutorial,
 };
 
