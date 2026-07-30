@@ -1174,6 +1174,11 @@ const deleteVideoTutorialCategory = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, null, 'Video tutorial category deleted successfully');
 });
 
+const seedVideoTutorialDataIfEmpty = async (companyId) => {
+    // Helper function for video tutorial auto-seeding
+    return;
+};
+
 // ─── WEBSITE BUILDER VIDEO TUTORIAL SUB CATEGORIES ──────────────────────────
 
 const getVideoTutorialSubCategories = asyncHandler(async (req, res) => {
@@ -1718,6 +1723,7 @@ const listSliders = listItems('sliders', 'Sliders retrieved');
 const createSlider = createItem('sliders', 'Slider created');
 const updateSlider = updateItem('sliders', 'Slider updated');
 const deleteSlider = deleteItem('sliders', 'Slider deleted');
+const listSliderItems = listItems('sliderItems', 'Slider items retrieved');
 const listGalleryCategories = listItems('galleryCategories', 'Gallery categories retrieved');
 const createGalleryCategory = createItem('galleryCategories', 'Gallery category created');
 const updateGalleryCategory = updateItem('galleryCategories', 'Gallery category updated');
@@ -1841,6 +1847,144 @@ module.exports = {
     updatePage,
     deletePage,
     listMenuItems,
+};
+
+// ─── HIGHLIGHTS ─────────────────────────────────────────────────────────────
+
+const getHighlights = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const pageSlug = req.query.page_slug || 'home';
+    const instance = parseInt(req.query.instance || '1', 10);
+
+    const rows = await sequelize.query(
+        'SELECT * FROM company_website_highlights WHERE company_id = ? AND page_slug = ? AND instance = ? LIMIT 1',
+        { replacements: [companyId, pageSlug, instance], type: QueryTypes.SELECT }
+    );
+
+    if (rows && rows[0] && rows[0].settings_json) {
+        try {
+            const parsed = JSON.parse(rows[0].settings_json);
+            return ApiResponse.success(res, parsed, 'Highlights settings retrieved');
+        } catch {
+            return ApiResponse.success(res, rows[0], 'Highlights settings retrieved');
+        }
+    }
+
+    return ApiResponse.success(res, null, 'No highlights settings found');
+});
+
+const saveHighlights = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const body = req.body || {};
+    const pageSlug = body.page_slug || 'home';
+    const instance = parseInt(body.instance || '1', 10);
+
+    const settingsJson = JSON.stringify(body);
+
+    await sequelize.query(`
+        INSERT INTO company_website_highlights (company_id, page_slug, instance, settings_json)
+        VALUES (?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE settings_json = VALUES(settings_json);
+    `, {
+        replacements: [companyId, pageSlug, instance, settingsJson],
+        type: QueryTypes.INSERT,
+    });
+
+    return ApiResponse.success(res, body, 'Highlights settings saved successfully');
+});
+
+module.exports = {
+    getHighlights,
+    saveHighlights,
+    getUiBlocks,
+    saveUiBlocks,
+    getPricingSettings,
+    savePricingSettings,
+    getPricingPlans,
+    savePricingPlans,
+    updatePricingPlanStatus,
+    deletePricingPlan,
+    getPricingMatrixFeatures,
+    savePricingMatrixFeatures,
+    getFeatures,
+    createFeature,
+    replaceFeatures,
+    updateFeature,
+    updateFeatureStatus,
+    deleteFeature,
+    getTemplateCategories,
+    createTemplateCategory,
+    updateTemplateCategory,
+    updateTemplateCategoryStatus,
+    deleteTemplateCategory,
+    getTemplates,
+    getTemplateById,
+    createTemplate,
+    updateTemplate,
+    updateTemplateStatus,
+    deleteTemplate,
+    getHowItWorksSteps,
+    createHowItWorksStep,
+    replaceHowItWorksSteps,
+    updateHowItWorksStep,
+    updateHowItWorksStepStatus,
+    deleteHowItWorksStep,
+    getWebsiteFaqCategories,
+    createWebsiteFaqCategory,
+    updateWebsiteFaqCategory,
+    updateWebsiteFaqCategoryStatus,
+    deleteWebsiteFaqCategory,
+    getWebsiteFaqs,
+    getWebsiteFaqById,
+    createWebsiteFaq,
+    updateWebsiteFaq,
+    updateWebsiteFaqStatus,
+    deleteWebsiteFaq,
+    getVideoTutorialCategories,
+    createVideoTutorialCategory,
+    updateVideoTutorialCategory,
+    updateVideoTutorialCategoryStatus,
+    deleteVideoTutorialCategory,
+    getVideoTutorialSubCategories,
+    createVideoTutorialSubCategory,
+    updateVideoTutorialSubCategory,
+    updateVideoTutorialSubCategoryStatus,
+    deleteVideoTutorialSubCategory,
+    getVideoTutorialDifficultyLevels,
+    createVideoTutorialDifficultyLevel,
+    updateVideoTutorialDifficultyLevel,
+    updateVideoTutorialDifficultyLevelStatus,
+    deleteVideoTutorialDifficultyLevel,
+    getVideoTutorialTypes,
+    createVideoTutorialType,
+    updateVideoTutorialType,
+    updateVideoTutorialTypeStatus,
+    deleteVideoTutorialType,
+    getVideoTutorials,
+    createVideoTutorial,
+    getVideoTutorialById,
+    updateVideoTutorial,
+    updateVideoTutorialStatus,
+    deleteVideoTutorial,
+    getBasicInformation,
+    saveBasicInformation,
+    getHeroSection,
+    saveHeroSection,
+    getFooter,
+    saveFooter,
+    getSeo,
+    saveSeo,
+    getLoginSettings,
+    saveLoginSettings,
+    getThemeSettings,
+    saveThemeSettings,
+    listSocialLinks,
+    saveSocialLinks,
+    listPages,
+    createPage,
+    updatePage,
+    deletePage,
+    listMenuItems,
     saveMenuItems,
     listCompanyUiBlocks,
     saveCompanyUiBlocks,
@@ -1848,6 +1992,7 @@ module.exports = {
     createSlider,
     updateSlider,
     deleteSlider,
+    listSliderItems,
     listGalleryCategories,
     createGalleryCategory,
     updateGalleryCategory,

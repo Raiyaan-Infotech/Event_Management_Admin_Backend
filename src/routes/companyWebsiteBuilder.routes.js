@@ -1,12 +1,47 @@
 const express = require('express');
 const controller = require('../controllers/companyWebsiteBuilder.controller');
-const { isAuthenticated } = require('../middleware/auth');
-const { extractCompanyContext } = require('../middleware/company');
-
 const router = express.Router();
+const jwt = require('jsonwebtoken');
 
-// All routes require admin authentication + company context
-router.use(isAuthenticated, extractCompanyContext);
+const optionalCompanyAuth = (req, res, next) => {
+  let token = null;
+  const authHeader = req.headers.authorization || req.headers['authorization'];
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.substring(7);
+  } else if (req.cookies && req.cookies.access_token) {
+    token = req.cookies.access_token;
+  }
+
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET || 'eventinvite_access_secret_key_change_in_production');
+      req.user = decoded;
+    } catch {
+      // ignore expired/invalid token
+    }
+  }
+
+  const headerCompanyId = req.headers['x-company-id'] || req.query?.company_id;
+  let parsedId = parseInt(headerCompanyId, 10);
+  if (!parsedId || isNaN(parsedId)) {
+    parsedId = req.user?.company_id ? parseInt(req.user.company_id, 10) : 1;
+  }
+  req.companyId = parsedId && !isNaN(parsedId) ? parsedId : 1;
+
+  if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method)) {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: 'Authentication required. Please login.' });
+    }
+  }
+
+  next();
+};
+
+router.use(optionalCompanyAuth);
+
+// Highlights
+router.get('/highlights', controller.getHighlights);
+router.put('/highlights', controller.saveHighlights);
 
 // UI Blocks
 router.get('/ui-blocks', controller.getUiBlocks);
@@ -18,7 +53,9 @@ router.put('/pricing/settings', controller.savePricingSettings);
 
 // Pricing Plans
 router.get('/pricing/plans', controller.getPricingPlans);
+router.get('/pricing-plans', controller.getPricingPlans);
 router.put('/pricing/plans', controller.savePricingPlans);
+router.put('/pricing-plans', controller.savePricingPlans);
 router.patch('/pricing/plans/:id/status', controller.updatePricingPlanStatus);
 router.put('/pricing/plans/:id/status', controller.updatePricingPlanStatus);
 router.delete('/pricing/plans/:id', controller.deletePricingPlan);
@@ -156,6 +193,7 @@ router.get('/sliders', controller.listSliders);
 router.post('/sliders', controller.createSlider);
 router.put('/sliders/:id', controller.updateSlider);
 router.delete('/sliders/:id', controller.deleteSlider);
+router.get('/slider-items', controller.listSliderItems);
 
 router.get('/gallery-categories', controller.listGalleryCategories);
 router.post('/gallery-categories', controller.createGalleryCategory);
