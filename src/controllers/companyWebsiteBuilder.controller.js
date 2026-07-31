@@ -1699,8 +1699,18 @@ const deleteVideoTutorial = asyncHandler(async (req, res) => {
 
 const getBasicInformation = getSingleton('basicInformation', 'Basic information retrieved');
 const saveBasicInformation = saveSingleton('basicInformation', 'Basic information saved');
-const getHeroSection = getSingleton('heroSection', 'Hero section retrieved');
-const saveHeroSection = saveSingleton('heroSection', 'Hero section saved');
+const getHeroSection = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const pageSlug = req.query.page || req.query.page_slug || 'home';
+    const data = await websiteService.getSingleton('heroSection', companyId, pageSlug);
+    return ApiResponse.success(res, data, 'Hero section retrieved');
+});
+const saveHeroSection = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const pageSlug = req.query.page || req.query.page_slug || req.body?.page_slug || req.body?.page || 'home';
+    const data = await websiteService.upsertSingleton('heroSection', companyId, req.body || {}, pageSlug);
+    return ApiResponse.success(res, data, 'Hero section saved');
+});
 const getFooter = getSingleton('footer', 'Footer settings retrieved');
 const saveFooter = saveSingleton('footer', 'Footer settings saved');
 const getSeo = getSingleton('seo', 'SEO settings retrieved');

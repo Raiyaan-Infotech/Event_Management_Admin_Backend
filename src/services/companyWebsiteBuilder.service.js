@@ -62,7 +62,7 @@ const TABLE_COLUMNS = {
   pages: ['page_type', 'title', 'slug', 'content', 'excerpt', 'seo_title', 'seo_description', 'seo_keywords', 'og_image_url', 'status', 'sort_order', 'is_system', 'is_active'],
   menuItems: ['parent_id', 'label', 'item_type', 'page_id', 'url', 'target', 'sort_order', 'is_visible', 'is_active'],
   uiBlocks: ['block_key', 'label', 'variant_key', 'is_visible', 'sort_order', 'config_json', 'design_json', 'mobile_json', 'is_active'],
-  heroSection: ['image_url', 'badge_text', 'title', 'description', 'hero_height', 'overlay_enabled', 'overlay_color', 'overlay_opacity', 'button_1_json', 'button_2_json', 'button_layout', 'content_alignment', 'mobile_settings_json', 'design_json', 'is_active'],
+  heroSection: ['page_slug', 'image_url', 'badge_text', 'title', 'description', 'hero_height', 'overlay_enabled', 'overlay_color', 'overlay_opacity', 'button_1_json', 'button_2_json', 'button_layout', 'content_alignment', 'mobile_settings_json', 'design_json', 'is_active'],
   sliders: ['slider_type', 'title', 'slider_height', 'autoplay', 'autoplay_speed', 'status', 'config_json', 'is_active'],
   sliderItems: ['slider_id', 'title', 'description', 'image_url', 'button_label', 'button_page_id', 'button_url', 'button_color', 'button_text_color', 'sort_order', 'status', 'is_active'],
   galleryCategories: ['name', 'slug', 'description', 'sort_order', 'is_active'],
@@ -179,31 +179,56 @@ const getWebsite = async (companyId) => {
   return normalizeRecord(row) || (await ensureWebsite(companyId));
 };
 
-const getSingleton = async (tableKey, companyId) => {
+const getSingleton = async (tableKey, companyId, pageSlug = null) => {
   const website = await getWebsite(companyId);
   const table = await requireTable(tableKey);
-  const [row] = await sequelize.query(
-    `SELECT * FROM ${table} WHERE company_id = ? AND website_id = ? LIMIT 1`,
-    { replacements: [companyId, website.id], type: QueryTypes.SELECT }
-  );
+  let querySql = `SELECT * FROM ${table} WHERE company_id = :companyId AND website_id = :websiteId`;
+  const replacements = { companyId, websiteId: website.id };
+
+  if (pageSlug) {
+    try {
+      const [colRow] = await sequelize.query(`SHOW COLUMNS FROM ${table} LIKE 'page_slug'`, { type: QueryTypes.SELECT });
+      if (colRow) {
+        querySql += ` AND (page_slug = :pageSlug OR page_slug IS NULL)`;
+        querySql += ` ORDER BY CASE WHEN page_slug = :pageSlug THEN 0 ELSE 1 END`;
+        replacements.pageSlug = pageSlug;
+      }
+    } catch {
+      // fallback without page_slug filter
+    }
+  }
+  querySql += ` LIMIT 1`;
+
+  const [row] = await sequelize.query(querySql, { replacements, type: QueryTypes.SELECT });
   return normalizeRecord(row);
 };
 
-const upsertSingleton = async (tableKey, companyId, payload = {}) => {
+const upsertSingleton = async (tableKey, companyId, payload = {}, pageSlug = null) => {
   const website = await getWebsite(companyId);
   const table = await requireTable(tableKey);
   const allowed = TABLE_COLUMNS[tableKey] || [];
   
-  const existing = await getSingleton(tableKey, companyId);
+  const targetPageSlug = pageSlug || payload.page_slug || payload.page || 'home';
+  const existing = await getSingleton(tableKey, companyId, targetPageSlug);
   const updates = {};
 
+  let hasPageSlugCol = false;
+  try {
+    const [colRow] = await sequelize.query(`SHOW COLUMNS FROM ${table} LIKE 'page_slug'`, { type: QueryTypes.SELECT });
+    hasPageSlugCol = Boolean(colRow);
+  } catch {}
+
   allowed.forEach((col) => {
-    if (payload[col] !== undefined) {
+    if (payload[col] !== undefined && (col !== 'page_slug' || hasPageSlugCol)) {
       updates[col] = JSON_COLUMNS.has(col) ? safeJsonStringify(payload[col]) : payload[col];
     }
   });
 
-  if (existing) {
+  if (hasPageSlugCol && targetPageSlug) {
+    updates.page_slug = targetPageSlug;
+  }
+
+  if (existing && (!hasPageSlugCol || existing.page_slug === targetPageSlug || !existing.page_slug)) {
     const setClause = Object.keys(updates).map((k) => `${k} = :${k}`).join(', ');
     if (setClause) {
       await sequelize.query(
@@ -220,7 +245,7 @@ const upsertSingleton = async (tableKey, companyId, payload = {}) => {
     );
   }
 
-  return getSingleton(tableKey, companyId);
+  return getSingleton(tableKey, companyId, targetPageSlug);
 };
 
 const getList = async (tableKey, companyId, extraWhere = '', replacements = {}) => {
