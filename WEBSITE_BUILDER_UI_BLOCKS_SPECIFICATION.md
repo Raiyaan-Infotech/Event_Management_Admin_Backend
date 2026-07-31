@@ -354,3 +354,23 @@ export type ThemeColors = {
    In `company-website-preview.tsx`:
    - Add entry to `homeSectionByKey` mapping object.
    - Add key to `defaultHomeOrder` array.
+
+---
+
+### 18. Login & Demo CTA Block Customizer
+
+* **Block Key**: `login-demo`
+* **Customizer Route**: `/admin/website-builder/login-demo/[page]`
+* **Preview Components File**: `src/components/company-website-preview/sections/login-demo-section.tsx`
+* **Variants Specifications**:
+
+| Variant ID | Component Name | Default Page | Design & Layout Features |
+| :--- | :--- | :--- | :--- |
+| `variant_1` | `LoginDemoSection` | Home Page | Clean row banner with Gift icon circle badge, subtext, Get Started Free & View Demo App buttons. |
+| `variant_2` | `FeaturesFirstHighlightSection` | Features Page (1st Demo) | Rich 3-column banner featuring tablet app mockup photo (`/images/event-app-mockup.png`), 2x3 feature pills grid (`Social Media`, `Music Player`, `Countdown Timer`, etc.), and right CTA card. |
+| `variant_3` | `ContactSignupDemoSection` | Pricing Page | Dual-card layout: Left Support card (*"Still Have Questions?"* + 3D Headset icon) + Right QR Code phone card (*"Ready to Create Your Amazing Event?"* + QR phone frame + 2 buttons). |
+| `variant_4` | `SignupDemoSection` | How It Works Page | Quick walkthrough CTA row banner with Gift icon badge and action buttons. |
+| `variant_5` | `ChatSignupDemoSection` | Contact Page | 3D Mail envelope graphic with floating paper plane, *"Still Have Questions?"* headline, Start Live Chat (`MessageSquare`) & Book a Demo (`Calendar`) buttons. |
+| `variant_6` | `SignInDemoSection` | Features Page (2nd Demo) | Deep dark slate container (`bg-[#0B0F19]`) with purple/pink theme accent highlight, Create Your App Now & Book a Demo buttons. |
+| `variant_7` | `TemplateDemoSection` | Template Page | Custom template builder banner with mobile invitation app mockup, 3 single-row feature checklist badges (*"Fully Customizable"*, *"No Coding Required"*, *"Preview in Real-time"*), Create Custom Template button & View How It Works link. |
+
