@@ -1,6 +1,86 @@
 const { sequelize, Sequelize, ColorPalette } = require('../models');
 const ApiError = require('../utils/apiError');
+const mediaService = require('./media.service');
 const { QueryTypes } = Sequelize;
+
+const TABLE_S3_FOLDERS = {
+  website: 'website-builder/website',
+  basicInformation: 'website-builder/logos',
+  socialLinks: 'website-builder/social-icons',
+  pages: 'website-builder/pages',
+  menuItems: 'website-builder/menu-items',
+  uiBlocks: 'website-builder/ui-blocks',
+  heroSection: 'website-builder/hero',
+  sliders: 'website-builder/sliders',
+  sliderItems: 'website-builder/sliders',
+  galleryCategories: 'website-builder/gallery',
+  galleryItems: 'website-builder/gallery',
+  contactSettings: 'website-builder/contact',
+  contactSocialLinks: 'website-builder/contact',
+  testimonials: 'website-builder/testimonials',
+  clients: 'website-builder/clients',
+  sponsors: 'website-builder/sponsors',
+  footer: 'website-builder/footer',
+  seo: 'website-builder/seo',
+  loginSettings: 'website-builder/login',
+  features: 'website-builder/features',
+  howItWorks: 'website-builder/how-it-works',
+  templates: 'website-builder/templates',
+  videoTutorials: 'website-builder/video-tutorials',
+};
+
+const convertBase64ToMedia = async (dataUrl, folder = 'website-builder') => {
+  if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
+    return dataUrl;
+  }
+  try {
+    const matches = dataUrl.match(/^data:image\/([a-zA-Z0-9+\-+.]+);base64,(.+)$/);
+    if (!matches) return dataUrl;
+    const ext = matches[1] === 'jpeg' ? 'jpg' : matches[1];
+    const buffer = Buffer.from(matches[2], 'base64');
+    const folderSub = folder.split('/').pop() || 'media';
+    const filename = `${folderSub}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
+    const fileObj = {
+      buffer,
+      originalname: filename,
+      mimetype: `image/${matches[1]}`,
+      size: buffer.length,
+    };
+    const result = await mediaService.upload(fileObj, { folder });
+    return result?.url || dataUrl;
+  } catch (err) {
+    console.error(`Failed to convert base64 image for folder ${folder}:`, err);
+    return dataUrl;
+  }
+};
+
+const processRecordBase64Images = async (payload, tableKey) => {
+  if (!payload) return payload;
+  const folder = TABLE_S3_FOLDERS[tableKey] || 'website-builder';
+
+  if (Array.isArray(payload)) {
+    return Promise.all(payload.map((item) => processRecordBase64Images(item, tableKey)));
+  }
+
+  if (typeof payload === 'object') {
+    const result = { ...payload };
+    for (const key of Object.keys(result)) {
+      let val = result[key];
+      if (typeof val === 'string' && val.startsWith('data:image/')) {
+        result[key] = await convertBase64ToMedia(val, folder);
+      } else if (val && typeof val === 'object') {
+        result[key] = await processRecordBase64Images(val, tableKey);
+      }
+    }
+    return result;
+  }
+
+  if (typeof payload === 'string' && payload.startsWith('data:image/')) {
+    return await convertBase64ToMedia(payload, folder);
+  }
+
+  return payload;
+};
 
 const tableCache = new Map();
 
@@ -200,14 +280,41 @@ const getSingleton = async (tableKey, companyId, pageSlug = null) => {
   querySql += ` LIMIT 1`;
 
   const [row] = await sequelize.query(querySql, { replacements, type: QueryTypes.SELECT });
-  return normalizeRecord(row);
+  const rawRecord = normalizeRecord(row);
+  if (!rawRecord) return rawRecord;
+
+  // Auto-migrate legacy base64 images in DB to S3/Storage URLs with component S3 folder
+  const record = await processRecordBase64Images(rawRecord, tableKey);
+  if (JSON.stringify(record) !== JSON.stringify(rawRecord) && record.id) {
+    try {
+      const allowed = TABLE_COLUMNS[tableKey] || [];
+      const updates = {};
+      allowed.forEach((col) => {
+        if (record[col] !== undefined) {
+          updates[col] = JSON_COLUMNS.has(col) ? safeJsonStringify(record[col]) : record[col];
+        }
+      });
+      const setClause = Object.keys(updates).map((k) => `${k} = :${k}`).join(', ');
+      if (setClause) {
+        await sequelize.query(
+          `UPDATE ${table} SET ${setClause}, updated_at = NOW() WHERE id = :id`,
+          { replacements: { ...updates, id: record.id }, type: QueryTypes.UPDATE }
+        );
+      }
+    } catch (err) {
+      console.error(`Failed to update converted base64 images in DB for table ${table}:`, err);
+    }
+  }
+
+  return record;
 };
 
-const upsertSingleton = async (tableKey, companyId, payload = {}, pageSlug = null) => {
+const upsertSingleton = async (tableKey, companyId, rawPayload = {}, pageSlug = null) => {
   const website = await getWebsite(companyId);
   const table = await requireTable(tableKey);
   const allowed = TABLE_COLUMNS[tableKey] || [];
   
+  const payload = await processRecordBase64Images(rawPayload, tableKey);
   const targetPageSlug = pageSlug || payload.page_slug || payload.page || 'home';
   const existing = await getSingleton(tableKey, companyId, targetPageSlug);
   const updates = {};
@@ -218,11 +325,12 @@ const upsertSingleton = async (tableKey, companyId, payload = {}, pageSlug = nul
     hasPageSlugCol = Boolean(colRow);
   } catch {}
 
-  allowed.forEach((col) => {
+  for (const col of allowed) {
     if (payload[col] !== undefined && (col !== 'page_slug' || hasPageSlugCol)) {
-      updates[col] = JSON_COLUMNS.has(col) ? safeJsonStringify(payload[col]) : payload[col];
+      const val = payload[col];
+      updates[col] = JSON_COLUMNS.has(col) ? safeJsonStringify(val) : val;
     }
-  });
+  }
 
   if (hasPageSlugCol && targetPageSlug) {
     updates.page_slug = targetPageSlug;
@@ -256,13 +364,15 @@ const getList = async (tableKey, companyId, extraWhere = '', replacements = {}) 
     `SELECT * FROM ${table} WHERE company_id = :companyId AND website_id = :websiteId ${extraWhere} ORDER BY ${sort}`,
     { replacements: { companyId, websiteId: website.id, ...replacements }, type: QueryTypes.SELECT }
   );
-  return rows.map(normalizeRecord);
+  const records = rows.map(normalizeRecord);
+  return Promise.all(records.map((rec) => processRecordBase64Images(rec, tableKey)));
 };
 
-const createListItem = async (tableKey, companyId, payload = {}, extraObj = {}) => {
+const createListItem = async (tableKey, companyId, rawPayload = {}, extraObj = {}) => {
   const website = await getWebsite(companyId);
   const table = await requireTable(tableKey);
   const allowed = TABLE_COLUMNS[tableKey] || [];
+  const payload = await processRecordBase64Images(rawPayload, tableKey);
 
   const data = {};
   allowed.forEach((col) => {
@@ -287,9 +397,10 @@ const createListItem = async (tableKey, companyId, payload = {}, extraObj = {}) 
   return normalizeRecord(created);
 };
 
-const updateListItem = async (tableKey, id, companyId, payload = {}) => {
+const updateListItem = async (tableKey, id, companyId, rawPayload = {}) => {
   const table = await requireTable(tableKey);
   const allowed = TABLE_COLUMNS[tableKey] || [];
+  const payload = await processRecordBase64Images(rawPayload, tableKey);
 
   const updates = {};
   allowed.forEach((col) => {
@@ -322,10 +433,11 @@ const deleteListItem = async (tableKey, id, companyId) => {
   return { id, deleted: true };
 };
 
-const replaceList = async (tableKey, companyId, items = []) => {
+const replaceList = async (tableKey, companyId, rawItems = []) => {
   const website = await getWebsite(companyId);
   const table = await requireTable(tableKey);
-  
+  const items = await processRecordBase64Images(rawItems, tableKey);
+
   await sequelize.query(
     `DELETE FROM ${table} WHERE company_id = ? AND website_id = ?`,
     { replacements: [companyId, website.id], type: QueryTypes.DELETE }
