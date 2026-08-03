@@ -113,7 +113,7 @@ const hasTable = async (tableName) => {
 const requireTable = async (key) => {
   const table = TABLES[key];
   if (!table || !(await hasTable(table))) {
-    throw new ApiError(503, `Table '${table || key}' is missing in company website builder schema.`);
+    throw new ApiError(`Table '${table || key}' is missing in company website builder schema.`, 503);
   }
   return table;
 };

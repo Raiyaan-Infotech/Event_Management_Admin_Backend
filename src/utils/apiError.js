@@ -3,8 +3,13 @@
  */
 class ApiError extends Error {
   constructor(message, statusCode = 500, errors = null) {
-    super(message);
-    this.statusCode = statusCode;
+    if (typeof message === 'number') {
+      const temp = message;
+      message = statusCode;
+      statusCode = temp;
+    }
+    super(typeof message === 'string' ? message : 'An error occurred');
+    this.statusCode = typeof statusCode === 'number' ? statusCode : 500;
     this.errors = errors;
     this.isOperational = true;
 
