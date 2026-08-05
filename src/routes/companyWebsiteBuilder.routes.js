@@ -220,16 +220,19 @@ router.delete('/contact-messages/:id', controller.deleteContactMessage);
 
 router.get('/testimonials', controller.listTestimonials);
 router.post('/testimonials', controller.createTestimonial);
+router.put('/testimonials', controller.saveTestimonials);
 router.put('/testimonials/:id', controller.updateTestimonial);
 router.delete('/testimonials/:id', controller.deleteTestimonial);
 
 router.get('/clients', controller.listClients);
 router.post('/clients', controller.createClient);
+router.put('/clients', controller.saveClients);
 router.put('/clients/:id', controller.updateClient);
 router.delete('/clients/:id', controller.deleteClient);
 
 router.get('/sponsors', controller.listSponsors);
 router.post('/sponsors', controller.createSponsor);
+router.put('/sponsors', controller.saveSponsors);
 router.put('/sponsors/:id', controller.updateSponsor);
 router.delete('/sponsors/:id', controller.deleteSponsor);
 

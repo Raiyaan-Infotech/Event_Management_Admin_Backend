@@ -204,10 +204,19 @@ const savePricingMatrixFeatures = asyncHandler(async (req, res) => {
         const f = items[i];
         await sequelize.query(
             `INSERT INTO company_website_pricing_matrix_features
-             (company_id, feature_name, category, plan_values_json, sort_order, is_active)
-             VALUES (?,?,?,?,?,?)`,
+             (company_id, feature_name, icon, description, category, plan_values_json, sort_order, is_active)
+             VALUES (?,?,?,?,?,?,?,?)`,
             {
-                replacements: [companyId, f.feature_name, f.category || 'General', JSON.stringify(f.plan_values_json || {}), i, 1],
+                replacements: [
+                    companyId,
+                    f.feature_name || f.title || 'Feature',
+                    f.icon || 'Sparkles',
+                    f.description || '',
+                    f.category || 'General',
+                    JSON.stringify(f.plan_values_json || f.plan_availability || {}),
+                    f.sort_order !== undefined ? f.sort_order : i,
+                    f.is_active !== undefined ? (f.is_active ? 1 : 0) : 1,
+                ],
                 type: QueryTypes.INSERT,
             }
         );
@@ -1756,14 +1765,17 @@ const listTestimonials = listItems('testimonials', 'Testimonials retrieved');
 const createTestimonial = createItem('testimonials', 'Testimonial created');
 const updateTestimonial = updateItem('testimonials', 'Testimonial updated');
 const deleteTestimonial = deleteItem('testimonials', 'Testimonial deleted');
+const saveTestimonials = replaceItems('testimonials', 'Testimonials saved');
 const listClients = listItems('clients', 'Clients retrieved');
 const createClient = createItem('clients', 'Client created');
 const updateClient = updateItem('clients', 'Client updated');
 const deleteClient = deleteItem('clients', 'Client deleted');
+const saveClients = replaceItems('clients', 'Clients saved');
 const listSponsors = listItems('sponsors', 'Sponsors retrieved');
 const createSponsor = createItem('sponsors', 'Sponsor created');
 const updateSponsor = updateItem('sponsors', 'Sponsor updated');
 const deleteSponsor = deleteItem('sponsors', 'Sponsor deleted');
+const saveSponsors = replaceItems('sponsors', 'Sponsors saved');
 
 module.exports = {
     getUiBlocks,
@@ -2025,13 +2037,16 @@ module.exports = {
     createTestimonial,
     updateTestimonial,
     deleteTestimonial,
+    saveTestimonials,
     listClients,
     createClient,
     updateClient,
     deleteClient,
+    saveClients,
     listSponsors,
     createSponsor,
     updateSponsor,
     deleteSponsor,
+    saveSponsors,
 };
 

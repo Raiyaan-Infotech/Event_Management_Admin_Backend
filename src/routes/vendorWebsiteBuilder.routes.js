@@ -64,16 +64,19 @@ router.delete('/contact/messages/:id', controller.deleteContactMessage);
 
 router.get('/testimonials', controller.listTestimonials);
 router.post('/testimonials', controller.createTestimonial);
+router.put('/testimonials', controller.saveTestimonials);
 router.put('/testimonials/:id', controller.updateTestimonial);
 router.delete('/testimonials/:id', controller.deleteTestimonial);
 
 router.get('/portfolio/clients', controller.listClients);
 router.post('/portfolio/clients', controller.createClient);
+router.put('/portfolio/clients', controller.saveClients);
 router.put('/portfolio/clients/:id', controller.updateClient);
 router.delete('/portfolio/clients/:id', controller.deleteClient);
 
 router.get('/portfolio/sponsors', controller.listSponsors);
 router.post('/portfolio/sponsors', controller.createSponsor);
+router.put('/portfolio/sponsors', controller.saveSponsors);
 router.put('/portfolio/sponsors/:id', controller.updateSponsor);
 router.delete('/portfolio/sponsors/:id', controller.deleteSponsor);
 
