@@ -20,10 +20,10 @@ const isAuthenticated = async (req, res, next) => {
       if (refreshDecoded) {
         // Validate refresh token exists and is active in DB
         const storedToken = await RefreshToken.findOne({
-          where: { token: refreshToken, user_id: refreshDecoded.userId, is_active: true },
+          where: { token: refreshToken, user_id: refreshDecoded.userId, is_active: [1, true] },
         });
 
-        if (storedToken && storedToken.expires_at > new Date()) {
+        if (storedToken && new Date(storedToken.expires_at) > new Date()) {
           // Fetch user to generate new access token with fresh data
           const user = await User.findByPk(refreshDecoded.userId, {
             include: [{
@@ -32,7 +32,7 @@ const isAuthenticated = async (req, res, next) => {
             }],
           });
 
-          if (user && user.is_active === 1) {
+          if (user && (user.is_active === 1 || user.is_active === true)) {
             const newAccessToken = generateAccessToken(user);
             res.cookie('access_token', newAccessToken, {
               ...COOKIE_OPTIONS,

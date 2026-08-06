@@ -53,6 +53,52 @@ const login = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Refresh access token
+ * POST /api/v1/auth/refresh
+ */
+const refresh = asyncHandler(async (req, res) => {
+  const refreshToken = req.cookies.refresh_token || req.body?.refreshToken || req.body?.refresh_token;
+
+  if (!refreshToken) {
+    return ApiResponse.unauthorized(res, 'Refresh token required');
+  }
+
+  const { verifyRefreshToken, generateAccessToken, setTokenCookies } = require('../utils/jwt');
+  const { User, Role } = require('../models');
+
+  const refreshDecoded = verifyRefreshToken(refreshToken);
+  if (!refreshDecoded) {
+    return ApiResponse.unauthorized(res, 'Invalid or expired refresh token');
+  }
+
+  const storedToken = await RefreshToken.findOne({
+    where: {
+      token: refreshToken,
+      user_id: refreshDecoded.userId,
+      is_active: [1, true],
+    },
+  });
+
+  if (!storedToken || new Date(storedToken.expires_at) <= new Date()) {
+    return ApiResponse.unauthorized(res, 'Refresh token revoked or expired');
+  }
+
+  const user = await User.findByPk(refreshDecoded.userId, {
+    include: [{ model: Role, as: 'role' }],
+  });
+
+  if (!user || (user.is_active !== 1 && user.is_active !== true)) {
+    return ApiResponse.unauthorized(res, 'User inactive or not found');
+  }
+
+  const newAccessToken = generateAccessToken(user);
+  setTokenCookies(res, newAccessToken, refreshToken);
+
+  logger.logRequest(req, 'Token refresh successful');
+  return ApiResponse.success(res, { accessToken: newAccessToken, token: newAccessToken }, 'Token refreshed successfully');
+});
+
+/**
  * Logout user
  * POST /api/v1/auth/logout
  */
@@ -157,6 +203,7 @@ const resetPassword = asyncHandler(async (req, res) => {
 module.exports = {
   register,
   login,
+  refresh,
   logout,
   me,
   changePassword,
