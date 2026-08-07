@@ -1,5 +1,6 @@
 const express = require('express');
 const controller = require('../controllers/companyWebsiteBuilder.controller');
+const translationController = require('../controllers/websiteBuilderTranslation.controller');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 
@@ -38,6 +39,29 @@ const optionalCompanyAuth = (req, res, next) => {
 };
 
 router.use(optionalCompanyAuth);
+
+// Website Builder Content Translations (per-section, per-language field values)
+router.get('/translations/languages', translationController.getBuilderLanguages);
+router.post('/translations/languages', translationController.createBuilderLanguage);
+router.put('/translations/languages/:id', translationController.updateBuilderLanguage);
+router.patch('/translations/languages/:id/default', translationController.setDefaultBuilderLanguage);
+router.post('/translations/languages/:id/translate-all', translationController.translateAllToLanguage);
+router.delete('/translations/languages/:id', translationController.deleteBuilderLanguage);
+// Whole-site overlay + switcher list, consumed by the rendered website
+router.get('/translations/public-languages', translationController.getPublicLanguages);
+router.get('/translations/bundle', translationController.getTranslationBundle);
+router.get('/content-translations', translationController.getContentTranslations);
+router.put('/content-translations', translationController.saveContentTranslations);
+router.put('/translation-keys/register', translationController.registerTranslationKeys);
+router.get('/translation-keys/sections', translationController.listTranslationSections);
+router.get('/translation-keys/stats', translationController.getTranslationStats);
+router.get('/translation-keys', translationController.listTranslationKeys);
+router.put('/translation-keys/:id/translations', translationController.saveKeyTranslations);
+router.post('/translation-keys/:id/retranslate', translationController.retranslateTranslationKey);
+router.delete('/translation-keys/:id', translationController.deleteTranslationKey);
+router.post('/content-translations/auto-translate', translationController.autoTranslateContent);
+// SSE progress stream for the same operation (drives the full-screen loader)
+router.get('/content-translations/auto-translate/stream', translationController.autoTranslateContentStream);
 
 // Highlights
 router.get('/highlights', controller.getHighlights);

@@ -266,19 +266,25 @@ const getSingleton = async (tableKey, companyId, pageSlug = null) => {
   let querySql = `SELECT * FROM ${table} WHERE company_id = :companyId AND website_id = :websiteId`;
   const replacements = { companyId, websiteId: website.id };
 
+  let orderBy = '';
   if (pageSlug) {
     try {
       const [colRow] = await sequelize.query(`SHOW COLUMNS FROM ${table} LIKE 'page_slug'`, { type: QueryTypes.SELECT });
       if (colRow) {
         querySql += ` AND (page_slug = :pageSlug OR page_slug IS NULL)`;
-        querySql += ` ORDER BY CASE WHEN page_slug = :pageSlug THEN 0 ELSE 1 END`;
+        orderBy = `CASE WHEN page_slug = :pageSlug THEN 0 ELSE 1 END, `;
         replacements.pageSlug = pageSlug;
       }
     } catch {
       // fallback without page_slug filter
     }
   }
-  querySql += ` LIMIT 1`;
+  // `id ASC` is not cosmetic: if duplicate rows ever exist for the same
+  // company/website, an unordered LIMIT 1 lets MySQL pick either one. The
+  // translation key scan reads these tables with `ORDER BY id ASC LIMIT 1`,
+  // so an unordered read here would address a different row and silently
+  // detach every saved translation from its slot.
+  querySql += ` ORDER BY ${orderBy}id ASC LIMIT 1`;
 
   const [row] = await sequelize.query(querySql, { replacements, type: QueryTypes.SELECT });
   const rawRecord = normalizeRecord(row);

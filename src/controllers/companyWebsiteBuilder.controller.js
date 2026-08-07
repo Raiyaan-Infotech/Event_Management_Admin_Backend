@@ -1886,7 +1886,15 @@ const getHighlights = asyncHandler(async (req, res) => {
     if (rows && rows[0] && rows[0].settings_json) {
         try {
             const parsed = JSON.parse(rows[0].settings_json);
-            return ApiResponse.success(res, parsed, 'Highlights settings retrieved');
+            // Layer the top-level columns back over the parsed blob. settings_json
+            // holds only the editor's own state, so returning it bare drops the
+            // row `id` — and content translations are addressed by that id, so
+            // without it the section silently looks untranslatable.
+            return ApiResponse.success(
+                res,
+                { ...parsed, id: rows[0].id, page_slug: rows[0].page_slug, instance: rows[0].instance },
+                'Highlights settings retrieved'
+            );
         } catch {
             return ApiResponse.success(res, rows[0], 'Highlights settings retrieved');
         }
@@ -1912,7 +1920,19 @@ const saveHighlights = asyncHandler(async (req, res) => {
         type: QueryTypes.INSERT,
     });
 
-    return ApiResponse.success(res, body, 'Highlights settings saved successfully');
+    // Read back so the response carries the row id. Echoing the request body
+    // would leave the client without one until a full refetch, and the
+    // translation UI needs the id to know the record exists.
+    const [saved] = await sequelize.query(
+        'SELECT id FROM company_website_highlights WHERE company_id = ? AND page_slug = ? AND instance = ? LIMIT 1',
+        { replacements: [companyId, pageSlug, instance], type: QueryTypes.SELECT }
+    );
+
+    return ApiResponse.success(
+        res,
+        { ...body, id: saved?.id, page_slug: pageSlug, instance },
+        'Highlights settings saved successfully'
+    );
 });
 
 module.exports = {
