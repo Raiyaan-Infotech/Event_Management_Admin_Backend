@@ -80,6 +80,13 @@ router.get('/pricing/plans', controller.getPricingPlans);
 router.get('/pricing-plans', controller.getPricingPlans);
 router.put('/pricing/plans', controller.savePricingPlans);
 router.put('/pricing-plans', controller.savePricingPlans);
+// Single-row create/update — the bulk PUT above deletes and reinserts every
+// plan on every call, reassigning ids and orphaning translations. The admin
+// form uses these instead so editing one plan doesn't touch the others' ids.
+router.post('/pricing/plans', controller.createPricingPlan);
+router.post('/pricing-plans', controller.createPricingPlan);
+router.put('/pricing/plans/:id', controller.updatePricingPlan);
+router.put('/pricing-plans/:id', controller.updatePricingPlan);
 router.patch('/pricing/plans/:id/status', controller.updatePricingPlanStatus);
 router.put('/pricing/plans/:id/status', controller.updatePricingPlanStatus);
 router.delete('/pricing/plans/:id', controller.deletePricingPlan);
@@ -87,6 +94,10 @@ router.delete('/pricing/plans/:id', controller.deletePricingPlan);
 // Pricing Matrix Features
 router.get('/pricing/matrix-features', controller.getPricingMatrixFeatures);
 router.put('/pricing/matrix-features', controller.savePricingMatrixFeatures);
+// Single-row create/update, same reasoning as pricing plans above.
+router.post('/pricing/matrix-features', controller.createPricingMatrixFeature);
+router.put('/pricing/matrix-features/:id', controller.updatePricingMatrixFeature);
+router.delete('/pricing/matrix-features/:id', controller.deletePricingMatrixFeature);
 
 // Features
 router.get('/features', controller.getFeatures);

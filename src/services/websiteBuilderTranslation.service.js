@@ -345,6 +345,98 @@ const FIELD_CATALOG = {
   },
 };
 
+// Static UI chrome — section headings, button labels, form placeholders — that
+// isn't admin-entered content, so there is no DB row for FIELD_CATALOG to scan.
+// Registered as a fixed list instead, all under the single slot
+// `ui-chrome|''|0`. The rendered site's `t()` reads this slot; unmatched keys
+// still fall back to the static src/locales/website-builder/*.json bundle, so
+// nothing breaks for a language that hasn't been given DB overrides yet.
+//
+// Keys and English defaults must stay in sync with the `t('key', 'default')`
+// call sites in components/company-website-preview/sections/*.tsx.
+const UI_CHROME_SECTION = 'ui-chrome';
+const UI_CHROME_KEYS = [
+  ['header.contact', 'Contact Us'],
+  ['header.login', 'Login'],
+  ['header.more', 'More'],
+  ['hero.get_started', 'Get Started'],
+  ['features.title', 'Features'],
+  ['features.subtitle', 'All the Features You Need'],
+  ['features.view_details', 'View Feature'],
+  ['how_it_works.badge', 'WORKING PROCESS'],
+  ['how_it_works.title', 'How It Works'],
+  ['how_it_works.subtitle', 'Get your event website ready in 4 simple steps'],
+  ['templates.title', 'Stunning Templates for Every Occasion'],
+  ['templates.subtitle', 'Choose From Beautiful Templates'],
+  ['templates.all_categories', 'All Templates'],
+  ['templates.popular', 'Popular'],
+  ['templates.preview', 'Preview'],
+  ['pricing.yearly', 'Yearly Billing'],
+  ['pricing.save_discount', 'Save up to 20%'],
+  ['pricing.most_popular', 'Most Popular'],
+  ['pricing.get_started', 'Get Started Free'],
+  ['pricing.choose_plan', 'Choose {planName}'],
+  ['pricing.all_plans_include', 'All Plans Include'],
+  ['pricing.view_all_features', 'View All Features'],
+  ['pricing.matrix_title', 'Powerful Features in Every Plan'],
+  ['pricing.matrix_subtitle', 'Everything you need to create, manage and share amazing events.'],
+  ['testimonials.title', 'Testimonials'],
+  ['testimonials.subtitle', 'What Our Clients Say'],
+  ['faqs.title', 'Frequently Asked Questions'],
+  ['faqs.subtitle', 'Got questions? We have got answers.'],
+  ['gallery.title', 'Our Gallery'],
+  ['gallery.all', 'All'],
+  ['gallery.no_images', 'No images in this category yet.'],
+  ['contact.title', 'Get In Touch'],
+  ['contact.subtitle', 'Send Us a Message'],
+  ['contact.form_hint', "Fill out the form and our team will get back to you shortly."],
+  ['contact.info_title', 'Contact Information'],
+  ['contact.full_name', 'Full Name'],
+  ['contact.full_name_placeholder', 'Enter your full name'],
+  ['contact.email_address', 'Email Address'],
+  ['contact.email_placeholder', 'Enter your email address'],
+  ['contact.phone_number', 'Phone Number'],
+  ['contact.phone_placeholder', 'Enter your phone number'],
+  ['contact.subject', 'Subject'],
+  ['contact.select_subject', 'Select a subject'],
+  ['contact.message', 'Message'],
+  ['contact.message_placeholder', 'Type your message here...'],
+  ['contact.send_message', 'Send Message'],
+  ['contact.email_us', 'Email Us'],
+  ['contact.call_us', 'Call Us'],
+  ['contact.head_office', 'Head Office'],
+  ['login_demo.ready_title', 'Ready to Create Your Event App?'],
+  ['login_demo.ready_subtitle', 'Join thousands of happy customers who trust {companyName} for their special moments.'],
+  ['login_demo.get_started_free', 'Get Started Free'],
+  ['login_demo.view_demo_app', 'View Demo App'],
+  ['footer.newsletter', 'Newsletter'],
+  ['footer.newsletter_subtitle', 'Subscribe to get updates and offers'],
+  ['footer.email_placeholder', 'Enter your email'],
+  ['footer.quick_links', 'Quick Links'],
+  ['footer.company', 'Company'],
+  ['footer.made_with', 'Made with'],
+  ['footer.for_moments', 'for your special moments'],
+  ['footer.all_rights_reserved', 'All Rights Reserved.'],
+].map(([key, defaultValue]) => ({
+  key,
+  // "how_it_works.badge" -> "How It Works · Badge" — readable in the admin
+  // Translations table without hand-writing 61 individual labels.
+  label: key
+    .split('.')
+    .map((part) => part.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()))
+    .join(' · '),
+  type: 'input',
+  value: defaultValue,
+}));
+
+const registerUiChromeKeys = (companyId) =>
+  registerKeys(companyId, {
+    section: UI_CHROME_SECTION,
+    page_slug: '',
+    record_id: 0,
+    fields: UI_CHROME_KEYS,
+  });
+
 const columnCache = new Map();
 const getTableColumns = async (table) => {
   if (columnCache.has(table)) return columnCache.get(table);
@@ -387,6 +479,13 @@ const syncKeysFromContent = async (companyId) => {
   let discovered = 0;
   const seen = new Set();
   const websiteId = await getActiveWebsiteId(companyId);
+
+  // Static UI chrome has no backing table to scan, so it's registered
+  // directly rather than discovered from a SELECT. Excluded from FIELD_CATALOG
+  // itself so the loop below (and the prune step after it) never touch it —
+  // section is not in FIELD_CATALOG, so pruning already treats it as
+  // manually-registered and leaves it alone.
+  await registerUiChromeKeys(companyId);
 
   for (const [section, config] of Object.entries(FIELD_CATALOG)) {
     const cols = await getTableColumns(config.table);

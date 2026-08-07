@@ -151,6 +151,83 @@ const savePricingPlans = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, items, 'Pricing plans saved');
 });
 
+// Single-row create/update — unlike `savePricingPlans` above, these preserve
+// the row's id. That matters beyond CRUD hygiene: content translations are
+// addressed by record_id, and the bulk save deletes + reinserts every plan on
+// every call, silently reassigning fresh ids and orphaning every plan's
+// translations on every save, not just the one being edited.
+const createPricingPlan = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const p = req.body || {};
+    const isActiveVal = (p.is_active === false || p.is_active === 0 || p.is_active === '0') ? 0 : 1;
+    const isPopularVal = (p.is_popular === true || p.is_popular === 1 || p.is_popular === '1') ? 1 : 0;
+
+    const [meta] = await sequelize.query(
+        `INSERT INTO company_website_pricing_plans
+         (company_id, plan_name, subtitle, target_type, currency, price_monthly, price_yearly,
+          period_label, badge_text, badge_style, is_popular, features_json, is_active, sort_order)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        {
+            replacements: [
+                companyId, p.plan_name, p.subtitle || '', p.target_type || 'individuals',
+                p.currency || '₹', p.price_monthly || 0, p.price_yearly || 0,
+                p.period_label || '/Month', p.badge_text || '', p.badge_style || 'filled',
+                isPopularVal, JSON.stringify(p.features_json || []),
+                isActiveVal, p.sort_order || 0,
+            ],
+            type: QueryTypes.INSERT,
+        }
+    );
+    return ApiResponse.created(res, { id: meta, ...p }, 'Pricing plan created');
+});
+
+const updatePricingPlan = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    const p = req.body || {};
+
+    const [existing] = await sequelize.query(
+        'SELECT * FROM company_website_pricing_plans WHERE id = ? AND company_id = ?',
+        { replacements: [id, companyId], type: QueryTypes.SELECT }
+    );
+    if (!existing) return ApiResponse.error(res, 'Pricing plan not found', 404);
+
+    const pick = (key, fallback) => (p[key] !== undefined ? p[key] : fallback);
+    const isActiveVal = p.is_active !== undefined
+        ? ((p.is_active === false || p.is_active === 0 || p.is_active === '0') ? 0 : 1)
+        : existing.is_active;
+    const isPopularVal = p.is_popular !== undefined
+        ? ((p.is_popular === true || p.is_popular === 1 || p.is_popular === '1') ? 1 : 0)
+        : existing.is_popular;
+
+    await sequelize.query(
+        `UPDATE company_website_pricing_plans SET
+           plan_name = ?, subtitle = ?, target_type = ?, currency = ?, price_monthly = ?,
+           price_yearly = ?, period_label = ?, badge_text = ?, badge_style = ?, is_popular = ?,
+           features_json = ?, is_active = ?, sort_order = ?, updated_at = NOW()
+         WHERE id = ? AND company_id = ?`,
+        {
+            replacements: [
+                pick('plan_name', existing.plan_name), pick('subtitle', existing.subtitle),
+                pick('target_type', existing.target_type), pick('currency', existing.currency),
+                pick('price_monthly', existing.price_monthly), pick('price_yearly', existing.price_yearly),
+                pick('period_label', existing.period_label), pick('badge_text', existing.badge_text),
+                pick('badge_style', existing.badge_style), isPopularVal,
+                JSON.stringify(pick('features_json', JSON.parse(existing.features_json || '[]'))),
+                isActiveVal, pick('sort_order', existing.sort_order),
+                id, companyId,
+            ],
+            type: QueryTypes.UPDATE,
+        }
+    );
+
+    const [updated] = await sequelize.query(
+        'SELECT * FROM company_website_pricing_plans WHERE id = ? AND company_id = ?',
+        { replacements: [id, companyId], type: QueryTypes.SELECT }
+    );
+    return ApiResponse.success(res, parseRow(updated), 'Pricing plan updated');
+});
+
 const updatePricingPlanStatus = asyncHandler(async (req, res) => {
     const companyId = getCompanyId(req);
     const { id } = req.params;
@@ -222,6 +299,85 @@ const savePricingMatrixFeatures = asyncHandler(async (req, res) => {
         );
     }
     return ApiResponse.success(res, items, 'Pricing matrix features saved');
+});
+
+// Single-row create/update — same reasoning as the pricing plan pair above:
+// the bulk save wipes and reinserts every row, reassigning ids and orphaning
+// every feature's translations on every single save.
+const createPricingMatrixFeature = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const f = req.body || {};
+
+    const [meta] = await sequelize.query(
+        `INSERT INTO company_website_pricing_matrix_features
+         (company_id, feature_name, icon, description, category, plan_values_json, sort_order, is_active)
+         VALUES (?,?,?,?,?,?,?,?)`,
+        {
+            replacements: [
+                companyId,
+                f.feature_name || f.title || 'Feature',
+                f.icon || 'Sparkles',
+                f.description || '',
+                f.category || 'General',
+                JSON.stringify(f.plan_values_json || f.plan_availability || {}),
+                f.sort_order || 0,
+                f.is_active !== undefined ? (f.is_active ? 1 : 0) : 1,
+            ],
+            type: QueryTypes.INSERT,
+        }
+    );
+    return ApiResponse.created(res, { id: meta, ...f }, 'Pricing matrix feature created');
+});
+
+const updatePricingMatrixFeature = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    const f = req.body || {};
+
+    const [existing] = await sequelize.query(
+        'SELECT * FROM company_website_pricing_matrix_features WHERE id = ? AND company_id = ?',
+        { replacements: [id, companyId], type: QueryTypes.SELECT }
+    );
+    if (!existing) return ApiResponse.error(res, 'Pricing matrix feature not found', 404);
+
+    const pick = (key, fallback) => (f[key] !== undefined ? f[key] : fallback);
+    const planValues = f.plan_values_json !== undefined || f.plan_availability !== undefined
+        ? (f.plan_values_json || f.plan_availability)
+        : JSON.parse(existing.plan_values_json || '{}');
+
+    await sequelize.query(
+        `UPDATE company_website_pricing_matrix_features SET
+           feature_name = ?, icon = ?, description = ?, category = ?, plan_values_json = ?,
+           sort_order = ?, is_active = ?, updated_at = NOW()
+         WHERE id = ? AND company_id = ?`,
+        {
+            replacements: [
+                pick('feature_name', existing.feature_name), pick('icon', existing.icon),
+                pick('description', existing.description), pick('category', existing.category),
+                JSON.stringify(planValues),
+                pick('sort_order', existing.sort_order),
+                f.is_active !== undefined ? (f.is_active ? 1 : 0) : existing.is_active,
+                id, companyId,
+            ],
+            type: QueryTypes.UPDATE,
+        }
+    );
+
+    const [updated] = await sequelize.query(
+        'SELECT * FROM company_website_pricing_matrix_features WHERE id = ? AND company_id = ?',
+        { replacements: [id, companyId], type: QueryTypes.SELECT }
+    );
+    return ApiResponse.success(res, parseRow(updated), 'Pricing matrix feature updated');
+});
+
+const deletePricingMatrixFeature = asyncHandler(async (req, res) => {
+    const companyId = getCompanyId(req);
+    const { id } = req.params;
+    await sequelize.query(
+        'DELETE FROM company_website_pricing_matrix_features WHERE id = ? AND company_id = ?',
+        { replacements: [id, companyId], type: QueryTypes.DELETE }
+    );
+    return ApiResponse.success(res, null, 'Pricing matrix feature deleted');
 });
 
 // ─── FEATURES ─────────────────────────────────────────────────────────────────
@@ -1784,10 +1940,15 @@ module.exports = {
     savePricingSettings,
     getPricingPlans,
     savePricingPlans,
+    createPricingPlan,
+    updatePricingPlan,
     updatePricingPlanStatus,
     deletePricingPlan,
     getPricingMatrixFeatures,
     savePricingMatrixFeatures,
+    createPricingMatrixFeature,
+    updatePricingMatrixFeature,
+    deletePricingMatrixFeature,
     getFeatures,
     createFeature,
     updateFeature,
@@ -1944,10 +2105,15 @@ module.exports = {
     savePricingSettings,
     getPricingPlans,
     savePricingPlans,
+    createPricingPlan,
+    updatePricingPlan,
     updatePricingPlanStatus,
     deletePricingPlan,
     getPricingMatrixFeatures,
     savePricingMatrixFeatures,
+    createPricingMatrixFeature,
+    updatePricingMatrixFeature,
+    deletePricingMatrixFeature,
     getFeatures,
     createFeature,
     replaceFeatures,
