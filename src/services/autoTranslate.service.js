@@ -14,6 +14,31 @@ const LANGUAGE_CODES = {
   hi: 'hi',  // Hindi
 };
 
+// MyMemory serves community-contributed translations, and some of the entries
+// in its corpus are themselves mis-encoded — UTF-8 bytes that were once stored
+// as Latin-1. Those come back as "à®ªà®¿à®°" instead of "பிர". Our DB and
+// connection are utf8mb4, so the damage arrives from the API, not from us.
+//
+// The signature is a Latin-1 high byte followed by a character in the UTF-8
+// continuation range. Real prose never produces that pair — U+0080–U+00BF are
+// control/punctuation codepoints, not letters — so this does not fire on
+// legitimate accented text like "café" or "Ça va".
+// Written with escapes on purpose: the continuation range is control
+// characters, which are invisible (and easily corrupted) as source literals.
+const MOJIBAKE_PATTERN = /[\u00C2-\u00F4][\u0080-\u00BF]/;
+
+/**
+ * Repairs Latin-1-mangled UTF-8, or returns null when the text is beyond repair.
+ * Re-decoding only works if every original byte survived; if the round trip
+ * yields replacement characters, bytes were already lost and the string is
+ * unusable — better to fail the translation than to persist garbage.
+ */
+const repairMojibake = (text) => {
+  if (typeof text !== 'string' || !MOJIBAKE_PATTERN.test(text)) return text;
+  const repaired = Buffer.from(text, 'latin1').toString('utf8');
+  return repaired.includes('\uFFFD') ? null : repaired;
+};
+
 /**
  * Translate text using MyMemory API (Free - 1000 requests/day)
  * @param {string} text - Text to translate
@@ -60,7 +85,15 @@ const translateText = async (text, fromLang = 'en', toLang, throwOnError = true)
     }
 
     if (response.data && response.data.responseStatus === 200) {
-      const translatedText = response.data.responseData.translatedText;
+      const rawText = response.data.responseData.translatedText;
+      const translatedText = repairMojibake(rawText);
+      if (translatedText === null) {
+        // Corrupted beyond repair — fail so callers keep the existing value
+        // rather than writing mojibake into the site.
+        const error = new Error('Translation service returned corrupted text');
+        error.statusCode = 502;
+        throw error;
+      }
       logger.logDB('autoTranslate', 'Translation', null, {
         from: fromLang,
         to: toLang,

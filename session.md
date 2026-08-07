@@ -603,3 +603,205 @@ section 51 — it now points at Website Builder > Languages.
 > Build note: a `next build` run right after the temporary dev server (section 48's proxy test)
 > failed on a stale `.next` turbopack chunk. `rm -rf .next` and rebuild is clean — not a code
 > regression.
+
+### 53. Mojibake in Tamil translations — MyMemory's corpus, not our encoding
+
+One nav label rendered as `à®ªà®¾à®¤à¯...` on the public site. DB, connection and column are all
+utf8mb4 (`utf8mb4_0900_ai_ci`) — the corruption arrived **from the translation API**. MyMemory serves
+community-contributed translations and some entries in its corpus are themselves UTF-8 bytes that
+were once stored as Latin-1.
+
+Defence added in `autoTranslate.service.js` (so **every** caller benefits, including the admin
+Languages module):
+- `MOJIBAKE_PATTERN` — a Latin-1 high byte followed by a UTF-8 continuation-range character.
+  Written with `\uXXXX` escapes: the continuation range is control characters, invisible and easily
+  corrupted as source literals.
+- `repairMojibake()` — re-decodes latin1→utf8; if the round trip yields U+FFFD the bytes were
+  already lost and it returns null, and `translateText` throws so callers keep the existing value
+  instead of persisting garbage.
+
+`scratch/test_mojibake.js` verifies **no false positives** on valid Tamil, Hindi, Arabic, French
+(`café`), Portuguese (`Ça vai, ação`), German (`Grüße`) and Spanish (`¿Cómo estás?`) — important,
+since a false positive would silently block legitimate accented translations.
+
+`scratch/clean_mojibake_translations.js` (dry-run by default) repaired **2 corrupted rows** locally
+(`nav-menu` label, `video-tutorial-difficulty-levels` name). Production had none.
+
+> **Correction to an earlier read:** these values were first judged unrecoverable. That was wrong —
+> the diagnostic script read them over a connection without `charset: 'utf8mb4'`, which mangled the
+> read itself. With the correct charset both repaired losslessly. **Always set `charset: 'utf8mb4'`
+> on mysql2 connections in scratch scripts**, or you will diagnose the tool instead of the data.
+
+### 54. Public-site design fixes
+
+| Area | Problem | Fix |
+|---|---|---|
+| Features | "View Feature" took the rotating per-card accent, so four cards showed four link colours; it also sat wherever the text ended | One `theme.primaryButton` for all; card is `flex h-full flex-col` and the CTA `mt-auto`, so links align across a row. Icons/bullets keep the accent |
+| Testimonials | Section background was `bg-slate-50` (grey) | `bg-white` |
+| Testimonials | Prev/next arrows and pager dots were `rounded-md` | `rounded-full` |
+| Testimonials | Card was centre-aligned, avatar-first | Rebuilt to the reference: rating on top, quote (`flex-1`), author row pinned bottom, all left-aligned. Grid switched to `items-stretch` so author rows line up |
+| Testimonials | Heading badge was a plain square chip | Pill badge, uppercase, letter-spaced |
+| Footer newsletter | Input and button should read as one control | Joined: `flex items-stretch` with no gap, rounding split across the pair (`rounded-l-xl` / `rounded-r-xl`) and the input's right border dropped so the seam looks like a single element. Input uses `flex-1 min-w-0`, not `w-full`, which would overflow the row and squeeze the button |
+| Template create | Required thumbnail showed "Required" text but no red border, unlike the file dropzone | Wrapped `ImageCropper` in an error-styled container matching the dropzone |
+
+Verified: `tsc --noEmit` clean, `next build` compiled, backend modules load.
+
+### 55. Highlights: fixed presets replaced with a gradient picker (frontend only)
+
+The four "Background Presets" buttons (Default / Gradient 1–3) are gone, replaced by a real gradient
+picker: **From** colour, **To** colour, an **angle** slider (0–360°) and a live swatch of exactly
+what will render.
+
+**No backend change was needed.** `saveHighlights` does `JSON.stringify(body)` into `settings_json`
+with no column whitelist, so new fields (`gradient_from`, `gradient_to`, `gradient_angle`) persist
+automatically.
+
+New shared helper `highlightsBackgroundStyle(config)` in `hooks/useHighlights.ts` is the single
+source of truth for the background, used by the admin form, its preview modal and the public
+section — three places that each re-derived it before and had drifted apart.
+
+Backward compatibility: rows saved before the picker carry a `preset` id and no stops.
+`LEGACY_PRESETS` maps those four ids to their original colour pairs, so existing blocks keep their
+look. Editing any stop clears `preset` so the two can never disagree.
+
+> **Bug found while doing this:** the public section ignored the configured colours entirely —
+> every `background_type: 'gradient'` block rendered the same hardcoded pink/purple
+> (`#EC4899 → #A855F7 → #4F46E5`), regardless of what the admin had chosen. So the old presets
+> only ever produced 2 distinct looks on the live site, not 4.
+>
+> Instance 2's default pink/purple banner is deliberately preserved for blocks that have **never**
+> had a background configured, so this change doesn't silently restyle live sites.
+
+Verified: `tsc --noEmit` clean, `next build` compiled, no `gradient-1/2/3` or preset UI left outside
+the legacy compatibility map.
+
+### 56. Newsletter input/button — joined, not gapped
+
+Correction to section 54: the "No gap" annotation on the footer newsletter meant the input and send
+button should be a **single joined control**, not that a gap was missing. They are now flush —
+`flex items-stretch` with no gap, rounding split across the pair (`rounded-l-xl` on the input,
+`rounded-r-xl` on the button), and the input's right border removed so the seam reads as one
+element instead of two touching ones. The shadow moved to the form wrapper so it wraps the pair.
+
+### 57. How It Works section — connector, image height, icon rendering, alignment
+
+Four issues from the mockup comparison, all in `how-it-works-section.tsx`:
+
+- **Icons not showing.** `STEP_ICONS` only mapped 12 hardcoded lucide components, but the admin's
+  icon picker (`icon-picker-dialog.tsx`) stores full Iconify names from any collection
+  (`heroicons:star`, `simple-icons:...`). Anything outside those 12 silently fell back to
+  `CheckCircle2`. Switched to `<Icon icon={...} />` from `@iconify/react` (same approach already
+  used in Features/Header), so every icon the picker can select actually renders.
+- **Each icon had a different colour.** They inherited the flat `theme.primaryButton` tint at fixed
+  opacity — barely distinguishable, not actually "different colours" as reported, so this reads as
+  "no colour." Added a 5-color `STEP_ACCENTS` rotation (pink/violet/green/orange/blue), applied
+  consistently to both the graphic box and the right-side icon chip for a given step.
+- **Icons not aligned in a column.** The right-side icon+badge block had no fixed width, so it
+  drifted left/right depending on label length. Now `w-[200px]` with `truncate` on the badge text.
+- **Image not full height of card.** The graphic box was a fixed `h-36` inside a `items-center` row,
+  so it never grew with a taller card. Row is now `items-stretch` and the box is
+  `h-36 md:h-auto md:min-h-[9rem]`, so on desktop it fills the card.
+- **Connector line "different from mockup."** Was a straight dashed vertical rule; the mockup shows
+  a soft flowing curve. Replaced with an inline SVG cubic Bezier that alternates left/right per step.
+
+### 58. Contact section — Get In Touch rebuilt to match the two-card mockup
+
+The old layout was a single form card beside a loose stack of contact rows and a separate map box —
+structurally different from the mockup's two matched cards. Rebuilt `contact-section.tsx`:
+
+- **Left card — "Send Us a Message":** icon header, hint line, labeled fields (was placeholder-only
+  inputs with no labels), "Subject" instead of an unlabeled category select.
+- **Right card — "Contact Information" + map, one card:** icon chips per row (Email Us / Call Us /
+  Head Office — was a plain MapPin/Phone/Mail with generic labels), map moved from its own separate
+  box into a split pane inside the same card (`grid sm:grid-cols-[1.3fr_1fr]`), filling the card's
+  full height.
+
+Grid switched to `items-stretch` so the two cards match height regardless of content length.
+
+### 59. Highlights not reflecting on the live page — local vs production data, not a bug
+
+Checked both databases directly. **Local** has a `pricing/1` highlights row (id=8, saved 2026-08-07);
+**production** does not — its `pricing/1` predates this session (id=31, 2026-08-05) and was never
+re-saved with the new fields. `useSaveHighlights`'s cache invalidation is correct
+(`['website-builder-highlights', page_slug, instance]`, matching the query key), so this was not a
+caching or wiring defect — the screenshot's environment simply has different data than what was
+edited. No code change; flagging so the next session doesn't re-chase this as a bug.
+
+### 60. Inline side-previews moved into "Live Preview" modals (matching Hero Section)
+
+Swept every website-builder form for a sticky/inline preview column. Two had one; both now match the
+pattern already used by Hero Section, SEO, Footer, etc. — full-width form, preview only in the
+"Live Preview" dialog.
+
+- **Login Page** (`login-page-content.tsx`) — had no Live Preview button at all; the branded panel
+  mockup sat permanently in a `lg:grid-cols-[1fr_1.1fr]` right column. Extracted verbatim into a new
+  `Dialog`, added the `Eye` / "Live Preview" button matching every other section, grid collapsed to
+  one column. The dialog's inner `sticky top-4` (meaningless once inside a Dialog, no scrolling
+  ancestor to stick within) replaced with `max-h-[70vh] overflow-y-auto`.
+- **Pricing Plans** (`pricing-plans-content.tsx`) — the device-switchable single-plan mockup (its own
+  "Card 1: Live Plan Preview" with a desktop/mobile toggle) was a sticky card beside the form.
+  Pricing Plans already had a separate "Live Preview" dialog showing all 3 plans side by side —
+  folded the single-plan mockup into the **top of that same dialog** rather than adding a second
+  modal, so one button shows both "the plan you're editing" and "all plans compared." Plan Summary
+  and Tips cards were left in place — those are reference data, not a visual preview.
+
+Every other section checked (testimonials, footer, gallery, sliders, features, hero, highlights, ui
+blocks) already previews exclusively through its modal — nothing else needed to move.
+
+Verified: `tsc --noEmit` clean, `next build` compiled successfully; grepped for `sticky top-` /
+"Right Column: Live" across all website-builder files afterward — none remain outside a Dialog.
+
+### 61. How It Works — connector still broken (real bug), plus flush-graphic fix
+
+Two more passes on `how-it-works-section.tsx` after section 57's first attempt.
+
+**Connector line collapsed to a stub.** The row wrapper was `items-start`, so the badge column
+(circle + SVG) was only ever as tall as its own content — the 40px circle — regardless of the
+card's actual height. `height: calc(100% - 1.5rem)` on the SVG therefore resolved against ~2.5rem,
+not the card's height, producing the tiny disconnected squiggle visible in testing. Changed the row
+to `items-stretch` so the badge column matches the card's rendered height, and recomputed the SVG's
+top offset (`3.75rem` = `pt-5` + `h-10`, was `3.25rem`) so the curve starts exactly where the circle
+ends. Simplified from an alternating dual-path to one consistent gentle S-curve, closer to the
+mockup's single flowing thread.
+
+**Graphic had its own border+radius "box within a box."** The card wrapped everything in
+`p-4 sm:p-6`, so the graphic sat inset on every side, and `DynamicStepGraphic` additionally drew its
+own `border` + `rounded-lg` on top of that inset position — two visible box outlines instead of one.
+Mockup has the image bleeding flush to the card's left/top/bottom edges with no visible border of
+its own.
+
+Fixed: card lost its uniform padding; the graphic now sits with zero inset on any side. The card's
+own `overflow-hidden` + `rounded-xl` clip the graphic's exposed corners, so no separate border/radius
+is needed on the graphic — removed both. Padding moved onto the content and badge columns
+individually, applied only to the edges *not* touching the graphic (`md:pl-0` on content, since the
+row's own `gap` already provides that spacing) so gap and padding don't stack into a double gap.
+
+Verified: `tsc --noEmit` clean, `next build` compiled successfully.
+
+### 62. Highlights — "individual cards" layout, scoped to How It Works only
+
+Investigated first before touching anything: neither reference image's content
+("Guest Management..." / "1000+ Templates...") exists anywhere in the DB under highlights OR
+features — both are pure reference mockups, not screenshots of misassigned live data. The real gap:
+every highlights block, on every page, has always rendered as **one shared bordered container**
+(`rounded-2xl border ... p-6` wrapping all items in a grid) — there was no code path that could
+produce "each item as its own card." That's what "ours showing one card" meant.
+
+Added a real `card_style: 'grouped' | 'individual'` field to `HighlightsSettings`
+(`hooks/useHighlights.ts`), defaulting to `'grouped'` so every existing block is visually unchanged.
+Wired it in three places:
+- Admin form (`highlights-content.tsx`) — new "Card Layout" select next to Icon Style.
+- Admin's own Live Preview modal — was a second, hand-duplicated render (doesn't reuse the public
+  component), branched separately so it matches what the public site will show.
+- Public site (`highlights-section.tsx`) — new branch takes priority over the existing
+  instance-based banner/bar logic; each item becomes its own bordered card, icon in a colored circle,
+  centered text.
+
+**Scoped to How It Works only, per explicit instruction** — not a global style change. Set
+`card_style: 'individual'` directly on the `how-it-works/1` row via
+`scratch/set_hiw_highlights_individual.js` (dry-run by default), applied to both local (id=10) and
+production (id=66). Verified via API afterward: how-it-works returns `card_style: "individual"`;
+home/1 returns `card_style: null` (falls through to the `'grouped'` default) — confirming no other
+page was touched.
+
+Verified: `tsc --noEmit` clean, `next build` compiled successfully.
