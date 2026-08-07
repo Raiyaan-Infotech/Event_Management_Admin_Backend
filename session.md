@@ -805,3 +805,132 @@ home/1 returns `card_style: null` (falls through to the `'grouped'` default) —
 page was touched.
 
 Verified: `tsc --noEmit` clean, `next build` compiled successfully.
+
+---
+
+## Session 6 — Translation correctness sweep + builder form consistency
+
+> **Date:** 2026-08-07 | Continues from Session 5 (§26–62)
+> **Status:** All work COMPLETE and verified locally. **NOTHING COMMITTED OR DEPLOYED.**
+
+### 63. ⚠️ START HERE TOMORROW — nothing is deployed
+
+Every fix below is **uncommitted** in both repos. Production (Vercel frontend + Render backend)
+still runs the buggy code.
+
+```
+Frontend  last commit 9b95556   ~20 modified files
+Backend   last commit 0544bee    3 modified files
+```
+
+This matters because the user tested on `event-management-admin-frontend.vercel.app` and reported
+"Not Translating" — those were the **already-fixed** bugs, still live in production. Do not
+re-debug them. **Commit + push both repos first**, then re-test.
+
+### 64. THE root cause — destructive bulk-save orphaned every translation
+
+Four sections saved via a bulk endpoint that ran `DELETE FROM <table>` then re-INSERTed every row,
+**reassigning auto-increment ids on every save**. Since translations are addressed by `record_id`,
+editing *any one* item silently detached **every** item's translations in that section.
+
+This single bug explains nearly all the "edit translation not working" reports. The translations
+were saving correctly, then being orphaned by the next unrelated save.
+
+| Section | Was | Now |
+|---|---|---|
+| Features | `useSaveFeaturesList` (bulk) | `useCreateFeature` / `useUpdateFeature` |
+| Testimonials | `replace` from generic list hook | `create` / `update` / `remove` |
+| Pricing Plans | `useSavePricingPlans` (bulk) | `useCreatePricingPlan` / `useUpdatePricingPlan` |
+| Plan Features | `useSavePricingMatrixFeatures` (bulk) | `useCreate/Update/DeletePricingMatrixFeature` |
+
+**New backend endpoints added** (`companyWebsiteBuilder.controller.js` + routes):
+- `POST/PUT /pricing/plans/:id` and `/pricing-plans/:id` → `createPricingPlan`, `updatePricingPlan`
+- `POST/PUT/DELETE /pricing/matrix-features/:id` → matrix feature per-item CRUD
+
+> The bulk endpoints still exist and are still used by drag-reorder paths (which only persist
+> `sort_order`). Do not delete them.
+
+### 65. ⚠️ `_components/pricing-plans-content.tsx` IS DEAD CODE
+
+Nothing imports it; no route renders it. **I wasted time editing it before noticing.** The real
+page is `pricing-plans/create/page.tsx`.
+
+**Before editing ANY `_components/*-content.tsx`, verify it's reachable:**
+```bash
+grep -rl "<filename-without-ext>" src/app/
+```
+It still sits in the repo and still shows up in audits. Worth deleting.
+
+### 66. Other fixes this session
+
+- **Templates + Features**: `router.push` to the list page right after Add meant a new record never
+  had a page where the language card could appear. Now stays on the form (`router.replace` to
+  `?id=<newId>`).
+- **Testimonials**: which row is being edited moved from local state into the URL (`?id=`). Local
+  state reset to row 1 on any fresh load — including the navigation a language switch performs —
+  so you could silently translate the wrong testimonial.
+- **Preview language-switch loader**: `isLoadingBundle` already existed in
+  `website-language-provider.tsx` but **nothing consumed it**. Now shows a "Switching language…"
+  overlay. One component powers all 9 public routes.
+- **How It Works**: investigated, **already correct** — has a working `RowTranslateButton` (small
+  globe icon next to Edit/Delete). No change needed.
+
+### 67. Hardcoded UI chrome → DB (61 strings)
+
+Static UI text (headings, buttons, placeholders) lived only in
+`src/locales/website-builder/*.json` and could not be translated from the admin.
+
+- Backend: `UI_CHROME_KEYS` in `websiteBuilderTranslation.service.js` — 61 keys registered under a
+  single fixed slot **`ui-chrome||0`**, via `registerUiChromeKeys()` called from
+  `syncKeysFromContent`. Not in `FIELD_CATALOG` (no table to scan), which also means the prune step
+  leaves it alone.
+- Frontend: `t()` in `website-language-provider.tsx` now checks
+  `bundleResponse.translations['ui-chrome||0']` first, falling back to the JSON dictionary.
+  One bundle fetch already covers it — the backend bundle query has no section filter.
+- Labels auto-derive: `how_it_works.badge` → `How It Works · Badge`.
+
+> Keys must stay in sync with the `t('key', 'default')` call sites in
+> `components/company-website-preview/sections/*.tsx`.
+
+### 68. Footer quick-links were untranslatable by design
+
+Footer link lists store **bare slugs** (`features`, `gallery`, `terms-of-service`).
+- Slug matches a page → renders that page's title (already translatable) ✓
+- Slug matches nothing → rendered a label **derived from the slug string** — text existing in no
+  table, so untranslatable ✗
+
+That's why list *headings* translated but the links under them stayed English.
+
+Fix: `footer` FIELD_CATALOG entry gained an `extract()` registering a `quick_link.<slug>` key per
+link (including the `['home','features','templates','gallery','contact']` fallbacks that render
+when nothing is configured). `buildFooter` in `preview-shared.ts` reads the override off the
+already-translated footer record. Verified end-to-end with real Tamil data.
+
+### 69. Builder form consistency — loaders + preview modals
+
+**Preview moved into a Live Preview modal** (Hero Section pattern) for the 3 forms that had it
+pinned as a permanent right column: **Features**, **Pricing Plans**, **Templates**.
+On Templates only the preview card moved — the "Tips" card stays as the sidebar.
+
+**Full-screen `PageLoader` added to 14 forms** that previously showed only a spinner inside the
+Save button: features (form + list), templates, pricing-plans, video-tutorial form + its 4 taxonomy
+pages, gallery, login-demo, clients, sponsors, contact-us, how-it-works, faq-form, faq-categories.
+
+> Near-miss worth knowing: while extracting the Templates preview block, a cleanup step deleted the
+> temp file holding those 71 lines *after* they were already cut from the source. Recovered exactly
+> from `git diff`. If a similar extract-and-move is needed, **write the block somewhere durable
+> before deleting it from the source.**
+
+### 70. Verification status
+
+`tsc --noEmit` clean · `next build` compiled · backend modules load · 61 ui-chrome keys confirmed
+via API · footer `quick_link.*` keys confirmed · bundle endpoint returns both overlays correctly.
+All temporary DB test rows and scratch scripts removed.
+
+### 71. TODO next session
+
+1. **Commit + push both repos** (§63) — nothing works in production until this happens.
+2. Re-test the reported flows on production after Vercel/Render redeploy.
+3. Consider deleting dead `_components/pricing-plans-content.tsx` (§65).
+4. Run **Translate All** for Tamil to populate the new `ui-chrome` (61) and `footer.quick_link.*`
+   keys — they're registered but have no translations yet.

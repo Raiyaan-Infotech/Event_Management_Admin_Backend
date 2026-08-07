@@ -76,6 +76,64 @@ const FIELD_CATALOG = {
       { col: 'copyright_text', label: 'Copyright Text' },
       { col: 'powered_by_text', label: 'Powered By Text' },
     ],
+    // The footer's quick-link lists store bare slugs ("features", "about-us").
+    // Any slug that matches a real page renders that page's (translatable)
+    // title, but the rest fall back to a label DERIVED from the slug — text
+    // that exists in no table and so could never be translated. Registering a
+    // `quick_link.<slug>` key per link closes that gap; buildFooter reads the
+    // override back off the translated footer record.
+    extract: (row) => {
+      const parseArr = (value) => {
+        if (Array.isArray(value)) return value;
+        if (typeof value === 'string' && value.trim()) {
+          try {
+            const parsed = JSON.parse(value);
+            return Array.isArray(parsed) ? parsed : [];
+          } catch {
+            return [];
+          }
+        }
+        return [];
+      };
+
+      const fields = [
+        { key: 'company_name', label: 'Company Name', type: 'input', value: row.company_name },
+        { key: 'description', label: 'Description', type: 'textarea', value: row.description },
+        { key: 'top_list_heading', label: 'Links Heading 1', type: 'input', value: row.top_list_heading },
+        { key: 'top_list_heading_2', label: 'Links Heading 2', type: 'input', value: row.top_list_heading_2 },
+        { key: 'copyright_text', label: 'Copyright Text', type: 'input', value: row.copyright_text },
+        { key: 'powered_by_text', label: 'Powered By Text', type: 'input', value: row.powered_by_text },
+      ];
+
+      // Mirrors buildFooter's fallback list, so the links that actually render
+      // when nothing is configured are translatable too.
+      const list1 = parseArr(row.quick_links_json || row.add_pages_json);
+      const links = [
+        ...(list1.length > 0 ? list1 : ['home', 'features', 'templates', 'gallery', 'contact']),
+        ...parseArr(row.quick_links_2_json),
+      ];
+
+      const seen = new Set();
+      links.forEach((entry) => {
+        const slug = String(entry ?? '').trim();
+        if (!slug || seen.has(slug)) return;
+        seen.add(slug);
+        const derived = slug
+          .replace(/^\/+/, '')
+          .split(/[-_/]/)
+          .filter(Boolean)
+          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(' ');
+        fields.push({
+          key: `quick_link.${slug}`,
+          label: `Footer Link — ${derived}`,
+          type: 'input',
+          value: derived,
+        });
+      });
+
+      return [{ page_slug: '', record_id: row.id, fields }];
+    },
   },
   seo: {
     table: 'company_website_seo_settings',
