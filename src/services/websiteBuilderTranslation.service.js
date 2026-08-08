@@ -6,6 +6,27 @@ const LANG_TABLE = 'company_website_builder_languages';
 const TRANSLATIONS_TABLE = 'company_website_content_translations';
 const KEYS_TABLE = 'company_website_translation_keys';
 
+/**
+ * Reads a JSON column that holds a flat array of strings, tolerating the two
+ * shapes mysql2 can hand back (already-parsed array, or a raw JSON string) and
+ * rows where the column is null or holds something unexpected.
+ * Non-string entries and blanks are dropped so they never become empty keys.
+ */
+const jsonStringArray = (raw) => {
+  let value = raw;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+    .filter(Boolean);
+};
+
 // Catalog of user-facing text that lives in the Website Builder content tables.
 // The registry is built by scanning these directly, so content already saved in
 // the DB is translatable without having to re-save each section from the UI.
@@ -172,6 +193,26 @@ const FIELD_CATALOG = {
       { col: 'short_description', label: 'Short Description', type: 'textarea' },
       { col: 'detailed_description', label: 'Detailed Description', type: 'textarea' },
     ],
+    // The card's bullet list lives in `bullet_points_json` as a plain string
+    // array, so it needs flattening into one key per position the way
+    // highlights does. 1-based to match what the preview writer expects;
+    // reordering the list re-points its translations.
+    extract: (row) => {
+      const fields = [
+        { key: 'title', label: 'Title', type: 'input', value: row.title || '' },
+        { key: 'short_description', label: 'Short Description', type: 'textarea', value: row.short_description || '' },
+        { key: 'detailed_description', label: 'Detailed Description', type: 'textarea', value: row.detailed_description || '' },
+      ];
+      jsonStringArray(row.bullet_points_json).forEach((point, index) => {
+        fields.push({
+          key: `bullet_${index + 1}`,
+          label: `Bullet ${index + 1}`,
+          type: 'input',
+          value: point,
+        });
+      });
+      return [{ page_slug: '', record_id: row.id, fields }];
+    },
   },
   'how-it-works': {
     table: 'company_website_how_it_works',
@@ -192,6 +233,25 @@ const FIELD_CATALOG = {
       { col: 'period_label', label: 'Period Label' },
       { col: 'badge_text', label: 'Badge Text' },
     ],
+    // The tick-list under each plan is a plain string array in `features_json`,
+    // so it flattens to one key per position like the feature bullets above.
+    extract: (row) => {
+      const fields = [
+        { key: 'plan_name', label: 'Plan Name', type: 'input', value: row.plan_name || '' },
+        { key: 'subtitle', label: 'Subtitle', type: 'input', value: row.subtitle || '' },
+        { key: 'period_label', label: 'Period Label', type: 'input', value: row.period_label || '' },
+        { key: 'badge_text', label: 'Badge Text', type: 'input', value: row.badge_text || '' },
+      ];
+      jsonStringArray(row.features_json).forEach((feature, index) => {
+        fields.push({
+          key: `feature_${index + 1}`,
+          label: `Feature ${index + 1}`,
+          type: 'input',
+          value: feature,
+        });
+      });
+      return [{ page_slug: '', record_id: row.id, fields }];
+    },
   },
   faqs: {
     table: 'company_website_faqs',
@@ -428,6 +488,7 @@ const UI_CHROME_KEYS = [
   ['hero.get_started', 'Get Started'],
   ['features.title', 'Features'],
   ['features.subtitle', 'All the Features You Need'],
+  ['features.description', 'Everything you need to inspire, manage and enhance your event experience.'],
   ['features.view_details', 'View Feature'],
   ['how_it_works.badge', 'WORKING PROCESS'],
   ['how_it_works.title', 'How It Works'],
@@ -437,7 +498,39 @@ const UI_CHROME_KEYS = [
   ['templates.all_categories', 'All Templates'],
   ['templates.popular', 'Popular'],
   ['templates.preview', 'Preview'],
+  ['templates.use_template', 'Use Template'],
+  ['templates.load_more', 'Load More Templates'],
+  // Template gallery filter bar.
+  ['templates.search_placeholder', 'Search templates for weddings, events...'],
+  // Distinct from `templates.all_categories` ("All Templates" pill).
+  ['templates.filter_all_categories', 'All Categories'],
+  ['templates.all_colors', 'All Colors'],
+  ['templates.color_red', 'Red'],
+  ['templates.color_gold', 'Gold'],
+  ['templates.color_green', 'Green'],
+  ['templates.color_purple', 'Purple'],
+  ['templates.color_blue', 'Blue'],
+  ['templates.all_items', 'All Items'],
+  ['templates.trending', 'Trending'],
+  ['templates.filter', 'Filter'],
+  ['pricing.monthly', 'Monthly Billing'],
   ['pricing.yearly', 'Yearly Billing'],
+  // Billing period suffix rendered as "₹999 / month".
+  ['pricing.period_month', 'month'],
+  ['pricing.period_year', 'year'],
+  // Plan group headings. The key is built from the group slug, so the two
+  // seeded groups are listed here; a custom group falls back to English.
+  ['pricing.group_individuals_title', 'For Individuals'],
+  ['pricing.group_individuals_subtitle', 'Perfect for creating beautiful events for personal occasions'],
+  ['pricing.group_companies_title', 'For Event Management Companies'],
+  ['pricing.group_companies_subtitle', 'Powerful tools to manage multiple events and clients seamlessly'],
+  // Comparison table header row.
+  ['pricing.table_features', 'Features'],
+  ['pricing.tier_free', 'Free'],
+  ['pricing.tier_basic', 'Basic'],
+  ['pricing.tier_pro', 'Pro'],
+  ['pricing.tier_premium', 'Premium'],
+  ['pricing.tier_companies', 'Companies'],
   ['pricing.save_discount', 'Save up to 20%'],
   ['pricing.most_popular', 'Most Popular'],
   ['pricing.get_started', 'Get Started Free'],
@@ -475,6 +568,34 @@ const UI_CHROME_KEYS = [
   ['login_demo.ready_subtitle', 'Join thousands of happy customers who trust {companyName} for their special moments.'],
   ['login_demo.get_started_free', 'Get Started Free'],
   ['login_demo.view_demo_app', 'View Demo App'],
+  // "And Much More" feature showcase on the Features page.
+  ['login_demo.much_more_title', 'And Much More'],
+  ['login_demo.much_more_subtitle', 'We keep adding new features to make your event experience better and better.'],
+  ['login_demo.social_media', 'Social Media'],
+  ['login_demo.music_player', 'Music Player'],
+  ['login_demo.countdown', 'Countdown'],
+  ['login_demo.contact_org', 'Contact / Org'],
+  ['login_demo.custom_pages', 'Custom Pages'],
+  ['login_demo.multi_language', 'Multi Language'],
+  ['login_demo.and_feature_plans', '... and Feature Plans'],
+  ['login_demo.ready_app_title', 'Ready to Create Your Amazing Event App?'],
+  ['login_demo.ready_event_title', 'Ready to Create Your Amazing Event?'],
+  // Closing call-to-action banner.
+  ['login_demo.banner_subtitle', "Start creating your event app today. It's easy, fast and absolutely amazing!"],
+  ['login_demo.create_app_now', 'Create Your App Now'],
+  ['login_demo.book_demo', 'Book a Demo'],
+  // Support card.
+  ['login_demo.still_questions', 'Still Have Questions?'],
+  ['login_demo.still_questions_subtitle', 'We are here to help you choose the best plan for your needs.'],
+  ['login_demo.contact_support', 'Contact Support'],
+  ['login_demo.start_live_chat', 'Start Live Chat'],
+  // Custom template call-to-action on the Templates page.
+  ['login_demo.cant_find_title', "Can't Find What You're Looking For?"],
+  ['login_demo.cant_find_subtitle', 'Create your own unique template with our easy drag & drop builder.'],
+  ['login_demo.create_custom_template', 'Create Custom Template'],
+  ['login_demo.fully_customizable', 'Fully Customizable'],
+  ['login_demo.no_coding', 'No Coding Required'],
+  ['login_demo.view_how_it_works', 'View How It Works'],
   ['footer.newsletter', 'Newsletter'],
   ['footer.newsletter_subtitle', 'Subscribe to get updates and offers'],
   ['footer.email_placeholder', 'Enter your email'],
