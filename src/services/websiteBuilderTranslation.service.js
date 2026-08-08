@@ -847,6 +847,23 @@ const registerKeys = async (companyId, { section, page_slug = '', record_id = 0,
       `SELECT id FROM ${KEYS_TABLE} WHERE company_id = ? AND section = ? AND page_slug = ? AND record_id = ? AND field_key = ?`,
       { replacements: [companyId, section, page_slug || '', record_id || 0, field.key], type: QueryTypes.SELECT }
     );
+
+    // A field with no English text is not translatable — the content scan skips
+    // empties for the same reason. Registering it anyway produced phantom keys
+    // that made the language card read "0/1" for a section with nothing to
+    // translate, and gave "Translate from English" nothing to do.
+    // Only the key row is removed; existing translations are preserved and are
+    // re-adopted if the English text comes back (§33.4).
+    if (!String(field.value ?? '').trim()) {
+      if (existing) {
+        await sequelize.query(`DELETE FROM ${KEYS_TABLE} WHERE id = ?`, {
+          replacements: [existing.id],
+          type: QueryTypes.DELETE,
+        });
+      }
+      continue;
+    }
+
     if (existing) {
       await sequelize.query(
         `UPDATE ${KEYS_TABLE} SET field_label = ?, field_type = ?, default_value = ?, sort_order = ?, updated_at = NOW() WHERE id = ?`,
