@@ -229,6 +229,9 @@ router.post('/sliders', controller.createSlider);
 router.put('/sliders/:id', controller.updateSlider);
 router.delete('/sliders/:id', controller.deleteSlider);
 router.get('/slider-items', controller.listSliderItems);
+router.post('/slider-items', controller.createSliderItem);
+router.put('/slider-items/:id', controller.updateSliderItem);
+router.delete('/slider-items/:id', controller.deleteSliderItem);
 
 router.get('/gallery-categories', controller.listGalleryCategories);
 router.post('/gallery-categories', controller.createGalleryCategory);

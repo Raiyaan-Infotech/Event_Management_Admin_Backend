@@ -1899,6 +1899,11 @@ const createSlider = createItem('sliders', 'Slider created');
 const updateSlider = updateItem('sliders', 'Slider updated');
 const deleteSlider = deleteItem('sliders', 'Slider deleted');
 const listSliderItems = listItems('sliderItems', 'Slider items retrieved');
+// Per-item CRUD so the admin slider editor never has to go through a bulk
+// replace, which would reassign ids and orphan the slide translations.
+const createSliderItem = createItem('sliderItems', 'Slider item created');
+const updateSliderItem = updateItem('sliderItems', 'Slider item updated');
+const deleteSliderItem = deleteItem('sliderItems', 'Slider item deleted');
 const listGalleryCategories = listItems('galleryCategories', 'Gallery categories retrieved');
 const createGalleryCategory = createItem('galleryCategories', 'Gallery category created');
 const updateGalleryCategory = updateItem('galleryCategories', 'Gallery category updated');
@@ -2201,6 +2206,9 @@ module.exports = {
     updateSlider,
     deleteSlider,
     listSliderItems,
+    createSliderItem,
+    updateSliderItem,
+    deleteSliderItem,
     listGalleryCategories,
     createGalleryCategory,
     updateGalleryCategory,

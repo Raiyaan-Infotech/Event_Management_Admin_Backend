@@ -369,6 +369,14 @@ const FIELD_CATALOG = {
       { col: 'description', label: 'Description', type: 'textarea' },
     ],
   },
+
+  // The postal address is the only free text on the contact settings row —
+  // email, phone and the map coordinates are the same in every language.
+  'contact-settings': {
+    table: 'company_website_contact_settings',
+    singleton: true,
+    fields: [{ col: 'address', label: 'Address', type: 'textarea' }],
+  },
   'video-tutorial-categories': {
     table: 'company_website_video_tutorial_categories',
     nameCol: 'name',
