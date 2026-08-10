@@ -497,6 +497,8 @@ const UI_CHROME_KEYS = [
   ['templates.subtitle', 'Choose From Beautiful Templates'],
   ['templates.all_categories', 'All Templates'],
   ['templates.popular', 'Popular'],
+  ['video_tutorials.badge', 'Video Showcase'],
+  ['video_tutorials.heading', 'Video Tutorials & Event Highlights'],
   ['templates.preview', 'Preview'],
   ['templates.use_template', 'Use Template'],
   ['templates.load_more', 'Load More Templates'],
@@ -1153,11 +1155,25 @@ const autoTranslateContent = async (
   const keys = await listKeys(companyId, { section, page_slug, record_id });
   const values = {};
 
-  const total = keys.length;
-  let done = 0;
-  onProgress({ phase: 'start', done, total });
+  // A field the user corrected by hand is stored as 'reviewed'. Re-translating
+  // it would silently replace their wording with machine output, so it is left
+  // out of this run entirely — same rule translateAllToLanguage already applies.
+  // Its existing row is not rewritten, so the 'reviewed' status survives too.
+  const isReviewed = (key) => {
+    const existing = key.translations.find((t) => t.language_id === language_id);
+    return Boolean(existing && (existing.value || '').trim() && existing.status === 'reviewed');
+  };
 
-  for (const key of keys) {
+  const translatable = keys.filter((key) => !isReviewed(key));
+  const preserved = keys.length - translatable.length;
+
+  // Progress counts only what will actually be sent, so the percentage reflects
+  // real work rather than jumping over skipped fields.
+  const total = translatable.length;
+  let done = 0;
+  onProgress({ phase: 'start', done, total, preserved });
+
+  for (const key of translatable) {
     const source = (key.default_value || '').trim();
     if (!source) {
       values[key.field_key] = '';
@@ -1171,19 +1187,23 @@ const autoTranslateContent = async (
       }
     }
     done += 1;
-    onProgress({ phase: 'progress', done, total, field: key.field_label || key.field_key });
+    onProgress({ phase: 'progress', done, total, preserved, field: key.field_label || key.field_key });
   }
 
-  const saved = await saveContentTranslations(companyId, {
-    section,
-    page_slug,
-    record_id,
-    language_id,
-    values,
-    status: 'auto',
-  });
+  // Every field was human-reviewed: nothing to write. Return the current state
+  // so the caller still refreshes with the preserved values.
+  const saved = Object.keys(values).length
+    ? await saveContentTranslations(companyId, {
+        section,
+        page_slug,
+        record_id,
+        language_id,
+        values,
+        status: 'auto',
+      })
+    : await getContentTranslations(companyId, section, page_slug, record_id);
 
-  onProgress({ phase: 'done', done, total });
+  onProgress({ phase: 'done', done, total, preserved });
   return saved;
 };
 
