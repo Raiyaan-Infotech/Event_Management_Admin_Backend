@@ -1891,7 +1891,15 @@ const createPage = createItem('pages', 'Page created');
 const updatePage = updateItem('pages', 'Page updated');
 const deletePage = deleteItem('pages', 'Page deleted');
 const listMenuItems = listItems('menuItems', 'Menu items retrieved');
+// `saveMenuItems` is a bulk replace: DELETE every row, then re-INSERT. That
+// reassigns auto-increment ids on every save, and nav-menu translations are
+// addressed by `record_id`, so one Save Changes orphaned every translated menu
+// label. Kept only for reorder-style callers; the admin editor now uses the
+// per-item routes below so ids — and therefore translations — survive.
 const saveMenuItems = replaceItems('menuItems', 'Menu items saved');
+const createMenuItem = createItem('menuItems', 'Menu item created');
+const updateMenuItem = updateItem('menuItems', 'Menu item updated');
+const deleteMenuItem = deleteItem('menuItems', 'Menu item deleted');
 const listCompanyUiBlocks = listItems('uiBlocks', 'UI blocks retrieved');
 const saveCompanyUiBlocks = replaceItems('uiBlocks', 'UI blocks saved');
 const listSliders = listItems('sliders', 'Sliders retrieved');
@@ -2199,6 +2207,9 @@ module.exports = {
     deletePage,
     listMenuItems,
     saveMenuItems,
+    createMenuItem,
+    updateMenuItem,
+    deleteMenuItem,
     listCompanyUiBlocks,
     saveCompanyUiBlocks,
     listSliders,

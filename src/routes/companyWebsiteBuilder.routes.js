@@ -220,6 +220,11 @@ router.delete('/pages/:id', controller.deletePage);
 
 router.get('/menu-items', controller.listMenuItems);
 router.put('/menu-items', controller.saveMenuItems);
+// Per-item CRUD. The bulk PUT above re-creates every row, which changes the ids
+// that nav-menu translations are keyed on — see the controller comment.
+router.post('/menu-items', controller.createMenuItem);
+router.put('/menu-items/:id', controller.updateMenuItem);
+router.delete('/menu-items/:id', controller.deleteMenuItem);
 
 router.get('/company-ui-blocks', controller.listCompanyUiBlocks);
 router.put('/company-ui-blocks', controller.saveCompanyUiBlocks);

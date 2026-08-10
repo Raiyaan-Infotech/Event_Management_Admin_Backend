@@ -934,3 +934,466 @@ All temporary DB test rows and scratch scripts removed.
 3. Consider deleting dead `_components/pricing-plans-content.tsx` (§65).
 4. Run **Translate All** for Tamil to populate the new `ui-chrome` (61) and `footer.quick_link.*`
    keys — they're registered but have no translations yet.
+
+---
+
+## Session 7 — §71 cleared, DB-backing the mock pages, translation correctness & staleness
+
+> **Date:** 2026-08-10 | Continues from Session 6 (§26–71)
+> **Status:** §71 done. Large bug-fix sweep on top. **Only part of this is pushed — see §72.**
+
+### 72. ⚠️ What is and isn't deployed
+
+Mid-session the user committed and pushed both repos:
+
+```
+Frontend  655e322   Backend  705eb76      (both level with origin/main)
+```
+
+That covers §73–§76 only. **Everything from §77 onward is uncommitted.** Production DB changes,
+however, were applied directly and ARE live — see §80 and §84. So production currently runs older
+code against a newer schema, which is safe (the column is additive) but means the "Needs review"
+UI and the manual-edit protection are not visible there yet.
+
+### 73. §71.3 — dead component deleted
+
+`_components/pricing-plans-content.tsx` (117 KB, zero references) removed. The real page is
+`pricing-plans/create/page.tsx` (§65).
+
+### 74. §71.2 — six mock-state admin pages made DB-backed
+
+These pages showed hardcoded sample data, never read the DB, and their Save buttons were
+`setTimeout` fakes. All six now read and write real rows, and carry `RowTranslateButton`:
+
+| Page | Table | Section |
+|---|---|---|
+| `clients/page.tsx` | `company_website_clients` | `clients` |
+| `sponsors/page.tsx` | `company_website_sponsors` | `sponsors` |
+| `gallery/categories/page.tsx` | `company_website_gallery_categories` | `gallery-categories` |
+| `contact-us/categories/page.tsx` | `company_website_contact_categories` | `contact-categories` |
+| `pages/page.tsx` **+ `pages/create/page.tsx`** | `company_website_pages` | `pages` |
+| `_components/simple-slider-content.tsx` | `company_website_sliders` + `_slider_items` | `sliders` |
+
+**All writes go through per-item create/update/remove.** The bulk `replace` mutation is never used:
+`replaceList()` in `companyWebsiteBuilder.service.js` really is `DELETE … WHERE company_id` followed
+by re-INSERT, which reassigns auto-increment ids and orphans every translation addressed by
+`record_id` (§64). Confirmed by reading the implementation, not assumed.
+
+Two things found while doing this:
+
+- **The pages create/edit form was mock too**, so the list's Edit pencil led to a form that loaded
+  nothing and saved nothing. Now handles `?edit=<id>` and, after a create, `router.replace`s to the
+  new id rather than navigating away (§66 pattern).
+- **Slider items had no write routes** — only `GET /slider-items` existed. Added
+  `POST /slider-items`, `PUT /slider-items/:id`, `DELETE /slider-items/:id` using the existing
+  per-item factories.
+
+Also: gallery categories' "Images" count is now real (counted from gallery items), and the slider's
+"Select Page" dropdown lists actual pages instead of four hardcoded paths.
+
+> Verified with a slot check across all six sections: registered `record_id`s match the content row
+> ids exactly, `page_slug=''` throughout, **0 mismatches** (the §33.1 trap).
+
+### 75. §71.4 — Translate All for Tamil
+
+| | Keys created | Notes |
+|---|---|---|
+| Local | 64 | exactly the 61 `ui-chrome` + 3 `footer.quick_link.*` |
+| **Production** | **302** | far more than expected — see below |
+
+**Production had only 110 registered keys vs local's 387.** The key registry is built by
+`syncKeysFromContent`, which only runs when someone opens a Translations/Languages endpoint — and
+nobody had since the §67/§68 deploy. Running the sync took production to 410 keys, so Translate All
+then had 302 to fill, not 64. 0 failures, well inside the 50k/day quota.
+
+> **Takeaway:** after deploying anything that adds to `FIELD_CATALOG` or `UI_CHROME_KEYS`, the
+> production registry is stale until an admin page is opened or a sync is run explicitly.
+
+### 76. Public site was ignoring translations for whole sections
+
+The user reported "I save Tamil but live still shows English". Three distinct causes:
+
+1. **Plan features matrix** — `PlanFeaturesComparisonSection` self-fetches via
+   `usePricingMatrixFeaturesData()`, so the data-layer overlay in `company-website-preview.tsx`
+   never touched it. It now applies `translator.many('pricing-features', …)` itself, the way
+   `PageHeroSection` does. **It was the only self-fetching section without a translator** (checked
+   all 17).
+2. **Contact information** — `contact-settings` was not in `FIELD_CATALOG` at all, so the address
+   was never translatable, and `buildContact` received the raw record. Added the catalog entry
+   (`address` only — email/phone/coords read the same in every language) and wrapped the record in
+   `translator.one('contact-settings', …)`.
+3. **Template category pills** — `category_name` is joined onto the template row, so it is not a
+   translatable field of the `templates` section. Pills now resolve through
+   `translator.field('template-categories', category_id, 'name', …)`, falling back to the English
+   join.
+
+### 77. Contact Us was a **seventh** mock page
+
+`contact-us/page.tsx` showed hardcoded `jamal@gmail.com` / `9884699435` / `'company address f...'`,
+never read the DB, and its Save did nothing. That is *why* it had no translation — no saved record
+means no `record_id` means no slot. Rebuilt on `useCompanyContactSettings()` with the full
+hero-style translation mode (`TranslationSideCard` + `TranslationModeBanner`, non-text fields
+dimmed via `sharedOnly`).
+
+> **Production had no contact settings row at all.** Saving the page creates one. When the user did
+> that, it saved *empty* strings — which produced the two bugs in §78.
+
+Also noted, not fixed: `company_website_contact_settings` has **duplicate rows locally** (ids 1 and
+2, the same seed-twice timestamps as §35). §35's cleanup covered `basic_information`,
+`hero_sections`, `footer_settings` and `seo_settings` but **missed this table**, so it also never
+got the `uniq_company_website_singleton` index.
+
+### 78. Two bugs behind "0/1 but Translate does nothing"
+
+1. **`registerKeys` created phantom keys.** It inserted a key even when the field's English value
+   was empty, so the language card read "0/1" for a section with nothing translatable. It now skips
+   empty fields and deletes a key whose value has become empty. Only the key row is removed —
+   translations are preserved and re-adopted (§33.4).
+2. **Auto-translate failed silently with no source text.** It streamed zero events, flashed "0%"
+   and closed, which reads as a broken button. `autoTranslate` now refuses up front with
+   *"There is no English text in this section yet…"*.
+
+### 79. Manual edits were being destroyed by the per-section button
+
+**The two translate buttons behaved differently:**
+
+| Path | Overwrote a hand-edited translation? |
+|---|---|
+| Translations module edit dialog | Yes (correct — a person is editing) |
+| Section form / row dialog → Save | Yes (correct) |
+| **"Translate from English"** (per section) | **YES — silently destroyed it** |
+| "Translate" (Languages page, Translate All) | No — always checked `status='reviewed'` |
+
+`autoTranslateContent` re-translated **every** field in the section and saved them all as `auto`.
+`translateAllToLanguage` had the guard; this path never did.
+
+Fixed: fields whose existing translation is `status='reviewed'` are excluded from the run entirely
+(their row is not rewritten, so the status survives). Progress counts only what will actually be
+sent, and the completion toast reports *"Kept N fields you edited by hand."*
+
+> **This mattered more than it first looked: production has 109 `reviewed` translations.** Every one
+> of them was one button press from being overwritten.
+
+Verified against real data: seeded a sentinel as `reviewed`, ran the exact code path, confirmed the
+value survived, then restored it.
+
+### 80. Stale translations — the "Needs review" system
+
+Question that exposed the gap: *if I hand-correct a Tamil string and then change the English, what
+happens?* Reproduced it — **the Tamil silently stays, now describing the old English**, because
+protection (§79) cannot distinguish "leave my wording alone" from "this is now wrong".
+
+**Schema change** — `source_value TEXT NULL` on `company_website_content_translations`, holding the
+English each translation was written from. Migration `scratch/add_translation_source_value.js`
+(dry-run by default, `--apply` to write, `prod` for production).
+
+> Backfilled every existing row with its key's *current* English, i.e. treated as in-sync. Correct
+> today, and it avoids flagging ~500 rows as stale the moment it ships.
+> **Applied: local 461 rows, production 499 rows.**
+
+Behaviour now differs by authorship:
+
+| Translation | English changes | Result |
+|---|---|---|
+| `auto` | → | **re-translated automatically** — no human work at risk |
+| `reviewed` | → | **kept, and flagged ⚠ Needs review** |
+
+- `saveContentTranslations` stamps `source_value` on every write.
+- `listKeys` returns `is_outdated` per translation; null snapshot = not outdated (pre-column rows).
+- `getStats` returns an `outdated` count per language (joined against the keys table).
+- `translateAllToLanguage` refreshes stale `auto` rows instead of skipping them — previously an
+  auto translation also went stale forever once its English changed.
+- Translations page: **⚠ Needs review** status + filter, and an orange count on each language card
+  (hidden at zero).
+
+Verified end to end: hand-edit → change the real English in the content table → Translate All →
+`outdated=true`, value preserved, `STATS outdated=1`.
+
+> **Testing note worth keeping:** an early version of this test edited `default_value` in the keys
+> table directly and reported false FAILs — `translateAllToLanguage` calls `syncKeysFromContent`
+> first, which rewrites `default_value` from the content tables. **To simulate an English change you
+> must edit the CONTENT table.** A test must also re-sync after restoring, or it leaves the derived
+> key cache stale and poisons the next run.
+
+### 81. Delete Language now states what it destroys
+
+Delete is unchanged in behaviour (default language still protected; translations then language row
+deleted, permanently). The confirmation now reads real numbers from `getStats`:
+
+> *Delete Tamil? This permanently removes 501 saved translations. 109 of them were edited by hand
+> and cannot be recreated by auto-translate. This cannot be undone. To hide the language from your
+> site but keep its translations, switch it to Inactive instead.*
+
+Empty languages get a short, non-alarming variant. **Advice recorded for the user: use the Active
+toggle, not Delete** — same effect on the public site, data preserved.
+
+### 82. Hardcoded UI chrome sweep — 61 → 114 keys
+
+Whole sections were still English because the strings were typed into the components rather than
+going through `t()`.
+
+| File | Strings wrapped |
+|---|---|
+| `templates-section.tsx` | 16 — search box, colour/category/item filters, Filter, All Templates, **Preview**, **Use Template**, Load More |
+| `login-demo-section.tsx` | 25 — And Much More + its six chips, Ready to Create…, the closing banner, Still Have Questions, Contact Support, Book a Demo, Create Custom Template, Fully Customizable, No Coding Required, View How It Works |
+| `pricing-section.tsx` | Monthly Billing, `/ month`, `/ year`, group headings + subtitles, table header, five tier labels |
+| `features-section.tsx` | section description |
+| `video-tutorials-section.tsx` | 2 headings |
+
+Three traps hit while doing it:
+
+1. **Seven components had no `t` in scope.** `login-demo-section.tsx` holds eight layout variants
+   and only two used the hook — the page would have crashed on load. Same for
+   `TemplateGridGallerySection` and `VideoTutorialsSectionBase`.
+2. **Key collision.** `templates.all_categories` already existed for the "All Templates" pill; the
+   filter dropdown needed "All Categories". Same key, two different English strings — one would
+   have silently won. The new one is `templates.filter_all_categories`.
+3. **`t` shadowing, twice.** `TIERS.map((t) => …)` in both the pricing table header *and* its body
+   shadows the translation function. Renamed to `tier` in both. The body one was not yet broken —
+   it would have broken for whoever next added a translation inside a cell.
+
+All 114 `ui-chrome` keys translated on **both** databases.
+
+### 83. Bullet lists were DB content, not chrome
+
+The bullet lists under feature cards and pricing plans are admin-entered but were in no catalog:
+
+- `company_website_features.bullet_points_json` → `bullet_1`, `bullet_2`, … (1-based)
+- `company_website_pricing_plans.features_json` → `feature_1`, `feature_2`, …
+
+Both are plain JSON string arrays. Added `extract()` entries using a new `jsonStringArray()` helper
+that tolerates parsed-array vs raw-string and drops blanks.
+
+Frontend counterpart: `NESTED_FIELD_KEYS` changed from a `Set` to a **predicate** (the indexed keys
+are open-ended), and `writeIndexedArray()` writes the translated values back into the JSON column.
+The change-detection snapshot was generalised from hero's two named columns to the whole record.
+
+> **Positions are 1-based on both sides and must stay that way**, or translated text lands on the
+> wrong bullet. Reordering a list re-points its translations — the same trade-off every JSON-backed
+> section makes.
+
+### 84. Navbar overflowed once translated
+
+Tamil labels run roughly 2× the English width, so the header pushed "Get Started Free" off the
+right edge. Every element in the row was `shrink-0` + `whitespace-nowrap`, and the existing overflow
+mechanism counts **items** (`VISIBLE_LIMIT = 7`), not width — seven short English words fit, seven
+long Tamil ones do not.
+
+Fixed in `header-section.tsx`: the link row is `min-w-0 flex-1` so it absorbs the squeeze instead of
+displacing the CTA, anything that still doesn't fit scrolls inside that row (no link becomes
+unreachable), gaps/text tighten at `lg` and restore at `xl`, and the brand wordmark hides below
+`xl` and truncates. Language-agnostic, not a Tamil patch.
+
+### 85. Highlights settings were saved but never read
+
+`items_per_row`, `icon_style`, `title_color` and `description_color` are all editable in
+`highlights-content.tsx` and were **ignored entirely** by `highlights-section.tsx`. Two more:
+
+- **The common icon colour was discarded if it equalled the shipped default** —
+  `config.icon_bg_color !== '#F3F0FF' ? … : pastel` — so picking that exact colour did nothing.
+- **The gradient banner (instance 2) hardcoded white** icons and text, ignoring every picker. That
+  is the block in the user's screenshots.
+
+All three layouts (individual cards / gradient banner / white bar) now share one
+`resolveIconColors(item, idx, fallback)`: **per-item colour → block colour → branch default**, with
+`icon_style: 'outline'` rendering a ring instead of a fill. `items_per_row` drives both the grid
+column class (lookup table — Tailwind needs whole class names) and the `slice()`. The banner keeps
+white as its default so unconfigured blocks are unchanged.
+
+### 86. Smaller fixes
+
+- **How It Works → Edit Step modal** now has a `RowTranslateButton` (the list rows had one, the
+  modal didn't). Uses the row-dialog pattern deliberately — a `?lang=` round-trip would close the modal.
+- **Add FAQ** used to `router.push` to the list on create, so a new FAQ never had a screen where the
+  language card could appear. Now `router.replace`s to `faqs/edit/<newId>` (§66).
+- **Empty `src=""` guard** and Live-Preview modal consistency carried over from §60 where relevant.
+
+### 87. Verification
+
+`tsc --noEmit` clean · `next build` compiled (137 pages) · backend modules load · slot check clean
+across all six newly-wired sections · manual-edit protection and stale-flagging both proven against
+real data with restore-after · all temporary scratch scripts removed
+(`add_translation_source_value.js` deliberately kept).
+
+### 88. Open — carried to next session
+
+**Reported by the user, not yet fixed:**
+
+1. **Public navbar drops "Home"** — 5 of 6 items render. *Ruled out:* all 6 rows exist with
+   `is_visible=1`/`is_active=1` and correct sort; `getList('menuItems')` returns all 6 on
+   production; all 6 have Tamil labels including `Home → முகப்பு`; `translator.many` never drops
+   records; the header has no Home special-case and its limit is 7. **Cause not isolated.**
+   *Fastest next step: check whether Home appears in **English** — if yes the fault is in the
+   translation overlay, if no it is the menu render.*
+2. **Nav Menu admin — Login / Get Started toggles do nothing.** Unverified expectation: saved but
+   never read by the public header (same class as §85).
+3. **Nav Menu admin — no translation wiring** (no `useSectionTranslation`), like Contact Us was.
+4. **Templates shows Tamil 1/2** — Description not translating. Likely not a bug: the scan skips
+   empty values and that template's Description is blank (`0/200`). Confirm before treating as one.
+
+**Found during audit, not reported:**
+
+5. **Comparison-table cell values never translate** — "Up to 50", "Limited" live in
+   `plan_values_json`, registered nowhere. Needs an extractor like §83.
+6. **Nine of seventeen preview sections have no `min-w-0` / `break-words`** (faqs, features,
+   gallery, hero, logo-wall, pricing, slider, templates, video-tutorials). This is why Tamil pricing
+   cards look cramped and the "most popular" badge overlaps the card edge. Same root cause as §84.
+7. **Hardcoded English fallbacks render when tables are empty** — 7 in `pricing-section.tsx`, 10 in
+   `highlights-section.tsx`. Untranslatable because they exist only in code.
+8. **Data bug:** a pricing plan is named `நட்சத்திர உதயம்Description` — stray "Description"
+   concatenated onto the plan name.
+9. **`contact_settings` duplicates + missing UNIQUE index** (§77).
+10. **RTL:** the languages table stores `direction` and the preview sets `dir`, but layouts use
+    physical CSS (`left-3`, `pl-9`, `text-left`). Tamil is LTR so nothing breaks yet; the first RTL
+    language will render mirrored-wrong.
+11. **`is_outdated` is surfaced only on the Translations page** — not in the row dialog or the
+    section language card, which read a lighter shape without status.
+
+**Deployment:** §77 onward is uncommitted. The production `source_value` column and all Tamil
+translations ARE already live in the database.
+
+---
+
+## Session 8 — Nav Menu Login / Get Started toggles
+
+> **Date:** 2026-08-10 | Continues from Session 7 (§72–88)
+
+### 89. §88.2 — Login / Get Started toggles now actually hide the buttons
+
+The §88.2 guess was right: **saved but never read** — the same class as §85.
+
+The whole write path was already correct and needed no change:
+`nav-menu-content.tsx` sends `show_login` / `show_signin` → `TABLE_COLUMNS.basicInformation`
+whitelists both → `upsertSingleton` writes on `!== undefined`, so a `0` persists →
+`parseHeaderSettings` in `preview-shared.ts` already parsed them into `header.showLogin` /
+`header.showSignIn`.
+
+**`header-section.tsx` simply never consumed those two fields.** Both buttons were rendered
+unconditionally, so the switches looked dead no matter what was saved. Each button is now gated on
+its flag, and the auth/language cluster only renders when at least one of the three (language
+picker, Login, Get Started) is enabled — otherwise both toggles off on a single-language site left
+an empty flex slot beside the nav.
+
+Verified against real data, not by reading: flipped `show_login`/`show_signin` to `0` locally and
+confirmed `GET /website-builder/basic-information` returns `0` (not dropped or coerced anywhere in
+the chain), then restored both to `1`. `boolValue(0, true)` → `false`, which is what the new gate
+reads. `tsc --noEmit` clean; `next build` compiled.
+
+> The two toggles are independent: "Login" controls the Login button only, "Get Started" controls
+> the Get Started button only. There is no separate Signup button in the header — Get Started *is*
+> the signup CTA.
+
+**Still open from §88:** the Nav Menu admin page has no translation wiring (§88.3) — that is the
+second annotation on the same screenshot and was not touched here.
+
+### 90. ⚠️ §85 was never deployed — that is why Highlights "doesn't work"
+
+Reported: on Highlights (home, instance 1) the **Icon Style** select and the four **Colors &
+Presets** pickers do nothing.
+
+`git status` on the frontend told the story: `highlights-section.tsx` — the entire §85 fix that
+made the public section *read* those settings — was **uncommitted**, so production has never run it.
+Same trap as §63. Everything else from Session 7 has since been committed (HEAD `8cef1cb`); only
+this file and §89's `header-section.tsx` were outstanding.
+
+> **Check `git status` before re-debugging any "still broken" report.** This is the second time a
+> session has burned effort on a bug that was already fixed but not shipped.
+
+Two *genuine* defects were found underneath it, both of which would still have been there after
+deploying §85.
+
+### 91. Per-item icon colours silently and permanently shadowed the block colours
+
+Production `home/1` has an icon colour on **all 5 items**. `resolveIconColors` resolves
+per-item → block → default, so the block-level **Icon Background** and **Icon Color** could never
+apply to any of them. Changing those pickers really did nothing, deploy or no deploy.
+
+What made it a trap rather than a preference:
+- The per-item swatch renders the *resolved* colour (`item.icon_color || settings.icon_color || …`),
+  so an override and an inherited value look identical.
+- `<input type="color">` writes on any interaction, so an override is set by merely opening the
+  swatch — no intent required.
+- Nothing could clear one. `handleItemChange` only ever assigns.
+
+Fixed in `highlights-content.tsx`: an overridden swatch is now outlined, its tooltip says so, and a
+revert button on that row deletes both keys so the item follows the block again. Added a line under
+"3. Colors & Presets" stating the precedence.
+
+### 92. `items_per_row` was deleting cards from the live site
+
+`items.slice(0, perRow)` (all three layout branches). With production's `items_per_row: 3` and 5
+cards, **the public site rendered 3 and dropped 2** — while the admin's own Live Preview modal maps
+`settings.items` with no slice and showed all 5. A setting labelled "Number of Items per **Row**"
+was acting as a cap.
+
+Slice removed; `perRow` still drives the grid column class, so extra cards wrap onto the next row —
+matching both the label and the admin preview.
+
+### 93. Nav Menu translations (§88.3) — the missing UI was the smaller half
+
+Backend was already complete: `FIELD_CATALOG['nav-menu']` registers `label` per menu row at
+`page_slug='', record_id=<row id>`. Only the admin UI was missing.
+
+**But wiring a dialog onto that page would have been useless**, because Nav Menu saved through the
+bulk `PUT /menu-items` → `replaceList()` → `DELETE … WHERE company_id` + re-INSERT. That reassigns
+auto-increment ids on **every save**, and translations are addressed by `record_id`. This is §64's
+bug, never fixed for menu items.
+
+Production proves it — 12 nav-menu translations for 6 menu rows:
+
+```
+menu item ids     137 138 139 140 141 142
+translation rows  131…136  (orphaned)  +  137…142  (live)
+```
+
+One id block per bulk save. The Tamil labels were being written correctly and detached on the next
+unrelated save.
+
+Fixed in three parts:
+1. **Backend** — added `POST /menu-items`, `PUT /menu-items/:id`, `DELETE /menu-items/:id` using the
+   existing `createItem` / `updateItem` / `deleteItem` factories (the §74 slider-items pattern). The
+   bulk route stays for reorder-style callers.
+2. **`nav-menu-content.tsx`** — Save now diffs and writes per item. It also **keeps the row id**:
+   the load effect overwrote `id` with the page slug (`'home'`, `'features'`) for pageOptions
+   matching and threw the DB id away — the §33.2 / §46 bug class for the third time. The id now
+   rides along as `dbId` on `DraggableItemListItem`.
+3. **`RowTranslateButton`** per menu row, via a new `renderActions` render prop on
+   `DraggableItemList`. Row dialog rather than the `?lang=` form mode: every row is its own slot,
+   and a URL round-trip would also throw away unsaved reordering.
+
+Verified against the local DB: ran the new per-item save path over all 7 menu rows, ids unchanged
+(`20,21,22,23,24,25,26` before and after), 7/7 translations still resolving.
+
+> Production still carries the 6 orphaned rows at `record_id` 131–136. Harmless (§33.4 keeps
+> translations so they re-adopt), but dead. **Not cleaned — needs a decision.**
+
+### 94. "Translation is not working, all fields all modules" was the badge lying
+
+The Templates report (`Holy`, Tamil showing **1/2**) is §88.4, and it was not a translation failure.
+Production data:
+
+```
+template 17 "Holy"   description length 0   keys: 17/template_name only
+                                            translation: தீபாவளி கொண்டாட்டம் ✓
+```
+
+One translatable field, one translated. The card said 1/2 because `total` was `fields.length` — the
+*form's* field list — while the backend only registers keys for fields that **have** English text
+(§78) and deletes a key whose text becomes empty. Any record with an optional field left blank read
+as permanently incomplete. This is the misleading badge §45 spotted and left in place.
+
+Fixed in both counters — `translation-side-card.tsx` and `row-translate-dialog.tsx` now count only
+fields with non-empty English source, so "Holy" reads 1/1 and goes green.
+
+**Two real data bugs seen while checking (production, not fixed):**
+- `templates/10` ("Traditional") is translated to the literal word `Description`.
+- `templates/15` ("Baby Shower") is translated to `seemantha` — MyMemory corpus junk (§30).
+
+### 95. Verification
+
+`tsc --noEmit` clean · `next build` compiled · backend route module loads · new menu-item routes
+answer `401` not `404` (registered, auth-gated) · id-stability proven against real rows with
+restore-after. The temporary test script was removed.
+
+**Uncommitted:** 7 frontend files + 2 backend files. Nothing here is on production yet — including
+§85, which still isn't.
