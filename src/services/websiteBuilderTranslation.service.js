@@ -131,6 +131,10 @@ const FIELD_CATALOG = {
       { col: 'top_list_heading_2', label: 'Links Heading 2' },
       { col: 'copyright_text', label: 'Copyright Text' },
       { col: 'powered_by_text', label: 'Powered By Text' },
+      // The footer keeps its OWN address column and buildFooter prefers it over
+      // basic_information, so the contact section's translated address never
+      // reaches the footer. Without this key it can never be translated at all.
+      { col: 'address', label: 'Address', type: 'textarea' },
     ],
     // The footer's quick-link lists store bare slugs ("features", "about-us").
     // Any slug that matches a real page renders that page's (translatable)
@@ -159,6 +163,9 @@ const FIELD_CATALOG = {
         { key: 'top_list_heading_2', label: 'Links Heading 2', type: 'input', value: row.top_list_heading_2 },
         { key: 'copyright_text', label: 'Copyright Text', type: 'input', value: row.copyright_text },
         { key: 'powered_by_text', label: 'Powered By Text', type: 'input', value: row.powered_by_text },
+        // Must be listed here too — this extractor REPLACES the `fields` array
+        // above when the scan runs, so a field only added there is ignored.
+        { key: 'address', label: 'Address', type: 'textarea', value: row.address },
       ];
 
       // Mirrors buildFooter's fallback list, so the links that actually render
