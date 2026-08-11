@@ -1153,11 +1153,38 @@ const registerKeys = async (companyId, { section, page_slug = '', record_id = 0,
   return listKeys(companyId, { section, page_slug });
 };
 
+// The content scan is company-wide and re-reads every catalogued table. Against
+// the production DB that is ~34s (hundreds of round-trips at ~374ms each), and
+// the Translations page triggers it TWICE per load — once for the key list and
+// once for the stats — so opening that page cost over a minute.
+//
+// Throttled: a scan requested within the window reuses the keys already
+// registered. Correctness is unaffected for READ paths, because the registry
+// only changes when content changes, and any save that changes content forces a
+// fresh scan on its way through the translate path.
+const SYNC_TTL_MS = 60_000;
+const lastSyncAt = new Map();
+
+/**
+ * `force` is mandatory for anything that is about to TRANSLATE. A stale
+ * registry there re-introduces §96: a field the admin just filled in has no key
+ * yet, so it is skipped and silently never translated.
+ */
+const syncKeysIfStale = async (companyId, { force = false } = {}) => {
+  const now = Date.now();
+  if (!force && now - (lastSyncAt.get(companyId) || 0) < SYNC_TTL_MS) return;
+  lastSyncAt.set(companyId, now);
+  await syncKeysFromContent(companyId);
+};
+
 // Lists registered keys with every language's saved value attached as a
 // `translations: [{ language_id, value, status }]` array — the same shape the
 // admin translation module returns, so the UI can render one column per language.
-const listKeys = async (companyId, { section, page_slug, record_id, search, sync = false } = {}) => {
-  if (sync) await syncKeysFromContent(companyId);
+const listKeys = async (
+  companyId,
+  { section, page_slug, record_id, search, sync = false, freshSync = false } = {}
+) => {
+  if (sync) await syncKeysIfStale(companyId, { force: freshSync });
 
   let sql = `SELECT * FROM ${KEYS_TABLE} WHERE company_id = ?`;
   const replacements = [companyId];
@@ -1239,7 +1266,9 @@ const deleteKey = async (companyId, id) => {
 
 // Completion statistics per language — mirrors the admin module's stat cards.
 const getStats = async (companyId) => {
-  await syncKeysFromContent(companyId);
+  // Throttled: the Translations page asks for keys and stats together, and the
+  // scan only needs to run once for the pair.
+  await syncKeysIfStale(companyId);
 
   const [{ total_keys }] = await sequelize.query(
     `SELECT COUNT(*) AS total_keys FROM ${KEYS_TABLE} WHERE company_id = ?`,
@@ -1334,7 +1363,9 @@ const autoTranslateContent = async (
   // times they press the button), and a field whose English was edited is
   // translated from the OLD text. translateAllToLanguage has always synced —
   // that is why the Languages-page button worked where this one didn't.
-  const keys = await listKeys(companyId, { section, page_slug, record_id, sync: true });
+  // `freshSync` bypasses the read-path throttle: this runs right after a save,
+  // and a stale registry would skip the field the admin just filled in (§96).
+  const keys = await listKeys(companyId, { section, page_slug, record_id, sync: true, freshSync: true });
 
   // Plan the whole run before sending anything, so the progress total is exact
   // rather than growing as we go.
@@ -1487,7 +1518,7 @@ const translateAllToLanguage = async (
     return { created: 0, failed: 0, skipped: 0, quotaExceeded: false, isDefault: true };
   }
 
-  const keys = await listKeys(companyId, { sync: !skipSync });
+  const keys = await listKeys(companyId, { sync: !skipSync, freshSync: true });
   let created = 0;
   let failed = 0;
   let skipped = 0;
