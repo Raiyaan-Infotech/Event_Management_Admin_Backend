@@ -22,9 +22,44 @@ const jsonStringArray = (raw) => {
     }
   }
   if (!Array.isArray(value)) return [];
-  return value
-    .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
-    .filter(Boolean);
+  // NOT filtered: callers derive the key name from the array index
+  // (`bullet_${i + 1}`), and dropping a text-less entry would shift every later
+  // position, landing translated text on the wrong bullet. Entries with no text
+  // come back as '' and are discarded later by the scan, which skips fields with
+  // an empty value — so they cost nothing and the numbering stays aligned with
+  // the frontend writer.
+  return value.map((entry) => jsonEntryText(entry));
+};
+
+// These JSON lists hold EITHER a plain string or an object carrying the text
+// plus display state. `company_website_pricing_plans.features_json` on
+// production is `[{ "label": "1 Active Event", "included": true }, …]`, and the
+// original string-only reader mapped every object to '' and filtered it out —
+// so no key was ever registered and every plan bullet rendered in English.
+//
+// Position is preserved by the caller, so an entry whose text cannot be found
+// still occupies its index and the 1-based numbering stays aligned with the
+// frontend writer.
+// Same tolerance as jsonStringArray, for JSON columns holding a plain object.
+const jsonObject = (raw) => {
+  let value = raw;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return {};
+    }
+  }
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+};
+
+const JSON_TEXT_PROPS = ['label', 'text', 'title', 'name', 'value'];
+
+const jsonEntryText = (entry) => {
+  if (typeof entry === 'string') return entry.trim();
+  if (!entry || typeof entry !== 'object') return '';
+  const prop = JSON_TEXT_PROPS.find((p) => typeof entry[p] === 'string' && entry[p].trim());
+  return prop ? entry[prop].trim() : '';
 };
 
 // Catalog of user-facing text that lives in the Website Builder content tables.
@@ -381,6 +416,37 @@ const FIELD_CATALOG = {
       { col: 'feature_name', label: 'Feature Name' },
       { col: 'description', label: 'Description', type: 'textarea' },
     ],
+    // The comparison table's CELL values ("Up to 50", "Limited") live per tier
+    // inside plan_values_json and were registered nowhere, so they always
+    // rendered in English (§88.5). A tier holding only a tick/cross has no text
+    // and is skipped. Keyed by tier name, not position, so reordering tiers
+    // cannot re-point a translation the way an indexed list can.
+    extract: (row) => {
+      const fields = [
+        { key: 'feature_name', label: 'Feature Name', type: 'input', value: row.feature_name || '' },
+        { key: 'description', label: 'Description', type: 'textarea', value: row.description || '' },
+      ];
+      const tiers = jsonObject(row.plan_values_json);
+      Object.keys(tiers)
+        .sort()
+        .forEach((tier) => {
+          const cell = tiers[tier];
+          const limit =
+            typeof cell === 'string'
+              ? cell
+              : cell && typeof cell === 'object'
+                ? String(cell.limit ?? '')
+                : '';
+          if (!limit.trim()) return;
+          fields.push({
+            key: `limit_${tier}`,
+            label: `Limit — ${tier}`,
+            type: 'input',
+            value: limit.trim(),
+          });
+        });
+      return [{ page_slug: '', record_id: row.id, fields }];
+    },
   },
   'social-links': {
     table: 'company_website_social_links',
