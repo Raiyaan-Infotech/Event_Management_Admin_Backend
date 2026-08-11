@@ -3,9 +3,71 @@ const logger = require('../utils/logger');
 
 const MYMEMORY_API_URL = 'https://api.mymemory.translated.net/get';
 
-// Add your email here to get 10,000 requests/day (instead of 1,000)
-// Leave empty for anonymous 1,000 requests/day
-const MYMEMORY_EMAIL = process.env.MYMEMORY_EMAIL || '';
+// MyMemory's quota is CHARACTER-based and keyed on the `de` (email) param:
+// 5,000 chars/day anonymous, 50,000 with an email. MYMEMORY_EMAIL accepts a
+// comma-separated list, and when one address is spent the next one takes over
+// mid-run instead of the whole translation failing.
+//
+// Caveat worth knowing: MyMemory also rate-limits by IP. Two addresses from the
+// same server usually do give the full 2x, but if it ever caps per-IP the
+// failover simply costs one wasted request and we stop where we would have
+// stopped anyway.
+const MYMEMORY_EMAILS = (process.env.MYMEMORY_EMAIL || '')
+  .split(',')
+  .map((e) => e.trim())
+  .filter(Boolean);
+
+// Addresses whose daily quota is spent, and the UTC day that applies to.
+// MyMemory's quota resets at UTC midnight, so the set is cleared when the day
+// rolls over. In-memory only: a restart just re-tries the first address, which
+// costs one request to rediscover.
+let exhaustedEmails = new Set();
+let exhaustedDay = null;
+
+const currentUtcDay = () => new Date().toISOString().slice(0, 10);
+
+const resetExhaustedIfNewDay = () => {
+  const today = currentUtcDay();
+  if (exhaustedDay !== today) {
+    exhaustedDay = today;
+    exhaustedEmails = new Set();
+  }
+};
+
+/**
+ * Addresses still believed to have quota, in configured order.
+ * Returns [''] when none are configured so the anonymous path still works, and
+ * when every address is spent so the caller gets a real 429 from the API rather
+ * than a synthetic one.
+ */
+const availableEmails = () => {
+  resetExhaustedIfNewDay();
+  if (!MYMEMORY_EMAILS.length) return [''];
+  const usable = MYMEMORY_EMAILS.filter((e) => !exhaustedEmails.has(e));
+  return usable.length ? usable : [MYMEMORY_EMAILS[MYMEMORY_EMAILS.length - 1]];
+};
+
+const markExhausted = (email) => {
+  if (!email) return;
+  resetExhaustedIfNewDay();
+  if (!exhaustedEmails.has(email)) {
+    exhaustedEmails.add(email);
+    logger.logDB('autoTranslate', 'QuotaExhausted', null, {
+      email,
+      remaining: MYMEMORY_EMAILS.filter((e) => !exhaustedEmails.has(e)).length,
+    });
+  }
+};
+
+const isQuotaError = (err) => err?.statusCode === 429;
+
+// MyMemory reports an exhausted allowance in two different wordings, and only
+// one of them contains the word QUOTA. The other is the plain-English warning
+// below, so matching on QUOTA alone misses the most common case.
+const QUOTA_MESSAGE_PATTERN = /QUOTA|ALL AVAILABLE FREE TRANSLATIONS|MYMEMORY WARNING/i;
+
+const isQuotaMessage = (details) =>
+  typeof details === 'string' && QUOTA_MESSAGE_PATTERN.test(details);
 
 // Language code mapping for MyMemory API
 const LANGUAGE_CODES = {
@@ -61,15 +123,44 @@ const translateText = async (text, fromLang = 'en', toLang, throwOnError = true)
   const sourceLang = LANGUAGE_CODES[fromLang] || fromLang;
   const targetLang = LANGUAGE_CODES[toLang] || toLang;
 
+  // Try each address that still has quota. A 429 retires that address and the
+  // loop moves on; any other error aborts, since retrying it on a different
+  // email would just repeat the same failure.
+  const emails = availableEmails();
+  let lastError = null;
+
+  for (let i = 0; i < emails.length; i += 1) {
+    const email = emails[i];
+    try {
+      return await requestTranslation(text, sourceLang, targetLang, email, fromLang, toLang);
+    } catch (error) {
+      lastError = error;
+      if (!isQuotaError(error) || !email) break;
+      markExhausted(email);
+      // Fall through to the next address; if that was the last one the loop
+      // ends and lastError (the 429) is what the caller sees.
+    }
+  }
+
+  logger.logError(lastError);
+  if (throwOnError) throw lastError;
+  return text;
+};
+
+/**
+ * One MyMemory request against one email address.
+ * Throws on quota (429), corruption (502) and any other API failure so the
+ * caller above can decide whether a different address is worth trying.
+ */
+const requestTranslation = async (text, sourceLang, targetLang, email, fromLang, toLang) => {
   try {
     const params = {
       q: text,
       langpair: `${sourceLang}|${targetLang}`,
     };
 
-    // Add email for 10,000 requests/day instead of 1,000
-    if (MYMEMORY_EMAIL) {
-      params.de = MYMEMORY_EMAIL;
+    if (email) {
+      params.de = email;
     }
 
     const response = await axios.get(MYMEMORY_API_URL, {
@@ -80,6 +171,18 @@ const translateText = async (text, fromLang = 'en', toLang, throwOnError = true)
     // Check for rate limit in response (MyMemory returns 429 status in responseStatus)
     if (response.data && response.data.responseStatus === 429) {
       const error = new Error('Rate limit exceeded');
+      error.statusCode = 429;
+      throw error;
+    }
+
+    // Quota has to be checked BEFORE the success branch. When the daily
+    // allowance is spent MyMemory answers `responseStatus: 200` and puts the
+    // warning in responseDetails, echoing the source text back as the
+    // "translation". Checked after the 200 branch (as it was), that echo is
+    // saved as a real translation and the quota is never detected — so nothing
+    // would ever trigger the failover to the next address.
+    if (isQuotaMessage(response.data?.responseDetails)) {
+      const error = new Error('Daily quota exceeded');
       error.statusCode = 429;
       throw error;
     }
@@ -103,13 +206,6 @@ const translateText = async (text, fromLang = 'en', toLang, throwOnError = true)
       return translatedText;
     }
 
-    // Check for quota exceeded message
-    if (response.data?.responseDetails?.includes('QUOTA')) {
-      const error = new Error('Daily quota exceeded');
-      error.statusCode = 429;
-      throw error;
-    }
-
     // Other API errors
     const error = new Error(`Translation failed: ${response.data?.responseStatus || 'unknown'}`);
     error.statusCode = response.data?.responseStatus || 500;
@@ -119,14 +215,9 @@ const translateText = async (text, fromLang = 'en', toLang, throwOnError = true)
     if (error.response?.status) {
       error.statusCode = error.response.status;
     }
-    logger.logError(error);
-
-    // Throw error for retry logic
-    if (throwOnError) {
-      throw error;
-    }
-    // Fallback: return original text
-    return text;
+    // Always throws: translateText owns the decision to fall back to the next
+    // email, and only it knows whether the caller wanted throwOnError.
+    throw error;
   }
 };
 
@@ -172,9 +263,22 @@ const batchTranslate = async (items, fromLang = 'en', toLang) => {
   return translations;
 };
 
+/** Quota-pool state, for logging and for reporting a run that ran dry. */
+const getQuotaStatus = () => {
+  resetExhaustedIfNewDay();
+  return {
+    configured: MYMEMORY_EMAILS.length,
+    exhausted: [...exhaustedEmails],
+    remaining: MYMEMORY_EMAILS.filter((e) => !exhaustedEmails.has(e)).length,
+    allExhausted:
+      MYMEMORY_EMAILS.length > 0 && exhaustedEmails.size >= MYMEMORY_EMAILS.length,
+  };
+};
+
 module.exports = {
   translateText,
   translateToMultiple,
   batchTranslate,
+  getQuotaStatus,
   LANGUAGE_CODES,
 };

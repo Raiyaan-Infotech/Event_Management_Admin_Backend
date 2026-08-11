@@ -103,7 +103,10 @@ const getPublicLanguages = asyncHandler(async (req, res) => {
 // auth cookie. Not wrapped in asyncHandler — this writes the response stream
 // itself rather than returning an ApiResponse.
 const autoTranslateContentStream = async (req, res) => {
-  const { section, page_slug = '', record_id = 0, language_id } = req.query;
+  const { section, page_slug = '', record_id = 0, language_id, all_languages } = req.query;
+  // Defaults to every active language. Pass all_languages=false with a
+  // language_id to translate just one.
+  const allLanguages = !(all_languages === 'false' || all_languages === '0');
 
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -134,13 +137,19 @@ const autoTranslateContentStream = async (req, res) => {
   try {
     const result = await service.autoTranslateContent(
       getCompanyId(req),
-      { section, page_slug, record_id: Number(record_id) || 0, language_id },
+      {
+        section,
+        page_slug,
+        record_id: Number(record_id) || 0,
+        language_id,
+        all_languages: allLanguages,
+      },
       (progress) => {
         if (!aborted) send('progress', progress);
       }
     );
 
-    if (!result) send('error', { message: 'Language not found' });
+    if (!result) send('error', { message: 'No active language to translate into' });
     else send('complete', { translations: result });
   } catch (err) {
     send('error', { message: err?.message || 'Failed to auto-translate' });
@@ -209,10 +218,18 @@ const translateAllToLanguage = asyncHandler(async (req, res) => {
 });
 
 const autoTranslateContent = asyncHandler(async (req, res) => {
-  const { section, page_slug, record_id, language_id } = req.body || {};
-  if (!section || !language_id) throw ApiError.badRequest('section and language_id are required');
-  const data = await service.autoTranslateContent(getCompanyId(req), { section, page_slug, record_id, language_id });
-  if (!data) throw ApiError.notFound('Language not found');
+  const { section, page_slug, record_id, language_id, all_languages } = req.body || {};
+  // language_id is no longer required: with no id this fills every active
+  // language, which is the default behaviour of the section translate button.
+  if (!section) throw ApiError.badRequest('section is required');
+  const data = await service.autoTranslateContent(getCompanyId(req), {
+    section,
+    page_slug,
+    record_id,
+    language_id,
+    all_languages: all_languages !== false && all_languages !== 'false',
+  });
+  if (!data) throw ApiError.notFound('No active language to translate into');
   return ApiResponse.success(res, data, 'Content auto-translated');
 });
 

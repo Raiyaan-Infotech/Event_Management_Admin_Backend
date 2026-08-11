@@ -883,20 +883,8 @@ const saveContentTranslations = async (
     return getContentTranslations(companyId, section, page_slug, record_id);
   }
 
-  // Snapshot of the English text each translation was written from. Comparing
-  // it against the key's current default_value is what makes a stale
-  // translation detectable: a reviewed translation is never auto-overwritten,
-  // so without this it would silently keep describing the OLD English.
-  const sourceRows = await sequelize.query(
-    `SELECT field_key, default_value FROM ${KEYS_TABLE}
-      WHERE company_id = ? AND section = ? AND page_slug = ? AND record_id = ?`,
-    { replacements: [companyId, section, page_slug || '', record_id || 0], type: QueryTypes.SELECT }
-  );
-  const sourceByField = new Map(sourceRows.map((row) => [row.field_key, row.default_value ?? '']));
-
   for (const fieldKey of fieldKeys) {
     const value = cleanValue(values[fieldKey]);
-    const sourceValue = sourceByField.get(fieldKey) ?? null;
     const [existing] = await sequelize.query(
       `SELECT id FROM ${TRANSLATIONS_TABLE}
        WHERE company_id = ? AND section = ? AND page_slug = ? AND record_id = ? AND field_key = ? AND language_id = ?`,
@@ -904,13 +892,13 @@ const saveContentTranslations = async (
     );
     if (existing) {
       await sequelize.query(
-        `UPDATE ${TRANSLATIONS_TABLE} SET value = ?, source_value = ?, status = ?, updated_at = NOW() WHERE id = ?`,
-        { replacements: [value, sourceValue, status, existing.id], type: QueryTypes.UPDATE }
+        `UPDATE ${TRANSLATIONS_TABLE} SET value = ?, status = ?, updated_at = NOW() WHERE id = ?`,
+        { replacements: [value, status, existing.id], type: QueryTypes.UPDATE }
       );
     } else {
       await sequelize.query(
-        `INSERT INTO ${TRANSLATIONS_TABLE} (company_id, section, page_slug, record_id, field_key, language_id, value, source_value, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        { replacements: [companyId, section, page_slug || '', record_id || 0, fieldKey, language_id, value, sourceValue, status], type: QueryTypes.INSERT }
+        `INSERT INTO ${TRANSLATIONS_TABLE} (company_id, section, page_slug, record_id, field_key, language_id, value, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        { replacements: [companyId, section, page_slug || '', record_id || 0, fieldKey, language_id, value, status], type: QueryTypes.INSERT }
       );
     }
   }
@@ -1005,13 +993,13 @@ const registerKeys = async (companyId, { section, page_slug = '', record_id = 0,
 
     if (existing) {
       await sequelize.query(
-        `UPDATE ${KEYS_TABLE} SET field_label = ?, field_type = ?, default_value = ?, sort_order = ?, updated_at = NOW() WHERE id = ?`,
-        { replacements: [field.label || field.key, field.type || 'input', field.value ?? '', i, existing.id], type: QueryTypes.UPDATE }
+        `UPDATE ${KEYS_TABLE} SET field_label = ?, default_value = ?, sort_order = ?, updated_at = NOW() WHERE id = ?`,
+        { replacements: [field.label || field.key, field.value ?? '', i, existing.id], type: QueryTypes.UPDATE }
       );
     } else {
       await sequelize.query(
-        `INSERT INTO ${KEYS_TABLE} (company_id, section, page_slug, record_id, field_key, field_label, field_type, default_value, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        { replacements: [companyId, section, page_slug || '', record_id || 0, field.key, field.label || field.key, field.type || 'input', field.value ?? '', i], type: QueryTypes.INSERT }
+        `INSERT INTO ${KEYS_TABLE} (company_id, section, page_slug, record_id, field_key, field_label, default_value, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        { replacements: [companyId, section, page_slug || '', record_id || 0, field.key, field.label || field.key, field.value ?? '', i], type: QueryTypes.INSERT }
       );
     }
   }
@@ -1054,7 +1042,7 @@ const listKeys = async (companyId, { section, page_slug, record_id, search, sync
   if (keys.length === 0) return [];
 
   const rows = await sequelize.query(
-    `SELECT section, page_slug, record_id, field_key, language_id, value, source_value, status
+    `SELECT section, page_slug, record_id, field_key, language_id, value, status
      FROM ${TRANSLATIONS_TABLE} WHERE company_id = ?`,
     { replacements: [companyId], type: QueryTypes.SELECT }
   );
@@ -1067,26 +1055,17 @@ const listKeys = async (companyId, { section, page_slug, record_id, search, sync
     bySlot.get(k).push({
       language_id: row.language_id,
       value: row.value,
-      source_value: row.source_value,
       status: row.status || 'reviewed',
     });
   });
 
-  return keys.map((key) => {
-    const translations = (bySlot.get(slot(key)) || []).map((entry) => ({
-      ...entry,
-      // Stale = the English moved on after this translation was written.
-      // `source_value` is null on rows saved before the column existed; those
-      // were backfilled as in-sync, so null is treated as "not outdated"
-      // rather than flagging everything at once.
-      is_outdated:
-        entry.source_value !== null &&
-        entry.source_value !== undefined &&
-        String(entry.source_value) !== String(key.default_value ?? '') &&
-        Boolean(String(entry.value || '').trim()),
-    }));
-    return { ...key, translations };
-  });
+  // No staleness tracking. Changing the English does not mark other languages
+  // as anything — whoever edits the English decides whether the translations
+  // need updating and edits them directly.
+  return keys.map((key) => ({
+    ...key,
+    translations: bySlot.get(slot(key)) || [],
+  }));
 };
 
 const deleteKey = async (companyId, id) => {
@@ -1125,26 +1104,15 @@ const getStats = async (companyId) => {
     { replacements: [companyId], type: QueryTypes.SELECT }
   );
 
-  // `outdated` counts translations whose English source has changed since they
-  // were written. Joined against the keys table so the comparison uses the
-  // CURRENT English. Rows with a null snapshot predate the column and are
-  // treated as in-sync.
+  // No join to the keys table any more: nothing here compares a translation
+  // against the current English, because changing the English is not treated as
+  // making a translation wrong.
   const counts = await sequelize.query(
     `SELECT t.language_id,
             SUM(CASE WHEN t.status = 'reviewed' AND t.value <> '' THEN 1 ELSE 0 END) AS reviewed,
             SUM(CASE WHEN t.status = 'auto' AND t.value <> '' THEN 1 ELSE 0 END) AS auto,
-            SUM(CASE WHEN t.value <> '' THEN 1 ELSE 0 END) AS total,
-            SUM(CASE WHEN t.value <> ''
-                      AND t.source_value IS NOT NULL
-                      AND t.source_value <> COALESCE(k.default_value, '')
-                     THEN 1 ELSE 0 END) AS outdated
+            SUM(CASE WHEN t.value <> '' THEN 1 ELSE 0 END) AS total
      FROM ${TRANSLATIONS_TABLE} t
-     LEFT JOIN ${KEYS_TABLE} k
-       ON  k.company_id = t.company_id
-       AND k.section    = t.section
-       AND k.page_slug  = t.page_slug
-       AND k.record_id  = t.record_id
-       AND k.field_key  = t.field_key
      WHERE t.company_id = ? GROUP BY t.language_id`,
     { replacements: [companyId], type: QueryTypes.SELECT }
   );
@@ -1162,7 +1130,6 @@ const getStats = async (companyId) => {
         total,
         reviewed: Number(c.reviewed) || 0,
         auto: Number(c.auto) || 0,
-        outdated: Number(c.outdated) || 0,
         missing: Math.max((Number(total_keys) || 0) - total, 0),
         completion: total_keys > 0 ? Math.round((total / Number(total_keys)) * 100) : 0,
       };
@@ -1185,71 +1152,115 @@ const listSections = async (companyId) => {
 // UI (see the SSE route). It defaults to a no-op for the plain POST path.
 const autoTranslateContent = async (
   companyId,
-  { section, page_slug = '', record_id = 0, language_id: rawLanguageId },
+  { section, page_slug = '', record_id = 0, language_id: rawLanguageId, all_languages = true },
   onProgress = () => {}
 ) => {
-  const language_id = Number(rawLanguageId);
-  if (!language_id || Number.isNaN(language_id)) return null;
+  // Target languages. The section button now fills EVERY active language in one
+  // press — pressing it once per language was the old behaviour and meant a
+  // newly written section was only ever translated into whichever language the
+  // admin happened to be viewing. A specific `language_id` still narrows the run
+  // (the row dialog uses that) but the default is all of them.
+  const requestedId = Number(rawLanguageId);
+  const targetOne = !all_languages && !!requestedId && !Number.isNaN(requestedId);
 
-  const [language] = await sequelize.query(
-    `SELECT * FROM ${LANG_TABLE} WHERE id = ? AND company_id = ?`,
-    { replacements: [language_id, companyId], type: QueryTypes.SELECT }
+  const languages = await sequelize.query(
+    targetOne
+      ? `SELECT * FROM ${LANG_TABLE} WHERE id = ? AND company_id = ?`
+      : `SELECT * FROM ${LANG_TABLE}
+          WHERE company_id = ? AND is_default = 0 AND is_active = 1
+          ORDER BY sort_order ASC, id ASC`,
+    {
+      replacements: targetOne ? [requestedId, companyId] : [companyId],
+      type: QueryTypes.SELECT,
+    }
   );
-  if (!language) return null;
+  // No language to write to at all — the caller shows "Language not found".
+  if (!languages.length) return null;
 
   // Scoped to this row: without the record_id filter every row's keys come back
   // and, being collapsed by field_key, the last row's text would be saved here.
-  const keys = await listKeys(companyId, { section, page_slug, record_id });
-  const values = {};
+  //
+  // `sync: true` is not optional. The key registry is derived from the content
+  // tables and only refreshed when something asks it to, so without it this run
+  // sees a stale snapshot: a field the admin has just filled in has no key yet
+  // and is skipped entirely (the site keeps showing English no matter how many
+  // times they press the button), and a field whose English was edited is
+  // translated from the OLD text. translateAllToLanguage has always synced —
+  // that is why the Languages-page button worked where this one didn't.
+  const keys = await listKeys(companyId, { section, page_slug, record_id, sync: true });
 
-  // A field the user corrected by hand is stored as 'reviewed'. Re-translating
-  // it would silently replace their wording with machine output, so it is left
-  // out of this run entirely — same rule translateAllToLanguage already applies.
-  // Its existing row is not rewritten, so the 'reviewed' status survives too.
-  const isReviewed = (key) => {
-    const existing = key.translations.find((t) => t.language_id === language_id);
-    return Boolean(existing && (existing.value || '').trim() && existing.status === 'reviewed');
-  };
+  // Plan the whole run before sending anything, so the progress total is exact
+  // rather than growing as we go.
+  //
+  // ONLY EMPTY SLOTS ARE FILLED. An existing translation is never re-translated,
+  // whatever its status and whether or not its English has since changed. That
+  // is the deliberate rule: editing the English does not re-sync the other
+  // languages. Whoever changes the English is responsible for deciding whether
+  // the translations need changing too, and edits them directly — the system
+  // does not track or flag that. The per-key re-translate action is the
+  // explicit "redo it" escape hatch.
+  const plan = [];
+  let preserved = 0;
 
-  const translatable = keys.filter((key) => !isReviewed(key));
-  const preserved = keys.length - translatable.length;
+  for (const language of languages) {
+    const langId = Number(language.id);
+    for (const key of keys) {
+      const source = (key.default_value || '').trim();
+      if (!source) continue;
+      const existing = key.translations.find((t) => Number(t.language_id) === langId);
+      if (existing && (existing.value || '').trim()) {
+        preserved += 1;
+        continue;
+      }
+      plan.push({ language, key, source });
+    }
+  }
 
-  // Progress counts only what will actually be sent, so the percentage reflects
-  // real work rather than jumping over skipped fields.
-  const total = translatable.length;
+  const total = plan.length;
   let done = 0;
   onProgress({ phase: 'start', done, total, preserved });
 
-  for (const key of translatable) {
-    const source = (key.default_value || '').trim();
-    if (!source) {
-      values[key.field_key] = '';
-    } else {
-      try {
-        values[key.field_key] = await autoTranslateService.translateText(source, 'en', language.code, false);
-      } catch {
-        // Keep whatever was already translated rather than wiping it out
-        const existing = key.translations.find((t) => t.language_id === language_id);
-        values[key.field_key] = existing?.value || '';
-      }
+  // Collected per language so each language is written in a single statement
+  // once its fields are done, rather than one write per field.
+  const pending = new Map();
+
+  for (const { language, key, source } of plan) {
+    const langId = Number(language.id);
+    try {
+      const value = await autoTranslateService.translateText(source, 'en', language.code, false);
+      if (!pending.has(langId)) pending.set(langId, {});
+      pending.get(langId)[key.field_key] = value;
+    } catch {
+      // Leave the slot empty rather than writing a failed marker: the next run
+      // will pick it up again, because empty is exactly what "not yet
+      // translated" means under this rule.
     }
     done += 1;
-    onProgress({ phase: 'progress', done, total, preserved, field: key.field_label || key.field_key });
+    onProgress({
+      phase: 'progress',
+      done,
+      total,
+      preserved,
+      field: key.field_label || key.field_key,
+      language: language.name,
+    });
   }
 
-  // Every field was human-reviewed: nothing to write. Return the current state
-  // so the caller still refreshes with the preserved values.
-  const saved = Object.keys(values).length
-    ? await saveContentTranslations(companyId, {
-        section,
-        page_slug,
-        record_id,
-        language_id,
-        values,
-        status: 'auto',
-      })
-    : await getContentTranslations(companyId, section, page_slug, record_id);
+  for (const [langId, values] of pending.entries()) {
+    if (!Object.keys(values).length) continue;
+    await saveContentTranslations(companyId, {
+      section,
+      page_slug,
+      record_id,
+      language_id: langId,
+      values,
+      status: 'auto',
+    });
+  }
 
+  // Always return the full map for this slot, keyed by language_id, so the
+  // caller can pick out whichever language it is displaying.
+  const saved = await getContentTranslations(companyId, section, page_slug, record_id);
   onProgress({ phase: 'done', done, total, preserved });
   return saved;
 };
@@ -1336,19 +1347,15 @@ const translateAllToLanguage = async (companyId, rawLanguageId, { skipExisting =
     }
 
     const existing = key.translations.find((t) => t.language_id === languageId);
-    if (existing && (existing.value || '').trim()) {
-      // Human wording is never overwritten, even once the English has moved on.
-      // Those rows surface as "Needs review" instead, for a person to redo.
-      if (existing.status === 'reviewed') {
-        skipped += 1;
-        continue;
-      }
-      // Machine translation: refresh it when the English source has changed,
-      // otherwise skip so a re-run costs no API quota.
-      if (skipExisting && !existing.is_outdated) {
-        skipped += 1;
-        continue;
-      }
+    if (skipExisting && existing && (existing.value || '').trim()) {
+      // An existing translation is never rewritten — not a hand-edited one, and
+      // not a machine one whose English has since changed. Changing the English
+      // deliberately does NOT re-sync the other languages; the admin making that
+      // edit decides whether each translation still fits and updates it.
+      // `skipExisting: false` (the overwrite option) remains the explicit
+      // "redo everything" path.
+      skipped += 1;
+      continue;
     }
 
     if (quotaExceeded) {

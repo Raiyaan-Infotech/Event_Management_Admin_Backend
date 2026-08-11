@@ -1397,3 +1397,74 @@ restore-after. The temporary test script was removed.
 
 **Uncommitted:** 7 frontend files + 2 backend files. Nothing here is on production yet — including
 §85, which still isn't.
+
+> **Update:** the user has since pushed both repos — frontend `a99d1ab`, backend `fdb398b`, both
+> level with origin/main. §85 and §89–§94 are now deploying. §96 below was written against the
+> **old** deployed build, which is why it looked broken.
+
+### 96. "Translate from English" never re-synced the key registry — the real Features bug
+
+Reported: on Features edit in Tamil mode, the title field is empty (`0/50`, English as placeholder)
+and the public site renders that card's title in English while its siblings are Tamil.
+
+`autoTranslateContent` called:
+
+```js
+const keys = await listKeys(companyId, { section, page_slug, record_id });   // no sync!
+```
+
+The key registry is **derived** from the content tables and only rebuilt when something asks
+(§75). Without `sync: true` this run sees a stale snapshot, which produces exactly two symptoms:
+
+1. A field the admin has **just filled in** has no registered key, so it is not in `keys`, gets no
+   entry in `values`, and is never written. The button appears to work — progress runs, toast says
+   "Translated" — but that field stays empty forever and the site keeps showing English.
+2. A field whose English was **edited** is translated from the OLD `default_value`. Production
+   showed this directly: feature 215's key held `"Beautiful Templates "` while the content row said
+   `"Beautiful Templatesst"`.
+
+`translateAllToLanguage` (the Languages-page button) has always passed `sync: true` — which is why
+the two buttons behaved differently and why "Translate All" appeared to fix things that the
+per-section button could not.
+
+Fixed by passing `sync: true`. Proven twice against real data, both restore-after:
+- Filling a previously-empty `detailed_description` and listing keys: without sync the field is
+  absent, with sync it appears.
+- Running the real `autoTranslateContent` on that row: the newly-filled field came back as
+  `"ஒவ்வொரு நிகழ்விற்கும் நேரடி பட்ஜெட் கண்காணிப்பு."` instead of being skipped.
+
+> Cost is one content scan per button press, the same one the Languages page already does, ahead of
+> API calls that are throttled to 350ms each anyway.
+
+### 97. Highlights "only the customised colour shows" — §85 again, plus a booby trap
+
+Production `template/1` (row 35) at the time of the report:
+
+```
+block  icon_style: outline   card_style: individual   icon_bg_color: #ffffff   icon_color: #271111
+       title_color: #ffffff  description_color: #fafcff
+items  1–4 no per-item colour · 5 "One Click Import" icon_bg #010005
+```
+
+Four pastel circles and one black one is precisely what code **without** `resolveIconColors`
+produces: block-level colours ignored, per-item colours the only thing honoured. Confirmed by
+`git show 8cef1cb:…highlights-section.tsx | grep -c resolveIconColors` → **0**. So this was §85
+undeployed, not a new defect, and the user's push resolves it. No code change.
+
+> ⚠️ **But shipping it will make two blocks unreadable.** Those colour fields were set while the
+> code ignored them, so nothing warned the admin:
+>
+> | Row | title/description colour | renders on | result |
+> |---|---|---|---|
+> | `template/1` (35) | `#ffffff` / `#fafcff` | `bg-white` individual cards | **invisible** |
+> | `features/1` (32) | `#ffffff` / `#ffffff` | default gradient `#F3F0FF→#FFFFFF` | **invisible** |
+>
+> `home/1` (white on a blue→red gradient) and `home/2` are fine. Left alone deliberately — these are
+> the admin's own colour choices on production data, and now that the pickers actually work they can
+> be corrected from the UI in a few seconds. Flagged, not silently overridden.
+
+### 98. Verification
+
+`tsc --noEmit` clean · `next build` compiled · backend modules load · both translation fixes proven
+against live rows with restore-after · local DB confirmed back to its original state (feature 15
+`detailed_description` null, 2 translations, 2 keys) · scratch scripts removed.
