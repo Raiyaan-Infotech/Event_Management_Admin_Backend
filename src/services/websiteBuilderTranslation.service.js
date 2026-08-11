@@ -570,6 +570,13 @@ const UI_CHROME_KEYS = [
   ['login_demo.ready_subtitle', 'Join thousands of happy customers who trust {companyName} for their special moments.'],
   ['login_demo.get_started_free', 'Get Started Free'],
   ['login_demo.view_demo_app', 'View Demo App'],
+  ['login_demo.view_pricing_plans', 'View Pricing Plans'],
+  ['login_demo.live_badge', 'Live'],
+  ['login_demo.event_app_badge', 'Event App'],
+  ['login_demo.scan_to_view_invite', 'Scan to View Invite'],
+  ['login_demo.templates_badge', 'Templates'],
+  ['login_demo.preview_realtime', 'Preview in Real-time'],
+  ['login_demo.friendly_team', 'Our friendly team is here to help you with anything you need.'],
   // "And Much More" feature showcase on the Features page.
   ['login_demo.much_more_title', 'And Much More'],
   ['login_demo.much_more_subtitle', 'We keep adding new features to make your event experience better and better.'],
@@ -582,7 +589,11 @@ const UI_CHROME_KEYS = [
   ['login_demo.and_feature_plans', '... and Feature Plans'],
   ['login_demo.ready_app_title', 'Ready to Create Your Amazing Event App?'],
   ['login_demo.ready_event_title', 'Ready to Create Your Amazing Event?'],
-  // Closing call-to-action banner.
+  // Closing call-to-action banner. The heading renders in two pieces so the
+  // last words can carry the brand colour, so it needs two keys — keep them
+  // adjacent, they are read as one sentence.
+  ['login_demo.banner_title', 'Create, Share & Celebrate Your'],
+  ['login_demo.banner_title_accent', 'Special Moments'],
   ['login_demo.banner_subtitle', "Start creating your event app today. It's easy, fast and absolutely amazing!"],
   ['login_demo.create_app_now', 'Create Your App Now'],
   ['login_demo.book_demo', 'Book a Demo'],
@@ -667,6 +678,8 @@ const getActiveWebsiteId = async (companyId) => {
 const syncKeysFromContent = async (companyId) => {
   let discovered = 0;
   const seen = new Set();
+  // Key rows found during the scan, flushed in one batched write at the end.
+  const pendingKeyUpserts = [];
   const websiteId = await getActiveWebsiteId(companyId);
 
   // Static UI chrome has no backing table to scan, so it's registered
@@ -746,12 +759,18 @@ const syncKeysFromContent = async (companyId) => {
 
         if (fields.length === 0) continue;
 
-        await registerKeys(companyId, { section, page_slug: pageSlug, record_id: recordId, fields });
+        // Collected and written once at the end of the scan. Writing per slot
+        // here meant hundreds of sequential round-trips against a remote DB.
+        const { upserts } = planKeyWrites({ section, page_slug: pageSlug, record_id: recordId, fields });
+        pendingKeyUpserts.push(...upserts);
         fields.forEach((f) => seen.add(`${section}|${pageSlug}|${recordId}|${f.key}`));
         discovered += fields.length;
       }
     }
   }
+
+  // Everything discovered above lands in one batched write.
+  await bulkUpsertKeys(companyId, pendingKeyUpserts);
 
   // Prune keys whose backing content no longer exists.
   // NOTE: only the key row is removed — saved translations are deliberately
@@ -759,22 +778,23 @@ const syncKeysFromContent = async (companyId) => {
   // than because the content was deleted, and destroying a translator's work on
   // that assumption is not recoverable. Orphaned translation rows are tiny and
   // are re-adopted automatically if the same slot reappears.
-  let pruned = 0;
   const existing = await sequelize.query(
     `SELECT id, section, page_slug, record_id, field_key FROM ${KEYS_TABLE} WHERE company_id = ?`,
     { replacements: [companyId], type: QueryTypes.SELECT }
   );
-  for (const key of existing) {
-    if (!FIELD_CATALOG[key.section]) continue; // leave manually-registered sections alone
-    const slot = `${key.section}|${key.page_slug || ''}|${key.record_id}|${key.field_key}`;
-    if (!seen.has(slot)) {
-      await sequelize.query(`DELETE FROM ${KEYS_TABLE} WHERE id = ? AND company_id = ?`, {
-        replacements: [key.id, companyId],
-        type: QueryTypes.DELETE,
-      });
-      pruned += 1;
-    }
+  const doomed = existing
+    .filter((key) => FIELD_CATALOG[key.section]) // leave manually-registered sections alone
+    .filter((key) => !seen.has(`${key.section}|${key.page_slug || ''}|${key.record_id}|${key.field_key}`))
+    .map((key) => key.id);
+
+  for (let i = 0; i < doomed.length; i += UPSERT_CHUNK) {
+    const chunk = doomed.slice(i, i + UPSERT_CHUNK);
+    await sequelize.query(
+      `DELETE FROM ${KEYS_TABLE} WHERE company_id = ? AND id IN (${chunk.map(() => '?').join(', ')})`,
+      { replacements: [companyId, ...chunk], type: QueryTypes.DELETE }
+    );
   }
+  const pruned = doomed.length;
 
   return { discovered, pruned };
 };
@@ -883,24 +903,28 @@ const saveContentTranslations = async (
     return getContentTranslations(companyId, section, page_slug, record_id);
   }
 
-  for (const fieldKey of fieldKeys) {
-    const value = cleanValue(values[fieldKey]);
-    const [existing] = await sequelize.query(
-      `SELECT id FROM ${TRANSLATIONS_TABLE}
-       WHERE company_id = ? AND section = ? AND page_slug = ? AND record_id = ? AND field_key = ? AND language_id = ?`,
-      { replacements: [companyId, section, page_slug || '', record_id || 0, fieldKey, language_id], type: QueryTypes.SELECT }
+  // Batched for the same reason as the key writes: this ran a SELECT plus an
+  // INSERT/UPDATE per field, and `uniq_translation_slot` already covers the
+  // 5-part slot plus language_id, so ON DUPLICATE KEY UPDATE does the work.
+  for (let i = 0; i < fieldKeys.length; i += UPSERT_CHUNK) {
+    const chunk = fieldKeys.slice(i, i + UPSERT_CHUNK);
+    const replacements = [];
+    chunk.forEach((fieldKey) => {
+      replacements.push(
+        companyId, section, page_slug || '', record_id || 0,
+        fieldKey, language_id, cleanValue(values[fieldKey]), status
+      );
+    });
+    await sequelize.query(
+      `INSERT INTO ${TRANSLATIONS_TABLE}
+         (company_id, section, page_slug, record_id, field_key, language_id, value, status)
+       VALUES ${chunk.map(() => '(?, ?, ?, ?, ?, ?, ?, ?)').join(', ')}
+       ON DUPLICATE KEY UPDATE
+         value      = VALUES(value),
+         status     = VALUES(status),
+         updated_at = NOW()`,
+      { replacements, type: QueryTypes.INSERT }
     );
-    if (existing) {
-      await sequelize.query(
-        `UPDATE ${TRANSLATIONS_TABLE} SET value = ?, status = ?, updated_at = NOW() WHERE id = ?`,
-        { replacements: [value, status, existing.id], type: QueryTypes.UPDATE }
-      );
-    } else {
-      await sequelize.query(
-        `INSERT INTO ${TRANSLATIONS_TABLE} (company_id, section, page_slug, record_id, field_key, language_id, value, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        { replacements: [companyId, section, page_slug || '', record_id || 0, fieldKey, language_id, value, status], type: QueryTypes.INSERT }
-      );
-    }
   }
   return getContentTranslations(companyId, section, page_slug, record_id);
 };
@@ -963,46 +987,96 @@ const getPublicLanguages = async (companyId) => {
   return rows.map((row) => ({ ...row, is_default: Number(row.is_default) === 1 }));
 };
 
+// Rows are written in chunks rather than one statement per field.
+//
+// This is a latency fix, not a tidiness one. Registering a key used to cost a
+// SELECT plus an INSERT/UPDATE — about 1,000 sequential round-trips for a full
+// ~500-key sync. Against the production DB a round-trip measures ~374ms from
+// here, so that sync alone took over six minutes and made "Translate All" look
+// like it had hung. The same sync runs in ~3s locally, which is exactly why it
+// never showed up in testing.
+//
+// `uniq_key_slot` (company_id, section, page_slug, record_id, field_key) makes
+// ON DUPLICATE KEY UPDATE the update path, so an existing slot is refreshed
+// instead of duplicated.
+const UPSERT_CHUNK = 200;
+
+const bulkUpsertKeys = async (companyId, entries) => {
+  for (let i = 0; i < entries.length; i += UPSERT_CHUNK) {
+    const chunk = entries.slice(i, i + UPSERT_CHUNK);
+    const replacements = [];
+    chunk.forEach((e) => {
+      replacements.push(
+        companyId, e.section, e.page_slug || '', e.record_id || 0,
+        e.field_key, e.field_label, e.default_value, e.sort_order
+      );
+    });
+    await sequelize.query(
+      `INSERT INTO ${KEYS_TABLE}
+         (company_id, section, page_slug, record_id, field_key, field_label, default_value, sort_order)
+       VALUES ${chunk.map(() => '(?, ?, ?, ?, ?, ?, ?, ?)').join(', ')}
+       ON DUPLICATE KEY UPDATE
+         field_label   = VALUES(field_label),
+         default_value = VALUES(default_value),
+         sort_order    = VALUES(sort_order),
+         updated_at    = NOW()`,
+      { replacements, type: QueryTypes.INSERT }
+    );
+  }
+};
+
+// Deletes key rows by slot address. Only the key row goes; saved translations
+// are deliberately left in place (§33.4).
+const bulkDeleteKeySlots = async (companyId, slots) => {
+  for (let i = 0; i < slots.length; i += UPSERT_CHUNK) {
+    const chunk = slots.slice(i, i + UPSERT_CHUNK);
+    const replacements = [companyId];
+    chunk.forEach((s) => {
+      replacements.push(s.section, s.page_slug || '', s.record_id || 0, s.field_key);
+    });
+    await sequelize.query(
+      `DELETE FROM ${KEYS_TABLE}
+        WHERE company_id = ?
+          AND (section, page_slug, record_id, field_key)
+              IN (${chunk.map(() => '(?, ?, ?, ?)').join(', ')})`,
+      { replacements, type: QueryTypes.DELETE }
+    );
+  }
+};
+
+// Turns a caller's `fields` list into upsert/delete sets for one content slot.
+// A field with no English text is not translatable — the content scan skips
+// empties for the same reason. Registering it anyway produced phantom keys that
+// made the language card read "0/1" for a section with nothing to translate.
+const planKeyWrites = ({ section, page_slug = '', record_id = 0, fields = [] }) => {
+  const upserts = [];
+  const removals = [];
+  fields.forEach((field, i) => {
+    const slot = { section, page_slug: page_slug || '', record_id: record_id || 0, field_key: field.key };
+    if (!String(field.value ?? '').trim()) {
+      removals.push(slot);
+      return;
+    }
+    upserts.push({
+      ...slot,
+      field_label: field.label || field.key,
+      default_value: field.value ?? '',
+      sort_order: i,
+    });
+  });
+  return { upserts, removals };
+};
+
 // Registers/refreshes the catalog of translatable fields for one content slot.
 // Called whenever a section is saved in its base (English) language, so the
 // central Translations module always knows what exists without inspecting
 // each section's own content table.
 const registerKeys = async (companyId, { section, page_slug = '', record_id = 0, fields = [] }) => {
-  for (let i = 0; i < fields.length; i++) {
-    const field = fields[i];
-    const [existing] = await sequelize.query(
-      `SELECT id FROM ${KEYS_TABLE} WHERE company_id = ? AND section = ? AND page_slug = ? AND record_id = ? AND field_key = ?`,
-      { replacements: [companyId, section, page_slug || '', record_id || 0, field.key], type: QueryTypes.SELECT }
-    );
-
-    // A field with no English text is not translatable — the content scan skips
-    // empties for the same reason. Registering it anyway produced phantom keys
-    // that made the language card read "0/1" for a section with nothing to
-    // translate, and gave "Translate from English" nothing to do.
-    // Only the key row is removed; existing translations are preserved and are
-    // re-adopted if the English text comes back (§33.4).
-    if (!String(field.value ?? '').trim()) {
-      if (existing) {
-        await sequelize.query(`DELETE FROM ${KEYS_TABLE} WHERE id = ?`, {
-          replacements: [existing.id],
-          type: QueryTypes.DELETE,
-        });
-      }
-      continue;
-    }
-
-    if (existing) {
-      await sequelize.query(
-        `UPDATE ${KEYS_TABLE} SET field_label = ?, default_value = ?, sort_order = ?, updated_at = NOW() WHERE id = ?`,
-        { replacements: [field.label || field.key, field.value ?? '', i, existing.id], type: QueryTypes.UPDATE }
-      );
-    } else {
-      await sequelize.query(
-        `INSERT INTO ${KEYS_TABLE} (company_id, section, page_slug, record_id, field_key, field_label, default_value, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        { replacements: [companyId, section, page_slug || '', record_id || 0, field.key, field.label || field.key, field.value ?? '', i], type: QueryTypes.INSERT }
-      );
-    }
-  }
+  const { upserts, removals } = planKeyWrites({ section, page_slug, record_id, fields });
+  await bulkUpsertKeys(companyId, upserts);
+  // Unconditional: a slot that isn't there is simply not matched, which costs
+  // one statement instead of a SELECT per field to find out.
+  await bulkDeleteKeySlots(companyId, removals);
   return listKeys(companyId, { section, page_slug });
 };
 
@@ -1318,7 +1392,14 @@ const translateOne = async (text, targetCode) => {
   }
 };
 
-const translateAllToLanguage = async (companyId, rawLanguageId, { skipExisting = true } = {}) => {
+const translateAllToLanguage = async (
+  companyId,
+  rawLanguageId,
+  // `skipSync` is for callers translating several languages in a row: the scan
+  // is company-wide, not per-language, so re-running it for each one is pure
+  // waste (~34s each against production).
+  { skipExisting = true, skipSync = false } = {}
+) => {
   // Route params arrive as strings; language_id from the DB is numeric. Coerce
   // up front so the "already translated" comparison below actually matches.
   const languageId = Number(rawLanguageId);
@@ -1333,7 +1414,7 @@ const translateAllToLanguage = async (companyId, rawLanguageId, { skipExisting =
     return { created: 0, failed: 0, skipped: 0, quotaExceeded: false, isDefault: true };
   }
 
-  const keys = await listKeys(companyId, { sync: true });
+  const keys = await listKeys(companyId, { sync: !skipSync });
   let created = 0;
   let failed = 0;
   let skipped = 0;
