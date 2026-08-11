@@ -200,7 +200,10 @@ const retranslateTranslationKey = asyncHandler(async (req, res) => {
 
 const listTranslationSections = asyncHandler(async (req, res) => {
   const companyId = getCompanyId(req);
-  await service.syncKeysFromContent(companyId);
+  // Throttled: this is only the filter dropdown, and it loads alongside the key
+  // list and stats which already sync. Calling the scan directly here made this
+  // a third ~12s request on every Translations page load.
+  await service.syncKeysIfStale(companyId);
   const data = await service.listSections(companyId);
   return ApiResponse.success(res, data, 'Sections retrieved');
 });

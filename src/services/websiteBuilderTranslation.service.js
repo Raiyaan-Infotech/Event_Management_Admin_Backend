@@ -1620,6 +1620,10 @@ module.exports = {
   listKeys,
   listSections,
   syncKeysFromContent,
+  // Throttled wrapper — prefer this anywhere a READ path just needs the
+  // registry to be reasonably current. Calling syncKeysFromContent directly
+  // costs a full content scan every single request.
+  syncKeysIfStale,
   deleteKey,
   getStats,
   saveKeyTranslations,
