@@ -7,6 +7,16 @@ const {
     subscribePublicVendorNewsletter,
     submitPublicVendorContact,
 } = require('../controllers/publicWebsite.controller');
+const {
+    resolvePublicSite,
+    getPublicSiteBundle,
+} = require('../controllers/companyPublicSite.controller');
+
+// ── Company website builder: host-addressed public read model ───────────────
+// Consumed by the standalone public site app, which knows the visitor's Host
+// but has no company id to send.
+router.get('/site/resolve', resolvePublicSite);
+router.get('/site/bundle', getPublicSiteBundle);
 
 router.get('/vendors/:slug/website-data', getPublicVendorWebsite);
 router.get('/website/:slug', getPublicVendorWebsite);

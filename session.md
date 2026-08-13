@@ -1468,3 +1468,578 @@ undeployed, not a new defect, and the user's push resolves it. No code change.
 `tsc --noEmit` clean · `next build` compiled · backend modules load · both translation fixes proven
 against live rows with restore-after · local DB confirmed back to its original state (feature 15
 `detailed_description` null, 2 translations, 2 keys) · scratch scripts removed.
+
+---
+
+## Session 9 — Translation module finished: flow change, data cleanup, speed
+
+> **Date:** 2026-08-11 | Continues from Session 8 (§89–98)
+
+### Today Status
+
+```
+Completed   Translation Module
+Working     Manual Translation Update — Skip Version
+```
+
+**Completed — Translation Module**
+- One save translates into **every** active language (was: one language per button press)
+- Saving English auto-translates; the button is now only a manual re-run
+- Two-email MyMemory pool with quota failover
+- All hardcoded UI strings in Login & Demo wrapped and translated
+- Pricing bullets + comparison table made translatable (were structurally impossible before)
+- Footer address, feature bullets, plan-feature cell values now editable per language
+- Corpus-junk detector + repair; dead/orphaned rows removed from both DBs
+- Translations page 47s → ~2s on repeat load
+
+**Working — Manual Translation Update, Skip Version**
+- Translation is never re-synced: only EMPTY slots are ever filled
+- A saved translation is never overwritten — not by an English edit, not by a re-run
+- Whoever changes the English decides whether the other languages need changing, and edits them
+  directly. The system does not track, flag or auto-fix that (staleness tracking removed — §102)
+
+---
+
+### 99. THE flow change — translate all languages, never re-sync
+
+Two rules replaced the old behaviour, on the user's explicit instruction:
+
+1. **One press fills every active language.** `autoTranslateContent` defaults to `all_languages: true`
+   and resolves every `is_default=0 AND is_active=1` language. Previously it translated only the
+   language in `?lang=`, so a section written today was translated only where the admin happened to
+   be looking.
+2. **Only EMPTY slots are filled.** An existing translation is never re-translated — regardless of
+   `status`, and regardless of whether its English has since changed. `translateAllToLanguage` lost
+   its "refresh stale auto rows" branch.
+
+> Re-saving while editing therefore costs no API quota for text already translated. The first save
+> after writing new text is the slow one.
+
+### 100. Auto-translate on SAVE — the button is no longer the primary path
+
+The user expected saving English to already produce the other languages. It did not: `registerKeys`
+only wrote key rows, and translation happened solely on a button press.
+
+`useSectionTranslation` gained `translateAfterSave(overrideRecordId?)`, wired into **all 12 forms**
+(seo, footer, login-page, contact-us, highlights, hero-section, testimonials, faqs, features,
+templates, video-tutorials, pricing-plans). Blocking, with the existing full-screen progress overlay
+— chosen deliberately over a background run so the result is visible.
+
+Four things that needed care:
+
+- **Create vs edit.** On create the row id exists only in the mutation response; the hook's
+  `recordId` closure is still `undefined`. Without passing it explicitly, every newly created record
+  would silently skip translation (the §45 guard).
+- **The overlay did not exist in English mode.** It is rendered by `TranslationModeBanner`, which
+  returned `null` outside translation mode — exactly when an English save runs. It now renders in
+  both modes; only the banner itself is mode-specific.
+- **A failed translation must not look like a failed save.** The post-save path runs `silent`:
+  "nothing to translate" stays quiet, and a real failure reports *"Saved, but translating failed"*.
+- **Navigation raced the run.** FAQ and video-tutorial edit both `router.push` to the list on
+  success, tearing down the SSE stream. They now translate first, then navigate.
+
+> §109 found this was still wrong for FAQ *create* — same class, different route.
+
+### 101. Two Gmail accounts with quota failover
+
+`MYMEMORY_EMAIL` now accepts a comma-separated list. A quota error retires that address and retries
+the same request on the next one; spent addresses reset at UTC midnight. In-memory only, so a restart
+just re-tries the first address at the cost of one request.
+
+> **A real bug was blocking this.** When the daily allowance is spent, MyMemory answers
+> `responseStatus: 200` and puts the warning in `responseDetails`, echoing the English back as the
+> "translation". The old code checked the 200-success branch FIRST, so that echo was saved as a real
+> translation and quota was never detected — nothing could ever have triggered a failover. The quota
+> check now runs before the success branch, and matches the plain-English wording
+> (`ALL AVAILABLE FREE TRANSLATIONS`) as well as the word `QUOTA`.
+
+Proven with a stubbed API: first → quota → second → success, and the next call skips the dead
+address. **Not yet set on Render** — production still runs one address at 50k chars/day.
+
+### 102. Staleness tracking removed entirely — and two columns dropped
+
+The ⚠ Needs review flag, `is_outdated`, the per-language `outdated` count and the `source_value`
+column are **gone**. Under §99's rule nothing auto-fixes a stale translation, and the user's position
+is that whoever edits the English is responsible for the other languages.
+
+**Columns dropped from both DBs:**
+
+| Column | Why |
+|---|---|
+| `company_website_content_translations.source_value` | Its only reader was `is_outdated` |
+| `company_website_translation_keys.field_type` | Written on every insert since day one, **read by nothing** |
+
+> Dropping `field_type` would have broken **every** key registration — `registerKeys` still wrote it
+> in both its INSERT and UPDATE. Caught before shipping. The obsolete
+> `add_translation_source_value.js` migration was deleted (re-running it would re-add a dead column)
+> and `field_type` removed from the table-creation script so a fresh install matches.
+
+### 103. Production DB latency — the "it runs for an hour" bug
+
+Measured from the dev machine to Aiven: **~374 ms per query round-trip** (local MySQL is
+sub-millisecond). `registerKeys` did a SELECT plus an INSERT/UPDATE **per field** — ~1,000 sequential
+round-trips for a ~500-key sync. That is 6+ minutes on production and 3 seconds locally, which is
+exactly why it never showed up in testing.
+
+Batched into chunked `INSERT … ON DUPLICATE KEY UPDATE` (the `uniq_key_slot` and
+`uniq_translation_slot` indexes already existed):
+
+```
+sync   LOCAL  2.9s -> 0.2s          (470 keys, stable across runs)
+sync   PROD   6+ min -> 34s
+```
+
+Also added `skipSync` so a multi-language run does not rescan per language.
+
+> **Takeaway: never conclude "it's fast" from a local run.** Any `for (row of rows) { SELECT; WRITE }`
+> loop is ~750ms per row against production.
+
+### 104. Data cleanup — and why deleting junk does NOT work
+
+Removed from production: **15 orphaned rows** (no key at that slot), **2 stale `auto`**, **~4 corpus
+junk** = 21 total. Local: 1. `getTranslationBundle` selects straight from the translations table with
+NO join to the keys table, so an orphaned row is still shipped to the public site — it simply does
+not match a slot the page asks for, until an id or JSON index is reused.
+
+> **The important discovery:** deleting corpus junk does not fix it. MyMemory returns the *same*
+> garbage for the same input, so the next translate run recreated `"seemantha"`, `"Description"` and
+> `"SharingName"` byte-for-byte. Under the never-overwrite rule the durable fix is to save the
+> correct value as `status='reviewed'`, which is then permanent.
+
+**New junk class found — trailing Latin text welded onto a good translation:**
+
+```
+"இசை இயக்கிName"           <- Music Player
+"தனிபயன் பக்கங்கள்Comment"   <- Custom Pages
+"நட்சத்திர உதயம்Description" <- §88.8, logged as an English content bug; it was this
+```
+
+`scratch/fix_trailing_latin_junk.js` detects non-Latin script running straight into ASCII letters
+with no space (real prose never does that), strips the suffix and saves as `reviewed`. Repaired 3 on
+production, 2 locally; both DBs now scan clean.
+
+Also finished §77: `contact_settings` duplicate removed and `uniq_company_website_singleton` added on
+both DBs.
+
+### 105. Sections that could never be translated
+
+| What | Why it was impossible | Fix |
+|---|---|---|
+| Plan bullets | `features_json` holds `{label, included}` objects on prod (plain strings locally); `jsonStringArray` mapped every object to `''` — **0 keys registered** | Read `label`/`text`/`title`/`name`/`value` from object entries |
+| Comparison table | `company_website_pricing_matrix_features` had **0 rows on both DBs**; the admin page seeds `useState(DEFAULT_MATRIX_FEATURES)` so 7 features *looked* saved but never were (the §45/§46 trap), and the public section fell back to its own hardcoded copy | Seeded the 7 rows on both DBs |
+| Comparison **cell values** ("Up to 50", "Limited") | Live in `plan_values_json`, registered nowhere (§88.5) | `limit_<tier>` extractor, keyed by tier name not position |
+| Footer address | `buildFooter` prefers `footer_settings.address`, which was **not in the footer catalog** — only `contact-settings.address` was | Added to the catalog **and its `extract()`** |
+| Login & Demo (14 strings) | The block had its **own hardcoded copy** of the subtitle; the `ready_subtitle` key was translated all along and nothing read it | Wrapped 14 strings, 10 new chrome keys |
+
+> **`jsonStringArray` had a second bug:** `.filter(Boolean)` dropped text-less entries, but callers
+> derive the key from the array index (`bullet_3`). One blank entry shifted every later bullet onto
+> the wrong key. Now positional.
+>
+> **The frontend writer would have destroyed the tick/cross:** it returned the bare translated string
+> for object entries, throwing `included` away. It now writes into `label` and keeps the rest.
+
+Production went **508 → 581 keys**.
+
+### 106. Admin UI audit — keys registered but not editable
+
+Audited all 21 sections that have keys, comparing what the backend registers against what each admin
+form exposes. **Three real gaps** (all the same class: the field list never included them):
+
+- **Plan Features** — had a translate button, but `fields` listed only `feature_name`/`description`,
+  never the `limit_*` cell values.
+- **Features → Bullet Points** — worse: the whole card was `sharedOnly`, dimmed and click-blocked in
+  translation mode. Its comment still claimed bullets were "shared across languages", true before §83
+  and wrong since.
+- **Footer → link labels** — `quick_link.<slug>` keys existed since §68 with no UI, which is why the
+  list *headings* translated while the links under them stayed English.
+
+The other 16 sections were already complete. Highlights and Footer show as "partial" in the audit
+script — **false positives**, they build keys dynamically (`item_${position}_title`,
+`quick_link.${slug}`) and a literal-string probe cannot see that.
+
+Reported, deliberately not changed: **footer copyright / powered-by are hardcoded constants** in the
+form — not editable in English either, so that is a missing feature, not a translation bug.
+
+### 107. Highlights — two dead controls removed
+
+Per the user: different colour per icon, drop the block-level one.
+
+The block-level **Icon Background / Icon Color** could never apply: all 5 items on `home/1` already
+carried their own colour, and resolution is per-item → block → default. Changing those pickers was a
+guaranteed no-op. (Items acquired their own colour because `<input type="color">` writes on any
+interaction — merely opening a swatch set one — and the swatch renders the *resolved* colour, so an
+override looked identical to an inherited value.) Removed; icon colour is now set per row only.
+Title/Description colour stay — they have no per-item equivalent.
+
+**"Number of Items per Row" removed.** 5 items at 3-per-row rendered 3 + 2 while the mockup shows one
+strip. Items now fill a single row sized to however many exist.
+
+> The admin's own Live Preview had no rule for 5 items and fell back to 3 columns — so it would have
+> kept showing 3+2 even after the public fix. That preview/live disagreement is how §92 hid.
+
+Affects `home/1` (5 items) and `home/2` (6) on the live site; the other five blocks were already at 6.
+
+### 108. Speed — Website Builder admin was unusable
+
+Measured against the **live server**:
+
+| Endpoint | Before |
+|---|---|
+| `translation-keys` | **22.8s** (259 KB) |
+| `translation-keys/stats` | **12.5s** |
+| `translation-keys/sections` | **12.1s** |
+
+All three re-ran the same full content scan — ~47s to open the Translations page. Three causes:
+
+1. **Backend:** a 60s throttle (`syncKeysIfStale`) shared by all three. Translation paths pass
+   `freshSync: true` to bypass it — a stale registry there re-introduces §96.
+2. **Frontend:** `useWBTranslationKeys` and `useWBTranslationStats` had **no `staleTime`**, so React
+   Query's default of `0` refetched everything on every visit.
+3. **Search fired a full scan per keystroke** — `search` sat in the React Query key with no debounce,
+   so typing five characters queued five 22-second scans. Now filtered client-side; every key is
+   already loaded.
+
+Live result after deploy: `stats` 12.5s → **1.8s**, repeat `translation-keys` 22.8s → **2.9s**.
+
+> **Measuring caught one that reading the code did not.** `sections` was still 11.8s because the
+> *controller* called `service.syncKeysFromContent()` directly, going around the throttle. Fixed by
+> exporting the throttled wrapper. 11.8s → **0.3s**.
+
+### 109. FAQ create never showed its translation
+
+Found by auditing the create paths after the user asked whether a **new** form translates on save.
+
+Create forms save, get a new id, then navigate — and the order matters. Features, Pricing Plans and
+Templates `router.replace` to the **same** route with a new `?id=`, so the component never unmounts.
+Video Tutorials awaits before navigating.
+
+**FAQ was the exception:** `/faqs/create` → `router.replace('/faqs/edit/<id>')` is a real route
+change, so the component unmounted while the translation was starting, taking the progress overlay
+and result toast with it. Now translates first, then navigates.
+
+### 110. Verification
+
+`tsc --noEmit` exit 0 · `next build` compiled (137 pages) · backend modules load · key count stable
+at 581 across the throttle change · trailing-junk scan clean on both DBs · the real SSE endpoint
+exercised against production (filled empty Hindi, `preserved: 2` for existing Tamil, persisted).
+
+> Not browser-tested. The §109 bug was found by reading navigation order, not by clicking — a real
+> click-through of each create form is still worth doing.
+
+### 111. Open — carried to next session
+
+1. **⚠ Hindi is ACTIVE on production at 4%** (22/581). A visitor switching language sees mostly
+   English. Either translate it (559 fields, 13,604 chars, ~13 min, inside quota) or set it Inactive.
+   This also slows every save, since each one now translates Hindi from scratch.
+2. **`MYMEMORY_EMAIL` not set on Render** — production still uses one address at 50k chars/day.
+3. **Uncommitted:** the `sections` throttle (2 backend files) + the §109 FAQ fix.
+4. One Tamil key missing: `templates.template_name` = `"Holy"`.
+5. `_components/features-content.tsx` is **dead code** — nothing imports it, same as the file deleted
+   in §73. Worth deleting.
+6. Footer copyright / powered-by hardcoded in the form (§106).
+7. **Schema, honest assessment:** two tables is right, but they are joined on a 5-column composite
+   `(company_id, section, page_slug, record_id, field_key)` instead of a `key_id` FK. That single
+   choice caused §33.1, every orphan cleaned in §104, and the whole §64/§74/§93 id-reassignment
+   family. A real FK with `ON DELETE CASCADE` would make orphans structurally impossible.
+   Deliberately NOT done — it rewrites every query in a 1,600-line service plus a data migration.
+
+---
+
+## Session 10 — Required fields were not enforced in translation mode
+
+> **Date:** 2026-08-12 | Continues from Session 9 (§99–111) | **Frontend only, uncommitted**
+
+### 112. A translated form saved happily with its required fields empty
+
+Reported on Templates: open a saved template in Tamil, clear **Template Name** (`*`, `0/100`), press
+**Save Translation** → *"Tamil translation for Template saved successfully"*. The public site then
+renders that card's name in **English**, because a missing translation legitimately falls back to the
+source — so the save looked successful and the site looked untranslated.
+
+**Cause:** `handleTranslationSave` was a pure bypass. Every wired form opens its `handleSave` with
+
+```js
+if (await handleTranslationSave(translation, 'Template')) return;   // skips ALL validation below
+```
+
+and the English `newErrors` block it skips was the *only* place required fields were ever checked.
+`useSectionTranslation.save()` had no validation of its own, so translation mode had none at all.
+Same hole in `RowTranslateDialog.handleSave` for the list-page row dialogs.
+
+**Fixed in the two shared components, so every wired form gets it:**
+
+- `TranslatableFieldInput` / `RowTranslateField` / side-card `TranslatableField` gained
+  `required?: boolean`, mirroring the `*` the form already shows in English.
+- `save()` rejects with the same toast the English path uses
+  (*"Please fill in all required fields marked with *"*) and marks the offending keys in a new
+  `translation.errors` map. `handleTranslationSave` still returns `true` on rejection — returning
+  `false` would fall through to the English save path and write the content row from a translated form.
+- Errors clear on typing, on a language switch, and when auto-translate fills the fields.
+- Forms feed `translation.errors.<key>` into the red-border className they already had for English.
+- The row dialog now renders the `*`, the red border and a per-field "… is required." line.
+
+> **The rule that makes this safe: a required field is only enforced when its ENGLISH source has
+> text.** The backend registers no key for an empty English field (§78) and deletes a key whose text
+> becomes empty, so requiring a translation for a blank English field would make the form
+> unsaveable with nothing the admin could do about it. Optional-in-English stays optional.
+
+**`required` markers added, matching each form's own English validation** — not a blanket rule:
+
+| Form / dialog | Required translation fields |
+|---|---|
+| templates (form + list dialog) | `template_name` |
+| features | `title`, `short_description` |
+| pricing-plans | `plan_name` |
+| faqs (form + list dialog) | `question`, `answer` |
+| testimonials (form + row dialog) | `customer_name`, `event_name`, `feedback` |
+| video-tutorials (form + list dialog) | `title`, `short_description` |
+| hero-section | `title` (its label was the literal string `"Title *"` — now a real `required` prop) |
+| how-it-works dialogs (row + modal) | `title`, `description`, `highlight_title`, `highlight_subtext` |
+| clients / sponsors / pages / nav-menu / pricing-features | the row's name/title/label |
+| template-, faq-, gallery-, contact-, video-tutorial-\* categories | `name` |
+
+**Deliberately left with no required fields:** seo, footer, login-page, contact-us, highlights and
+sliders — none of them validates anything in English either, so enforcing only in translation mode
+would make the Tamil form stricter than the English one. `_components/features-content.tsx` skipped:
+it is dead code (§111.5).
+
+> **Backend unchanged and still permissive.** `PUT /content-translations` must keep accepting empty
+> values — that is how an *optional* translation is cleared. "Required" is a property of the form's
+> field list, which exists only on the frontend; there is no backend notion of it to enforce.
+
+Verified: `tsc --noEmit` exit 0 · `next build` compiled. Not browser-tested.
+
+---
+
+## Session 11 — Public-site fixes
+
+> **Date:** 2026-08-13 | Continues from Session 10 (§112) | **Frontend only, uncommitted**
+
+### 113. Dead space between the quote and the author row
+
+Reported against the mockup: every testimonial card carried a tall empty band between the quote and
+the author row.
+
+**Cause — two rules fighting.** §54 gave the quote `flex-1` so author rows line up across cards of
+differing length, which is correct on its own. But the card also kept a hard
+`min-h-[300px]` (active) / `min-h-[280px]` (inactive) from the earlier centred design. The grid is
+already `items-stretch`, so the longest quote sets the row height; the extra floor inflated every
+card past its content, and `flex-1` handed the whole surplus to the quote paragraph — pushing the
+author row to the bottom edge and opening ~80–100px of white space on a 2-line quote.
+
+Fix: dropped both `min-h-*` classes in
+`components/company-website-preview/sections/testimonials-section.tsx`. Cards now size to the tallest
+quote in the row, so `flex-1` only absorbs the genuine difference between quotes. `items-stretch`,
+the active card's lift/scale/shadow emphasis and the author alignment are all unchanged.
+
+Two things noticed while in there, **not changed** (say the word if they should be):
+- The mockup has **no divider rule** above the author row; ours keeps `border-t border-slate-100 pt-4`
+  from §54. It's what made the empty band read as a boxed-off gap.
+- `_components/testimonials-content.tsx`'s own Live Preview modal is still the **pre-§54 design**
+  (quote icon, avatar first, centred) — it does not show what the public site renders. Same
+  preview/live disagreement class as §107.
+- `Event_Managment_Website_Builder/src/components/website-preview/sections/testimonials-section.tsx`
+  is also still the pre-§54 card. The rendered site comes from the Admin Frontend copy.
+
+Verified: `tsc --noEmit` exit 0 · `next build` compiled. Not browser-tested.
+
+### 114. Hero text colour is now admin-picked (was hardcoded white)
+
+Hero title/description were `text-white` / `text-white/90` **literals** in
+`sections/hero-section.tsx`. On a light hero image — the reported case, a pale pink Contact hero —
+the text is effectively invisible. Nothing in the admin could change it: the only colour control on
+the form was the overlay.
+
+Added **Title Color** and **Description Color** pickers, per page (each page has its own hero image,
+so one global colour would not solve it).
+
+**No backend change and no migration.** `company_website_hero_sections` has **no `page_slug` column**
+(§35) — `useCompanyHeroSection` nests the entire per-page payload under `design_json[<slug>]` and
+layers it back over the row on read. `design_json` is in both `TABLE_COLUMNS.heroSection` and
+`JSON_COLUMNS`, so unknown keys inside it round-trip untouched. Confirmed against the local DB rather
+than assumed: row id=1 already stores 13 keys per page for 5 pages, including `overlay_color` and
+`content_alignment` — which are real columns too. `title_color` / `description_color` simply become
+keys 14 and 15. (Same trick as §55's gradient stops in `settings_json`.)
+
+| File | Change |
+|---|---|
+| `sections/preview-shared.ts` | `buildHero` returns `titleColor` / `descriptionColor` |
+| `sections/hero-section.tsx` | `style={{ color }}` replaces the `text-white` classes |
+| `_components/hero-section-content.tsx` | state + load + save + reset, new **Text Colors** card, and the form's own Live Preview mockup now honours them |
+| `hooks/useCompanyWebsiteBuilder.ts` | two fields on `CompanyHeroSection` |
+
+Details worth knowing:
+- **Default is `#FFFFFF` in both the builder and the form**, so every hero saved before the picker
+  existed renders exactly as it did. The description loses its old `/90` opacity — the picked colour
+  now renders literally, which is what makes a dark pick actually look dark.
+- The card sits inside the shared-controls wrapper, so it dims and locks in translation mode along
+  with the image and overlay — colour is not per-language.
+- Each picker has a **Reset** link back to white, shown only when it differs. `<input type="color">`
+  fires on any interaction (§107), so a one-way picker would strand a value the admin never chose.
+- Applied per page, so switching all six heroes to dark text means visiting all six. Deliberate —
+  the right colour depends on that page's image.
+- **Badge text/background still follow `theme.primaryButton` + white**, unchanged. Readable in the
+  reported screenshot; say the word if those need pickers too.
+
+Verified: local DB shape confirmed, `tsc --noEmit` exit 0, `next build` compiled. Not browser-tested.
+
+### 115. Contact form + CTA blocks — four mockup mismatches
+
+**Contact form: phone was beside email.** Email and Phone shared a
+`grid sm:grid-cols-2`; every other field is full width, so the pair read as a broken row rather than
+two fields. Phone is now its own full-width field directly after Email.
+
+**Contact Information card: dead block under the social icons.** §58 put the two cards in an
+`items-stretch` grid so they match height, and the form card is the taller of the two — the details
+pane ended well short of the bottom edge. The rows now take the slack (`flex-1` + `justify-center`)
+and the social icons stay pinned to the bottom, so the free space splits above and below the rows
+instead of dangling under everything. Needed a wrapper around the heading + accent rule first:
+they are two sibling elements, and any `justify-*` on the column would have pulled them apart.
+
+**"Bg color" ×2 — one root cause, five components.** The CTA cards wash themselves with
+`bg-primary/5`, `border-primary/20`, `ring-primary/20`. **`--primary` in this app is
+`222.2 47.4% 11.2%` — near-black slate**, so every one of those washes rendered grey instead of the
+site's pink. Nothing was theme-aware; the colour came from the *admin app's* token, not the site.
+
+Added `alpha()` / `haloStyle()` / `bannerStyle()` in `login-demo-section.tsx` and mixed the washes
+from `theme.primaryButton`. `alpha()` returns `transparent` (not a solid block) if the theme ever
+hands over a non-hex value.
+
+The user flagged the home banner and the features card; the identical defect was in three more
+variants of the same file, so all five are fixed — otherwise the grey banner survives on the other
+three pages:
+
+| Variant | Page | Component |
+|---|---|---|
+| variant_1 | home | `LoginDemoSection` ← flagged |
+| variant_2 | features | `FeaturesFirstHighlightSection` ← flagged |
+| variant_4 | how-it-works | `SignupDemoSection` |
+| variant_5 | contact | `ChatSignupDemoSection` |
+| variant_7 | template | `TemplateDemoSection` |
+
+`SignInDemoSection` (variant_6) is deliberately dark navy — left alone.
+
+**"... and Feature Plans" was a seventh chip.** Styled exactly like the six feature pills, so it read
+as another feature. It is a trailing aside in the reference — now plain muted text.
+
+**Pricing "Book a Demo" (§image 2).** Ambiguous annotation, so it was asked rather than guessed: the
+answer was button styling. It carried an inline `borderColor: primaryBtn`, making the secondary
+action compete with the primary. Now a neutral `border-slate-300` white button, and both buttons in
+that pair moved `rounded-xl` → `rounded-lg` to match the reference's radius.
+
+> Still pink-outlined, **not changed** (only the pricing one was flagged): the secondary buttons on
+> the home, how-it-works and contact CTA banners. Worth unifying if the neutral look is the intent.
+
+Verified: `tsc --noEmit` exit 0 · `next build` compiled. Not browser-tested.
+
+### 116. ⚠ THE ARCHITECTURE GAP — the public site was never a separate app
+
+Raised by the user, and correct. Confirmed in code before acting:
+
+1. **The public site was a set of routes inside the admin app.** `src/app/features`, `/pricing`,
+   `/contact`, `/gallery`, `/templates`, `/how-it-works` sit beside `/admin` in the same Next
+   project, and every one is `'use client'` — a crawler gets an empty shell.
+2. **Tenant identity was a header, not the host.** `optionalCompanyAuth` resolves
+   `x-company-id || ?company_id || user.company_id || 1`. Nothing could ever map `acme.com` to a
+   company, so §54–§115's design work was really styling *company 1's* site.
+3. **The schema was already built for this and unused.** `company_websites.slug` and
+   `.custom_domain` are written by the builder and read by **nothing**. The vendor builder in the
+   same backend already does `WHERE (slug = :slug OR custom_domain = :slug)`.
+
+The in-admin preview was a reasonable way to build the editor; it was never the shipping
+architecture, and that should have been flagged during the public-site design sessions.
+
+### 117. Backend: host-addressed public read model
+
+New, all under `/api/v1/public` (no auth — GETs there were already public):
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/site/resolve?host=` | Host → company. Answers `{found:false}`, not 404, so a caller can tell "no tenant" from "API down" |
+| GET | `/site/bundle?host=&lang=` | **The entire site in one response** |
+
+- `src/services/companyPublicSite.service.js` — `parseHost` splits subdomain-vs-custom-domain
+  against `PUBLIC_SITE_ROOT_DOMAINS` (comma-separated, env). Strips port, case and `www.`.
+- `src/controllers/companyPublicSite.controller.js` — reads `x-forwarded-host` first (behind
+  Vercel/Render `host` is internal); `?host=` is the local-dev escape hatch.
+
+**One payload is not a nicety.** The admin preview fires ~22 client requests per page. Server-side
+that is 22 sequential round trips at ~374ms against Aiven (§103). The bundle issues everything in
+parallel: **35 sections in 90ms locally.**
+
+> **Two traps hit while writing it, both silent:**
+> 1. `getList`/`getSingleton` always scope by `company_id AND website_id`. **`features`,
+>    `pricing_plans`, `pricing_matrix_features` and `pricing_settings` have no `website_id`
+>    column** — the query throws and the section returns empty. It looked exactly like "the admin
+>    hasn't added any" until the row counts were read back (6 / 3 / 7 rows really existed). They
+>    use raw SQL now, and every section's failure is logged instead of swallowed.
+> 2. Hero has **no `page_slug` column** — one row holds every page inside `design_json`. The merge
+>    is done server-side (`buildHeroByPage`) precisely because dropping the row id there is the
+>    §33.2/§46 bug, and the id is what addresses the section's translations.
+
+### 118. New app: `D:\Jamal\Event_Management_Public_Site`
+
+Next 15 / React 19 / Tailwind 3 — same stack as the admin app so the section components port
+unchanged. Port 3010. **Named deliberately unlike the three existing `*Website_Builder*` folders,
+which are all builder ADMIN apps.**
+
+| Piece | Notes |
+|---|---|
+| `src/lib/site.ts` | `currentHost()` from `x-forwarded-host`/`host`; `loadSite()` fetches the bundle with ISR (`revalidate`, tagged `site:<host>` for future per-tenant invalidation) |
+| `src/app/_render.tsx` | One fetch-resolve-render used by every route. 404s on unknown host **and on `status !== 'published'`** — never falls through to another company's content |
+| `src/app/layout.tsx` | Per-tenant `generateMetadata` from that tenant's SEO row: title template, OG, Twitter, robots, favicon |
+| `src/app/robots.ts` / `sitemap.ts` | Per-tenant. Unpublished/unknown hosts are `Disallow: /` — otherwise a half-built site is indexed the moment DNS resolves |
+| Routes | `/`, `/features`, `/templates`, `/pricing`, `/how-it-works`, `/contact`, `/gallery`, `/[slug]` for builder pages |
+
+**Three components fetched their own data** and had to be converted to props, or they would have
+rendered client-side and defeated the point: `PageHeroSection`, `HighlightsSection`,
+`PlanFeaturesComparisonSection`.
+
+**The language provider was rewritten.** It used React Query; here languages and the translation
+overlay arrive from the server bundle, and switching language is a *navigation* (`?lang=ta`) so the
+server re-renders with the other overlay. Tamil has to be in the HTML, not applied after hydration.
+
+### 119. Verified end-to-end (real servers, real DB)
+
+```
+resolve  eventify-co.eventinvit.test        -> company 1, published
+bundle   35 sections, 90ms
+GET /            200  <title> "Eventify Co. | Premier Event Management in Mumbai"  (tenant SEO row)
+                      <h1> "Creating Unforgettable Moments"        server-rendered
+GET /?lang=ta    200  2,049 Tamil strings IN THE HTML
+GET /pricing     200  <h1> "Flexible Pricing Tiers For Every Event"
+GET /contact     200  <h1> "Let Us Help You Bring Your Event To Life"
+GET /  (Host: not-a-tenant.example.com)     404
+robots.txt  tenant -> Allow + sitemap | unknown host -> Disallow: /
+```
+
+`tsc --noEmit` exit 0 · `next build` compiled (12 routes, all dynamic).
+
+> `/features` shows the home hero because **no features hero has ever been saved** — `design_json`
+> holds home/contact/pricing/template/how-it-works only. `heroFor()` falls back to the base row so
+> an unsaved page shows the company's own copy rather than the library's sample text.
+
+### 120. Assigning a domain
+
+- **Subdomain:** `company_websites.slug` → `acme.<root>`. One wildcard `*.<root>` on the Vercel
+  project + one wildcard DNS record. Zero per-company setup. Set `PUBLIC_SITE_ROOT_DOMAINS` on the
+  **backend**.
+- **Custom domain:** `company_websites.custom_domain` → customer points a CNAME at
+  `cname.vercel-dns.com`; add the domain to the project (the Vercel Domains API can do this from
+  the admin UI). Vercel issues the cert.
+- Both columns already exist and are already written by the builder — only the *reading* was
+  missing, and that is now the resolve endpoint.
+
+### 121. Open — before this replaces the admin routes
+
+1. **Login & Demo variant lives in the ADMIN's `localStorage`** (§44), so the public app cannot know
+   which variant an admin picked — it falls back to the per-page default map. **Needs a DB column**;
+   this is a genuine parity blocker.
+2. Contact form, newsletter and login/register **POST** endpoints are not wired in the new app
+   (the bundle is read-only). The builder's contact form currently fakes its submit with a
+   `setTimeout` anyway.
+3. Admin frontend still serves its own copies of these public routes. Leave them until the new app
+   is live, then delete — otherwise the same site exists at two URLs, which Google penalises.
+4. No revalidation hook yet: a builder save is visible after `PUBLIC_SITE_REVALIDATE` (60s).
+   The fetches are tagged `site:<host>`, so a webhook → `revalidateTag` is the next step.
+5. `next/image` is not used anywhere — all `<img>`. Fine for launch, a real Lighthouse cost later.
