@@ -2030,6 +2030,56 @@ robots.txt  tenant -> Allow + sitemap | unknown host -> Disallow: /
 - Both columns already exist and are already written by the builder — only the *reading* was
   missing, and that is now the resolve endpoint.
 
+### 121b. LIVE — 2026-08-13
+
+`https://event-managment-public-website.vercel.app` · backend `f32c437` on Render.
+
+Three things had to line up, and the failure mode of each was the *same page* ("Site not found"),
+which is why it took a few passes to separate them:
+
+1. **Backend not deployed.** `Cannot GET /api/v1/public/site/resolve` — Express's own 404. The app
+   fetched it, got HTML, `loadSite()` returned null, `notFound()`. Deployed as `f32c437`.
+2. **`custom_domain` was null.** Production's website row is **`id=5`, slug `company-1`** (local is
+   `id=1`, `eventify-co` — they were never the same). Set via
+   `scratch/set_site_domain.js` against `.env.production`, dry run first.
+3. **`NEXT_PUBLIC_API_URL` missing from the Vercel build.** Inlined at build time, so the deployed
+   bundle was calling `localhost:5000`. Fixed by setting it and redeploying.
+
+> **Diagnostic worth reusing:** `robots.txt` distinguishes these instantly. It returns
+> `Disallow: /` only on the `!bundle` branch, so `200 + Disallow` = the app is healthy and the data
+> fetch failed, while `DEPLOYMENT_NOT_FOUND` = no deployment at all. A 404 on `/` alone cannot tell
+> those apart.
+>
+> **A self-inflicted one:** the two candidate hosts were curled in a loop that reused one output
+> file, so only the last body survived and both were reported as `DEPLOYMENT_NOT_FOUND`. The real
+> host had been serving our own 404 the whole time. Write to distinct files when probing candidates.
+
+Verified live:
+
+```
+/               200  "Make Every Moment Memorable with Event Invite"
+/features       200  "Everything You Need to Create Unforgettable Events"
+/pricing        200  "Choose the Perfect Plan for Your Needs"
+/templates      200  "Stunning Templates for Every Celebration"
+/how-it-works   200  "Create, Share and Manage your Event in Minutes"
+/contact        200  "Let's Create Something Amazing Together"
+/?lang=ta       200  2,219 Tamil strings IN THE HTML
+title/og        "Event Invites"        (tenant's own SEO row)
+robots.txt      Allow: / + sitemap     (was Disallow while unresolved)
+sitemap.xml     7 URLs
+```
+
+Every page has its **own** hero copy, so per-page `design_json` resolution works against production
+data, not just the local fixture.
+
+> **Production content gaps** (from the live bundle): `pages`, `social_links`, `sliders`,
+> `gallery_items`, `clients`, `sponsors` are all **0**. Populated: basic_information, footer,
+> theme_settings, menu_items (6), testimonials (7), features (12), pricing_plans (7), templates (11).
+> Those sections render empty — data, not a bug (§59).
+>
+> **Hindi is active on production** and was only 4% translated at §111.1. A visitor switching to
+> Hindi now sees mostly English on a live site.
+
 ### 121. Open — before this replaces the admin routes
 
 1. **Login & Demo variant lives in the ADMIN's `localStorage`** (§44), so the public app cannot know
