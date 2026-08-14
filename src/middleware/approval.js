@@ -21,6 +21,12 @@ function getServiceMap() {
       faqs: require('../services/faq.service'),
       faq_categories: require('../services/faqCategory.service'),
       vendors: require('../services/vendor.service'),
+
+      // Menu Management
+      event_categories: require('../services/eventCategory.service'),
+      event_types: require('../services/eventType.service'),
+      religions: require('../services/religion.service'),
+      event_menus: require('../services/eventMenu.service'),
     };
   }
   return _serviceMap;

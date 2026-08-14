@@ -2826,3 +2826,164 @@ ON DUPLICATE KEY UPDATE `default_value` = VALUES(`default_value`), `group` = VAL
 INSERT IGNORE INTO `translations` (`translation_key_id`, `language_id`, `company_id`, `value`, `status`, `is_active`)
 SELECT tk.id, 1, 1, tk.default_value, 'reviewed', 1 FROM `translation_keys` tk
 WHERE tk.`key` IN ('settings.color_palettes', 'settings.color_palettes_desc', 'nav.color_palettes');
+
+
+-- =============================================================================
+-- MENU MANAGEMENT â€” event menu catalogue + its three taxonomies
+-- Mirrored by scratch/setup_menu_management.js, which is what runs against an
+-- already-deployed database. Keep the two in step.
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS `event_categories` (
+  `id`          INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `name`        VARCHAR(100) NOT NULL,
+  `description` TEXT         NULL,
+  `icon`        VARCHAR(100) NULL DEFAULT '',
+  `color`       VARCHAR(20)  NULL DEFAULT NULL,
+  `sort_order`  INT          NOT NULL DEFAULT 0,
+  `is_active`   TINYINT      NOT NULL DEFAULT 1 COMMENT '0=inactive, 1=active, 2=pending approval',
+  `company_id`  INT UNSIGNED NULL DEFAULT NULL,
+  `created_by`  INT UNSIGNED NULL DEFAULT NULL,
+  `updated_by`  INT UNSIGNED NULL DEFAULT NULL,
+  `created_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at`  DATETIME     NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_event_categories_listing` (`company_id`, `deleted_at`, `is_active`, `sort_order`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `event_types` (
+  `id`                INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `event_category_id` INT UNSIGNED NOT NULL,
+  `name`              VARCHAR(100) NOT NULL,
+  `description`       TEXT         NULL,
+  `icon`              VARCHAR(100) NULL DEFAULT '',
+  `color`             VARCHAR(20)  NULL DEFAULT NULL,
+  `sort_order`        INT          NOT NULL DEFAULT 0,
+  `is_active`         TINYINT      NOT NULL DEFAULT 1 COMMENT '0=inactive, 1=active, 2=pending approval',
+  `company_id`        INT UNSIGNED NULL DEFAULT NULL,
+  `created_by`        INT UNSIGNED NULL DEFAULT NULL,
+  `updated_by`        INT UNSIGNED NULL DEFAULT NULL,
+  `created_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at`        DATETIME     NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_event_types_listing` (`company_id`, `deleted_at`, `is_active`, `sort_order`),
+  KEY `idx_event_types_category` (`company_id`, `event_category_id`, `deleted_at`),
+  CONSTRAINT `fk_event_types_category` FOREIGN KEY (`event_category_id`)
+    REFERENCES `event_categories` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `religions` (
+  `id`          INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `name`        VARCHAR(100) NOT NULL,
+  `description` TEXT         NULL,
+  `icon`        VARCHAR(100) NULL DEFAULT '',
+  `color`       VARCHAR(20)  NULL DEFAULT NULL,
+  `sort_order`  INT          NOT NULL DEFAULT 0,
+  `is_active`   TINYINT      NOT NULL DEFAULT 1 COMMENT '0=inactive, 1=active, 2=pending approval',
+  `company_id`  INT UNSIGNED NULL DEFAULT NULL,
+  `created_by`  INT UNSIGNED NULL DEFAULT NULL,
+  `updated_by`  INT UNSIGNED NULL DEFAULT NULL,
+  `created_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at`  DATETIME     NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_religions_listing` (`company_id`, `deleted_at`, `is_active`, `sort_order`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Platform targeting is two indexed booleans, not SET('website','mobile'):
+-- FIND_IN_SET() cannot use an index and the list screen filters on menu type.
+-- The API still speaks menu_type: ['website','mobile'] â€” eventMenu.service.js
+-- maps between the two representations.
+CREATE TABLE IF NOT EXISTS `event_menus` (
+  `id`                INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `name`              VARCHAR(150) NOT NULL,
+  `slug`              VARCHAR(180) NOT NULL,
+  `event_category_id` INT UNSIGNED NULL DEFAULT NULL,
+  `event_type_id`     INT UNSIGNED NULL DEFAULT NULL,
+  `religion_id`       INT UNSIGNED NULL DEFAULT NULL,
+  `is_website`        TINYINT      NOT NULL DEFAULT 1 COMMENT 'menu type: website',
+  `is_mobile`         TINYINT      NOT NULL DEFAULT 1 COMMENT 'menu type: mobile app',
+  `display_website`   TINYINT      NOT NULL DEFAULT 1 COMMENT 'show/hide on website',
+  `display_mobile`    TINYINT      NOT NULL DEFAULT 1 COMMENT 'show/hide on mobile app',
+  `active_website`    TINYINT      NOT NULL DEFAULT 1 COMMENT 'active/inactive on website',
+  `active_mobile`     TINYINT      NOT NULL DEFAULT 1 COMMENT 'active/inactive on mobile app',
+  `icon`              VARCHAR(100) NULL DEFAULT '',
+  `color`             VARCHAR(20)  NULL DEFAULT NULL,
+  `sort_order`        INT          NOT NULL DEFAULT 0,
+  `is_active`         TINYINT      NOT NULL DEFAULT 1 COMMENT '0=inactive, 1=active, 2=pending approval',
+  `company_id`        INT UNSIGNED NULL DEFAULT NULL,
+  `created_by`        INT UNSIGNED NULL DEFAULT NULL,
+  `updated_by`        INT UNSIGNED NULL DEFAULT NULL,
+  `created_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at`        DATETIME     NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_event_menus_listing`  (`company_id`, `deleted_at`, `sort_order`),
+  KEY `idx_event_menus_category` (`company_id`, `event_category_id`, `deleted_at`),
+  KEY `idx_event_menus_type`     (`company_id`, `event_type_id`, `deleted_at`),
+  KEY `idx_event_menus_religion` (`company_id`, `religion_id`, `deleted_at`),
+  KEY `idx_event_menus_platform` (`company_id`, `is_website`, `is_mobile`, `deleted_at`),
+  -- Non-UNIQUE on purpose: rows are soft-deleted, and UNIQUE would let a
+  -- deleted row hold its slug hostage forever.
+  KEY `idx_event_menus_slug`     (`company_id`, `slug`),
+  CONSTRAINT `fk_event_menus_category` FOREIGN KEY (`event_category_id`)
+    REFERENCES `event_categories` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_event_menus_type` FOREIGN KEY (`event_type_id`)
+    REFERENCES `event_types` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_event_menus_religion` FOREIGN KEY (`religion_id`)
+    REFERENCES `religions` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO `modules` (`name`, `slug`, `description`, `company_id`, `is_active`) VALUES
+('Event Categories', 'event_categories', 'Manage event categories', 1, 1),
+('Event Types',      'event_types',      'Manage event types',      1, 1),
+('Religions',        'religions',        'Manage religions',        1, 1),
+('Event Menus',      'event_menus',      'Manage event menus',      1, 1);
+
+INSERT IGNORE INTO `permissions` (`name`, `slug`, `module`, `company_id`, `description`, `is_active`) VALUES
+('View Event Categories',   'event_categories.view',   'event_categories', 1, 'View event categories list',     1),
+('Create Event Categories', 'event_categories.create', 'event_categories', 1, 'Create new event categories',    1),
+('Edit Event Categories',   'event_categories.edit',   'event_categories', 1, 'Edit existing event categories', 1),
+('Delete Event Categories', 'event_categories.delete', 'event_categories', 1, 'Delete event categories',        1),
+('View Event Types',        'event_types.view',        'event_types',      1, 'View event types list',          1),
+('Create Event Types',      'event_types.create',      'event_types',      1, 'Create new event types',         1),
+('Edit Event Types',        'event_types.edit',        'event_types',      1, 'Edit existing event types',      1),
+('Delete Event Types',      'event_types.delete',      'event_types',      1, 'Delete event types',             1),
+('View Religions',          'religions.view',          'religions',        1, 'View religions list',            1),
+('Create Religions',        'religions.create',        'religions',        1, 'Create new religions',           1),
+('Edit Religions',          'religions.edit',          'religions',        1, 'Edit existing religions',        1),
+('Delete Religions',        'religions.delete',        'religions',        1, 'Delete religions',               1),
+('View Event Menus',        'event_menus.view',        'event_menus',      1, 'View event menus list',          1),
+('Create Event Menus',      'event_menus.create',      'event_menus',      1, 'Create new event menus',         1),
+('Edit Event Menus',        'event_menus.edit',        'event_menus',      1, 'Edit existing event menus',      1),
+('Delete Event Menus',      'event_menus.delete',      'event_menus',      1, 'Delete event menus',             1);
+
+UPDATE `permissions` p
+JOIN `modules` m ON m.`slug` = p.`module` AND m.`company_id` = p.`company_id`
+SET p.`module_id` = m.`id`
+WHERE p.`module` IN ('event_categories', 'event_types', 'religions', 'event_menus');
+
+-- SuperAdmin (role 2): everything, no approval
+INSERT IGNORE INTO `role_permissions` (`role_id`, `permission_id`, `company_id`, `requires_approval`)
+SELECT 2, p.id, 1, 0 FROM `permissions` p
+WHERE p.`module` IN ('event_categories', 'event_types', 'religions', 'event_menus');
+
+-- Admin (role 3): view freely, writes require approval â€” same policy as `menus`
+INSERT IGNORE INTO `role_permissions` (`role_id`, `permission_id`, `company_id`, `requires_approval`)
+SELECT 3, p.id, 1, CASE WHEN p.`slug` LIKE '%.view' THEN 0 ELSE 1 END
+FROM `permissions` p
+WHERE p.`module` IN ('event_categories', 'event_types', 'religions', 'event_menus');
+
+INSERT INTO `translation_keys` (`key`, `default_value`, `group`, `company_id`) VALUES
+('nav.menu_management',  'Menu Management', 'nav', 1),
+('nav.event_categories', 'Event Category',  'nav', 1),
+('nav.event_types',      'Event Type',      'nav', 1),
+('nav.religions',        'Religion',        'nav', 1),
+('nav.event_menus',      'Menu List',       'nav', 1)
+ON DUPLICATE KEY UPDATE `default_value` = VALUES(`default_value`), `group` = VALUES(`group`);
+
+INSERT IGNORE INTO `translations` (`translation_key_id`, `language_id`, `company_id`, `value`, `status`, `is_active`)
+SELECT tk.id, 1, 1, tk.default_value, 'reviewed', 1 FROM `translation_keys` tk
+WHERE tk.`key` IN ('nav.menu_management', 'nav.event_categories', 'nav.event_types', 'nav.religions', 'nav.event_menus');

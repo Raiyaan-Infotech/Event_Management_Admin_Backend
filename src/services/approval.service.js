@@ -27,6 +27,12 @@ function getServiceMap() {
 
       menus: require('./menu.service'),
       subscriptions: require('./subscription.service'),
+
+      // Menu Management
+      event_categories: require('./eventCategory.service'),
+      event_types: require('./eventType.service'),
+      religions: require('./religion.service'),
+      event_menus: require('./eventMenu.service'),
     };
   }
   return _serviceMap;

@@ -79,6 +79,12 @@ db.VendorSubscriber = require('./VendorSubscriber')(sequelize, Sequelize);
 db.Menu = require('./Menu')(sequelize, Sequelize);
 db.Subscription = require('./Subscription')(sequelize, Sequelize);
 
+// Menu Management — event menu catalogue and its taxonomies
+db.EventCategory = require('./EventCategory')(sequelize, Sequelize);
+db.EventType = require('./EventType')(sequelize, Sequelize);
+db.Religion = require('./Religion')(sequelize, Sequelize);
+db.EventMenu = require('./EventMenu')(sequelize, Sequelize);
+
 // Translations
 db.Language = require('./Language')(sequelize, Sequelize);
 db.TranslationKey = require('./TranslationKey')(sequelize, Sequelize);
@@ -262,5 +268,13 @@ db.ChatReadState.belongsTo(db.ChatConversation, { foreignKey: 'conversation_id',
 // Vendor → ColorPalette (vendor's selected palette)
 
 // Vendor Theme Colors — per (vendor, theme) override
+
+// Menu Management
+db.EventCategory.hasMany(db.EventType, { foreignKey: 'event_category_id', as: 'eventTypes' });
+db.EventType.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'category' });
+
+db.EventMenu.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'category' });
+db.EventMenu.belongsTo(db.EventType, { foreignKey: 'event_type_id', as: 'eventType' });
+db.EventMenu.belongsTo(db.Religion, { foreignKey: 'religion_id', as: 'religion' });
 
 module.exports = db;

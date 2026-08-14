@@ -2093,3 +2093,243 @@ data, not just the local fixture.
 4. No revalidation hook yet: a builder save is visible after `PUBLIC_SITE_REVALIDATE` (60s).
    The fetches are tagged `site:<host>`, so a webhook → `revalidateTag` is the next step.
 5. `next/image` is not used anywhere — all `<img>`. Fine for launch, a real Lighthouse cost later.
+
+---
+
+## Session 12 â€” Menu Management module (Event Category / Event Type / Religion / Menu)
+
+> **Date:** 2026-08-14 | **Backend:** `D:\Jamal\Event_Management_Admin_Backend` | **Frontend:** `D:\Jamal\Event_Management_Admin_Frontend`
+> **Status:** Backend COMPLETE and API-tested. Frontend built and typechecks. **Browser testing NOT completed** â€” see Â§127.
+> **Nothing committed. Production DB NOT migrated yet.**
+
+### 122. What was asked, and the four decisions taken first
+
+A new **Menu Management** module with 4 CRUD children: Event Category, Event Type, Religion, and
+Menu (list screen + add/edit form). Design reused from the Website Builder's **Template Categories**
+page; field set taken from the supplied mockups.
+
+Four things materially changed the build, so they were asked before any code was written:
+
+| Decision | Chosen |
+|---|---|
+| Extend the existing `menus` module, or build new? | **New `event_menus` module** |
+| Layout for the 3 taxonomy pages | **3 separate pages**, Template Categories layout (form card on top, table below) |
+| RBAC | **New per-module permission slugs** |
+| Deploy scope | **Migrate live DB, but do NOT push code** |
+
+> **There is already a `menus` module** (`Menu.js`, `menu.service.js`, `menu.routes.js`,
+> `menus.view/create/edit/delete`, sidebar entry at `/admin/menus`). It is the admin panel's own
+> menu-item registry and is **untouched**. The new module is `event_menus` â€” the event menu
+> catalogue. Do not confuse the two; both now appear in the sidebar.
+
+---
+
+### 123. Schema â€” 4 new tables
+
+`event_categories`, `event_types`, `religions`, `event_menus`. All follow the house pattern:
+`company_id` scoping, `created_by`/`updated_by`, paranoid soft delete, `is_active` TINYINT where
+`2` means "pending approval".
+
+**Two schema choices worth knowing:**
+
+1. **Menu type is two indexed booleans (`is_website`, `is_mobile`), not `SET('website','mobile')`.**
+   The mockup's list screen filters on menu type, and `FIND_IN_SET()` cannot use an index. The API
+   still speaks `menu_type: ['website','mobile']` â€” the mockup's own vocabulary â€” and
+   `eventMenu.service.js` maps between the two representations in one place
+   (`applyMenuType` / `withMenuType`).
+
+2. **`idx_event_menus_slug` is deliberately NOT UNIQUE.** Rows are soft-deleted, so a UNIQUE index
+   would let a deleted row hold its slug hostage forever. Uniqueness is enforced in the service
+   against live rows only, appending `-2`, `-3`â€¦ rather than failing the save.
+
+Status columns are split per platform exactly as the mockup draws them â€”
+`display_website` / `display_mobile` / `active_website` / `active_mobile` â€” with `is_active` kept as
+the overall row status behind the list's Status badge.
+
+**Indexes** (all created; `EXPLAIN` on the default list query reports `type=ref`,
+`key=idx_event_menus_listing`, no filesort):
+
+| Table | Index |
+|---|---|
+| all four | `(company_id, deleted_at, is_active, sort_order)` â€” scope + soft-delete + sort in one |
+| `event_types` | `(company_id, event_category_id, deleted_at)` â€” the Menu form re-reads types on every category change |
+| `event_menus` | `(company_id, deleted_at, sort_order)` plus one each for category / type / religion / platform / slug |
+
+> `deleted_at` sits second because Sequelize's paranoid mode appends `deleted_at IS NULL` to every
+> read, and `IS NULL` is an equality-style predicate MySQL can use an index for.
+
+FKs: `event_types.event_category_id â†’ event_categories` **CASCADE**; the three on `event_menus`
+**SET NULL**, so deleting a taxonomy blanks the column instead of orphaning or blocking the menu.
+
+**Migration:** the schema lives in `initial_setup.sql` only. It was applied to **local and
+production** by a one-off idempotent script that has since been **deleted on request** — there
+is no standalone migration file left to re-run.
+
+---
+
+### 124. Backend files
+
+| File | Purpose |
+|---|---|
+| `models/EventCategory.js`, `EventType.js`, `Religion.js`, `EventMenu.js` | Sequelize models |
+| `services/eventCategory.service.js`, `eventType.service.js`, `religion.service.js`, `eventMenu.service.js` | One standalone service per module, each delegating to `base.service.js` |
+| `controllers/eventCategory.controller.js`, `eventType.controller.js`, `religion.controller.js`, `eventMenu.controller.js` | One standalone controller per module |
+| `routes/eventCategory.routes.js`, `eventType.routes.js`, `religion.routes.js`, `eventMenu.routes.js` | Mounted at `/api/v1/event-categories`, `/event-types`, `/religions`, `/event-menus` |
+
+**All four follow the house pattern** — one explicit service + controller per module,
+delegating to `base.service.js`, exporting `getAll/getById/create/update/updateStatus/deleteById`
+plus a `remove` alias for `approval.service.js`. Modelled on `menu.service.js` /
+`menu.controller.js`, the closest sibling (same Events area, same `companyId` scoping,
+same `updateStatus`).
+
+> **A first pass used a shared factory** (`createTaxonomyService` / `createTaxonomyController`)
+> to avoid repeating the three near-identical taxonomies. **Rejected and rewritten** — it read
+> nothing like the other 30-odd modules. Consistency with the codebase beat DRY here. The two
+> factory files were deleted; there is some duplication between the three taxonomy services now,
+> and that is intentional.
+
+`base.service.js` defaults its sort to `created_at`, which would miss `idx_*_listing`. Each
+service therefore opens `getAll` with `{ sort_by: 'sort_order', sort_order: 'ASC', ...query }`
+so `sort_order` is the default but an explicit `sort_by` still wins, and passes the module's
+extra filters through `options.where`.
+
+All four services are registered in **both** approval service maps
+(`services/approval.service.js` and `middleware/approval.js`) â€” miss either and an approved request
+throws `No service found for module`.
+
+#### Routes
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/event-menus` | `?search= &event_category_id= &event_type_id= &religion_id= &menu_type=website\|mobile &is_active= &page= &limit=` |
+| PATCH | `/event-menus/:id/toggle/:field` | One column per request, for the list's four switches |
+| PATCH | `/event-menus/reorder` | One transaction â€” a half-applied reorder leaves two rows on the same position |
+| POST | `/event-menus/:id/duplicate` | Action-menu "Duplicate"; appends `(Copy)` and a fresh slug |
+| GET | `/event-types?event_category_id=` | Cascading dropdown source |
+
+Writes go through `checkApprovalRequired`; status/toggle/reorder bypass it (reversible one-column
+writes â€” same precedent the `menus` module sets).
+
+**Guards in the service, not the controller:**
+- `:field` on the toggle route is checked against a whitelist, so it cannot write an arbitrary column.
+- A menu's event type must belong to its event category, or the list would show a row whose Event
+  Type contradicts its Event Category.
+- At least one menu type must be selected â€” but only validated when the request actually touches
+  menu type, so a PATCH flipping one switch is not rejected for not resending it.
+- Every service has a `WRITABLE` whitelist; a stray body key cannot write `company_id` or `id`.
+
+---
+
+### 125. Frontend files
+
+| File | Purpose |
+|---|---|
+| `hooks/use-menu-management.ts` | All four resources. `createTaxonomyHooks` factory + a dedicated Event Menu set |
+| `app/admin/menu-management/_components/taxonomy-manager.tsx` | **The shared screen** all three taxonomy pages render |
+| `app/admin/menu-management/_components/icon-color-fields.tsx` | `IconField` / `ColorField`, wrapping the shared picker |
+| `app/admin/menu-management/_components/menu-view-dialog.tsx` | List action-menu "View" |
+| `app/admin/menu-management/_components/menu-reorder-dialog.tsx` | List action-menu "Change Order" |
+| `app/admin/menu-management/event-categories/page.tsx` | ~55 lines â€” just wiring |
+| `app/admin/menu-management/event-types/page.tsx` | Adds the `categorySelect` prop |
+| `app/admin/menu-management/religions/page.tsx` | ~55 lines |
+| `app/admin/menu-management/menus/page.tsx` | Menu List â€” filter bar, two-row table header, action dropdown |
+| `app/admin/menu-management/menus/create/page.tsx` + `_components/menu-form-content.tsx` | Add/Edit form (`?id=` = edit) |
+| `components/common/dynamic-icon.tsx` | **Extracted, not duplicated** â€” see below |
+
+#### `DynamicIcon` was lifted out of the menus page, not re-written
+
+First attempt wrote a fresh copy under `menu-management/_components/`. Correctly rejected: the icon
+components already exist. `IconPickerDialog` was already shared at
+`components/common/icon-picker-dialog.tsx`, but its renderer counterpart `DynamicIcon` was **private
+inside `app/admin/menus/_components/menus-content.tsx`**.
+
+It now lives at `components/common/dynamic-icon.tsx` and `menus-content.tsx` imports it â€” one
+implementation, two consumers. It has to resolve both shapes the picker emits: a bare PascalCase
+Lucide name (`ArrowRight`) and a full Iconify id (`mdi:star`).
+
+> **Rule for this module: check `components/common/` before writing any shared-looking component.**
+
+#### Notes on the pages
+
+- **Menu List** uses a hand-built `<Table>` rather than `CommonTable`, because the mockup's header is
+  two rows deep â€” Display Status and Active Status each span a Website + Mobile pair (`colSpan`/
+  `rowSpan`). `CommonTable` has no way to express that.
+- **A platform the menu does not target renders `â€”`, not a switch.** A "display on mobile" toggle on
+  a website-only menu controls nothing.
+- **Event Type cascades from Event Category** in the form *and* in the list filter, and selecting a
+  category clears the chosen type â€” keeping it would send a combination the backend rejects.
+- **Religion is optional** (`None`), matching the mockup's list, which shows `â€”` for Corporate and
+  Other events. It carries a `*` in the mockup's form; the list is the stronger signal.
+- **Create stays on the form** â€” `router.replace('?id=<newId>')`, same route, so the component never
+  unmounts (Â§109's failure mode). "Save & Add Another" keeps the taxonomy selections and bumps
+  `sort_order`, since consecutive menus almost always belong to the same event.
+- **Reset re-reads the saved record** via `refetch()` rather than reverting local state.
+- All state uses functional updaters (`setForm(prev => â€¦)`) â€” the icon picker resolves
+  asynchronously and a `{ ...form }` spread would write back a stale snapshot.
+- Validation uses the common `"Please fill all mandatory fields."` toast, never field-specific ones.
+- Description cells use `break-all line-clamp-2`, never `truncate` â€” the table is auto-layout.
+
+#### Sidebar
+
+New top-level **Menu Management** group (`app-sidebar.tsx`) with 4 children, each gated on its own
+`*.view` permission. `app-sidebar.tsx` calls `t(labelKey)` **with no fallback**, so a missing
+translation key renders the raw string `nav.menu_management`. The migration script therefore seeds
+5 `nav.*` keys into `translation_keys` + `translations` â€” this is required, not cosmetic.
+
+---
+
+### 126. Verified
+
+**Backend â€” `scratch/` smoke test, 43/43 passed, median 25ms, max 101ms:**
+
+```
+CRUD on all four resources Â· joined category/type/religion names in list responses
+menu_type array round-trips  ['website','mobile']
+slug collision               "Event Information" x2 -> event-information, event-information-2
+duplicate name               400
+missing name                 400
+no menu type selected        400
+type not in given category   400
+toggle/company_id            400   (whitelist holds)
+duplicate + reorder          201 / 200
+delete then GET              404
+EXPLAIN list query           type=ref  key=idx_event_menus_listing   (no filesort)
+```
+
+Local DB migrated, all indexes and FKs confirmed present via `SHOW INDEX`.
+Demo data seeded (`scratch/seed_menu_management_demo.js`, idempotent): 5 categories, 8 types,
+5 religions, 8 menus â€” the mockup's exact content.
+
+**Frontend:** `npx tsc --noEmit` exit 0.
+
+---
+
+### 127. âš  NOT verified â€” browser testing did not complete
+
+The user asked for local **and** live browser testing. Neither happened.
+
+A full Playwright script exists at
+`<scratchpad>/browser-test.js` â€” it logs in, drives all four pages, asserts ~50 checks (row counts,
+every mockup field label, the cascade, validation, toggle persistence, the View dialog, the icon
+picker, taxonomy create + edit, sidebar labels), screenshots each step, and fails on any console
+error or 4xx API response.
+
+**It crashed on the first navigation.** Both dev servers had exited by the time it ran â€” they were
+started as background tasks that completed, taking the servers with them. Backend `:5001` and
+frontend `:3001` both return `000`.
+
+To finish: start both servers so they stay up, then
+`node <scratchpad>/browser-test.js` (frontend defaults to `:3001` â€” port 3000 was already taken).
+
+> Chromium for Playwright is already downloaded, so the rerun is fast.
+
+**Also still open:**
+- ~~Production Aiven DB migration~~ — **DONE and independently verified.** 4 tables with all
+  indexes + FKs; 16 permissions with `module_id` backfilled; role 2 = 16 grants / 0 approvals,
+  role 3 = 16 grants / 12 approvals; 5 `nav.*` keys each with an English translation row;
+  `EXPLAIN` reports `type=ref key=idx_event_menus_listing`. Column counts match local exactly
+  (13 / 14 / 13 / 22). **Production tables are empty** — the demo seed
+  (`scratch/seed_menu_management_demo.js`) was run on local only.
+- Live browser testing cannot happen at all until the code is pushed â€” and **push was explicitly out
+  of scope this session**, so "live testing" is blocked by design, not by an oversight.
+- Nothing is committed in either repo.
