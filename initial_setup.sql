@@ -2875,7 +2875,9 @@ CREATE TABLE IF NOT EXISTS `event_types` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `religions` (
-  `id`          INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `id`                INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `event_category_id` INT UNSIGNED NOT NULL,
+  `event_type_id`     INT UNSIGNED NOT NULL,
   `name`        VARCHAR(100) NOT NULL,
   `description` TEXT         NULL,
   `icon`        VARCHAR(100) NULL DEFAULT '',
@@ -2889,7 +2891,13 @@ CREATE TABLE IF NOT EXISTS `religions` (
   `updated_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `deleted_at`  DATETIME     NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
-  KEY `idx_religions_listing` (`company_id`, `deleted_at`, `is_active`, `sort_order`)
+  KEY `idx_religions_listing` (`company_id`, `deleted_at`, `is_active`, `sort_order`),
+  -- The Menu form re-reads religions for the chosen category+type on every change.
+  KEY `idx_religions_scope` (`company_id`, `event_category_id`, `event_type_id`, `deleted_at`),
+  CONSTRAINT `fk_religions_category` FOREIGN KEY (`event_category_id`)
+    REFERENCES `event_categories` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_religions_type` FOREIGN KEY (`event_type_id`)
+    REFERENCES `event_types` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Platform targeting is two indexed booleans, not SET('website','mobile'):

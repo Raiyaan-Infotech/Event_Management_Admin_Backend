@@ -273,6 +273,10 @@ db.ChatReadState.belongsTo(db.ChatConversation, { foreignKey: 'conversation_id',
 db.EventCategory.hasMany(db.EventType, { foreignKey: 'event_category_id', as: 'eventTypes' });
 db.EventType.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'category' });
 
+db.Religion.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'category' });
+db.Religion.belongsTo(db.EventType, { foreignKey: 'event_type_id', as: 'eventType' });
+db.EventType.hasMany(db.Religion, { foreignKey: 'event_type_id', as: 'religions' });
+
 db.EventMenu.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'category' });
 db.EventMenu.belongsTo(db.EventType, { foreignKey: 'event_type_id', as: 'eventType' });
 db.EventMenu.belongsTo(db.Religion, { foreignKey: 'religion_id', as: 'religion' });

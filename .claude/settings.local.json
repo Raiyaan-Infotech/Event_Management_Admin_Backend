@@ -85,7 +85,28 @@
       "Bash(curl -s -m 3 http://localhost:5001/health)",
       "Bash(timeout 12 node src/server.js)",
       "Bash(echo \"exit=$?\")",
-      "Bash(timeout 15 node src/server.js)"
+      "Bash(timeout 15 node src/server.js)",
+      "Bash(curl -s -o /dev/null -m 90 -w \"%{http_code}\" http://localhost:3001/login)",
+      "Bash(echo 'login -> __CMDSUB_OUTPUT__')",
+      "Bash(tail -4 /tmp/fe3.log)",
+      "Bash(curl -s -m 5 http://localhost:5001/health)",
+      "Bash(curl -s -m 4 http://localhost:5001/health)",
+      "PowerShell($p = Get-CimInstance Win32_Process -Filter \"ProcessId = 18944\" -ErrorAction SilentlyContinue; if \\($p\\) { \"PID 18944 = $\\($p.Name\\) parent=$\\($p.ParentProcessId\\)\"; \"Cmd: $\\($p.CommandLine\\)\"; $par = Get-CimInstance Win32_Process -Filter \"ProcessId = $\\($p.ParentProcessId\\)\" -ErrorAction SilentlyContinue; if \\($par\\) { \"Parent: $\\($par.Name\\) -> $\\($par.CommandLine\\)\" } } else { \"gone\" })",
+      "PowerShell(taskkill /PID 23152 /T /F)",
+      "Bash(rm -f _select_check.tsx)",
+      "Bash(rm -f \"C:/Users/LKMEDI~1/AppData/Local/Temp/claude/d--Jamal-Event-Management-Admin-Backend/50465e31-e241-4739-b819-059ade899935/scratchpad/select-test.jsx\")",
+      "Bash(node -r dotenv/config -e ' *)",
+      "Bash(node -r dotenv/config scratch/_religion_scope_tmp.js dotenv_config_path=.env)",
+      "Bash(node -r dotenv/config scratch/_religion_scope_tmp.js dotenv_config_path=.env.production --apply)",
+      "Bash(node -r dotenv/config scratch/_religion_scope_tmp.js dotenv_config_path=.env.production)",
+      "Bash(INT UNSIGNED NOT NULL\" initial_setup.sql | head -5)",
+      "Bash(grep -n \"fk_religions_category\\\\|idx_religions_scope\\\\|event_category_id` INT UNSIGNED NOT NULL\" initial_setup.sql | head -5)",
+      "Bash(node -e \"require\\('./src/app'\\); console.log\\('OK: backend loads'\\)\")",
+      "Bash(curl -s -m 5 -o /dev/null -w \"backend=%{http_code}\\\\n\" http://localhost:5001/health)",
+      "Bash(node -r dotenv/config scratch/_backfill_menu_religion_tmp.js dotenv_config_path=.env --apply)",
+      "Bash(echo \"tsc exit=$?\")",
+      "Bash(node -r dotenv/config scratch/_verify_religion_scope_tmp.js dotenv_config_path=.env.production)",
+      "Bash(node -r dotenv/config scratch/_verify_religion_scope_tmp.js dotenv_config_path=.env)"
     ],
     "additionalDirectories": [
       "D:\\Jamal\\Event_Management_Admin_Frontend\\src\\app\\admin\\website-builder\\how-it-works",
@@ -104,7 +125,9 @@
       "D:\\Jamal\\Event_Management_Admin_Frontend\\src\\app\\admin\\menu-management\\religions",
       "D:\\Jamal\\Event_Management_Admin_Frontend\\src\\app\\admin\\menu-management\\event-types",
       "D:\\Jamal\\Event_Management_Admin_Frontend\\src\\app\\admin\\menu-management\\menus",
-      "D:\\Jamal\\Event_Management_Admin_Frontend\\src\\components\\admin"
+      "D:\\Jamal\\Event_Management_Admin_Frontend\\src\\components\\admin",
+      "D:\\Jamal\\Event_Management_Admin_Frontend",
+      "D:\\Jamal\\Event_Management_Admin_Frontend\\src\\app\\admin\\menu-management\\menus\\create\\_components"
     ]
   }
 }

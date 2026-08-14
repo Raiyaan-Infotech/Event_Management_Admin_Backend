@@ -7,6 +7,17 @@ module.exports = (sequelize) => {
             primaryKey: true,
             autoIncrement: true,
         },
+        // A religion is scoped under an event type, the same way an event type
+        // is scoped under a category. Both are stored so the Menu form can
+        // filter on either without a join.
+        event_category_id: {
+            type: DataTypes.INTEGER.UNSIGNED,
+            allowNull: false,
+        },
+        event_type_id: {
+            type: DataTypes.INTEGER.UNSIGNED,
+            allowNull: false,
+        },
         name: {
             type: DataTypes.STRING(100),
             allowNull: false,

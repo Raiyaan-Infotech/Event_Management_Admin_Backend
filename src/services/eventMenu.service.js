@@ -134,6 +134,34 @@ const assertTypeMatchesCategory = async (categoryId, typeId, companyId) => {
     }
 };
 
+/**
+ * Religions are scoped under (category, type) too, so the chosen religion has
+ * to sit under the menu's own scope — otherwise the Menu List would show a
+ * religion that its own cascade could never offer.
+ *
+ * The column stays nullable in the DB: existing menus predate this rule, and
+ * the mockup's list legitimately shows "—" for non-religious events. "Required"
+ * is enforced here on write, not by the schema, so it stays reversible.
+ */
+const assertReligionMatchesScope = async (categoryId, typeId, religionId, companyId) => {
+    if (!religionId) throw ApiError.badRequest('Religion is required.');
+
+    const religion = await Religion.findByPk(religionId, {
+        attributes: ['id', 'event_category_id', 'event_type_id', 'company_id'],
+    });
+    if (!religion) throw ApiError.badRequest('Selected religion does not exist.');
+
+    if (companyId !== undefined && companyId !== null && religion.company_id && religion.company_id !== companyId) {
+        throw ApiError.badRequest('Selected religion does not exist.');
+    }
+    if (categoryId && Number(religion.event_category_id) !== Number(categoryId)) {
+        throw ApiError.badRequest('The selected religion does not belong to the selected event category.');
+    }
+    if (typeId && Number(religion.event_type_id) !== Number(typeId)) {
+        throw ApiError.badRequest('The selected religion does not belong to the selected event type.');
+    }
+};
+
 const getAll = async (query = {}, companyId = undefined) => {
     // Default to sort_order so the list matches idx_event_menus_listing;
     // an explicit sort_by in the query still wins.
@@ -190,6 +218,12 @@ const create = async (data, userId = null, companyId = undefined) => {
     }
 
     await assertTypeMatchesCategory(payload.event_category_id, payload.event_type_id, companyId);
+    await assertReligionMatchesScope(
+        payload.event_category_id,
+        payload.event_type_id,
+        payload.religion_id,
+        companyId
+    );
 
     payload.slug = await buildUniqueSlug(payload.slug || payload.name, companyId);
 
@@ -221,11 +255,25 @@ const update = async (id, data, userId = null, companyId = undefined) => {
         }
     }
 
-    await assertTypeMatchesCategory(
-        payload.event_category_id ?? menu.event_category_id,
-        payload.event_type_id ?? menu.event_type_id,
-        companyId
-    );
+    const nextCategoryId = payload.event_category_id ?? menu.event_category_id;
+    const nextTypeId = payload.event_type_id ?? menu.event_type_id;
+    await assertTypeMatchesCategory(nextCategoryId, nextTypeId, companyId);
+
+    // Only revalidate the religion when the request touches the scope or the
+    // religion itself. A PATCH flipping one display toggle must not be rejected
+    // because a pre-existing menu has no religion yet.
+    const touchesScope = payload.event_category_id !== undefined
+        || payload.event_type_id !== undefined
+        || payload.religion_id !== undefined;
+
+    if (touchesScope) {
+        await assertReligionMatchesScope(
+            nextCategoryId,
+            nextTypeId,
+            payload.religion_id ?? menu.religion_id,
+            companyId
+        );
+    }
 
     // Regenerate only when the slug was explicitly sent, or the name changed and
     // no slug was supplied. Editing an unrelated field must not silently
