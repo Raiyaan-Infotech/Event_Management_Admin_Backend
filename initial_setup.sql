@@ -1737,7 +1737,7 @@ FROM `permissions` p WHERE p.`module` = 'menus';
 
 
 
-CREATE TABLE IF NOT EXISTS `subscriptions` (
+CREATE TABLE IF NOT EXISTS `plan_types` (
   `id`          INT            NOT NULL AUTO_INCREMENT,
   `name`        VARCHAR(200)   NOT NULL,
   `description` TEXT           DEFAULT NULL,
@@ -1758,32 +1758,32 @@ CREATE TABLE IF NOT EXISTS `subscriptions` (
   `updated_at`  DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `deleted_at`  DATETIME       DEFAULT NULL,
   PRIMARY KEY (`id`),
-  KEY `idx_subscriptions_company_id` (`company_id`)
+  KEY `idx_plan_types_company_id` (`company_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT IGNORE INTO `modules` (`name`, `slug`, `description`, `company_id`, `is_active`) VALUES
-('Subscriptions', 'subscriptions', 'Manage subscription plans', 1, 1);
+('Plan Types', 'plan_types', 'Manage plan types', 1, 1);
 
 INSERT IGNORE INTO `permissions` (`name`, `slug`, `module`, `company_id`, `description`, `is_active`) VALUES
-('View Subscriptions',   'subscriptions.view',   'subscriptions', 1, 'View subscription plans list', 1),
-('Create Subscriptions', 'subscriptions.create', 'subscriptions', 1, 'Create new subscription plans', 1),
-('Edit Subscriptions',   'subscriptions.edit',   'subscriptions', 1, 'Edit existing subscription plans', 1),
-('Delete Subscriptions', 'subscriptions.delete', 'subscriptions', 1, 'Delete subscription plans', 1);
+('View Plan Types',   'plan_types.view',   'plan_types', 1, 'View plan types list', 1),
+('Create Plan Types', 'plan_types.create', 'plan_types', 1, 'Create new plan types', 1),
+('Edit Plan Types',   'plan_types.edit',   'plan_types', 1, 'Edit existing plan types', 1),
+('Delete Plan Types', 'plan_types.delete', 'plan_types', 1, 'Delete plan types', 1);
 
 UPDATE `permissions` p
 JOIN `modules` m ON m.`slug` = p.`module`
 SET p.`module_id` = m.`id`
-WHERE p.`module` = 'subscriptions';
+WHERE p.`module` = 'plan_types';
 
--- SuperAdmin (role 2) gets all subscriptions permissions without approval
+-- SuperAdmin (role 2) gets all plan_types permissions without approval
 INSERT IGNORE INTO `role_permissions` (`role_id`, `permission_id`, `company_id`, `requires_approval`)
-SELECT 2, p.id, 1, 0 FROM `permissions` p WHERE p.`module` = 'subscriptions';
+SELECT 2, p.id, 1, 0 FROM `permissions` p WHERE p.`module` = 'plan_types';
 
 -- Admin (role 3) gets view freely; create/edit/delete require approval
 INSERT IGNORE INTO `role_permissions` (`role_id`, `permission_id`, `company_id`, `requires_approval`)
 SELECT 3, p.id, 1,
-  CASE WHEN p.`slug` IN ('subscriptions.create', 'subscriptions.edit', 'subscriptions.delete') THEN 1 ELSE 0 END
-FROM `permissions` p WHERE p.`module` = 'subscriptions';
+  CASE WHEN p.`slug` IN ('plan_types.create', 'plan_types.edit', 'plan_types.delete') THEN 1 ELSE 0 END
+FROM `permissions` p WHERE p.`module` = 'plan_types';
 
 INSERT INTO `translation_keys` (`key`, `default_value`, `group`, `company_id`) VALUES
 ('nav.subscriptions',                'Subscriptions',                                         'nav',           1),
@@ -2995,3 +2995,106 @@ ON DUPLICATE KEY UPDATE `default_value` = VALUES(`default_value`), `group` = VAL
 INSERT IGNORE INTO `translations` (`translation_key_id`, `language_id`, `company_id`, `value`, `status`, `is_active`)
 SELECT tk.id, 1, 1, tk.default_value, 'reviewed', 1 FROM `translation_keys` tk
 WHERE tk.`key` IN ('nav.menu_management', 'nav.event_categories', 'nav.event_types', 'nav.religions', 'nav.event_menus');
+
+
+-- =============================================================================
+-- SUBSCRIPTION PLANS â€” the 6-step plan wizard
+-- NOTE: the older `subscriptions` table was renamed to `plan_types` and now
+-- holds the Plan Type master data referenced by subscription_plans.plan_type_id.
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS `subscription_plans` (
+  `id`                INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `name`              VARCHAR(150) NOT NULL,
+  `plan_code`         VARCHAR(50)  NOT NULL COMMENT 'internal reference, no spaces',
+  -- Signed INT, not UNSIGNED: plan_types.id is a signed INT and an FK column
+  -- must match the referenced column's type AND signedness exactly.
+  `plan_type_id`      INT          NULL DEFAULT NULL,
+  `billing_cycle`     ENUM('monthly','quarterly','yearly','lifetime') NOT NULL DEFAULT 'monthly',
+  `short_description` VARCHAR(200) NULL,
+  -- NULL scope = "All Categories / All Types / All Religions" on the list screen
+  `for_website`       TINYINT      NOT NULL DEFAULT 1,
+  `for_mobile`        TINYINT      NOT NULL DEFAULT 1,
+  `event_category_id` INT UNSIGNED NULL DEFAULT NULL,
+  `event_type_id`     INT UNSIGNED NULL DEFAULT NULL,
+  `religion_id`       INT UNSIGNED NULL DEFAULT NULL,
+  `currency_code`     VARCHAR(10)  NOT NULL DEFAULT 'INR',
+  `price`             DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  `trial_days`        INT          NOT NULL DEFAULT 0 COMMENT '0 = no trial',
+  `is_visible`        TINYINT      NOT NULL DEFAULT 1,
+  `is_active`         TINYINT      NOT NULL DEFAULT 1 COMMENT '0=inactive, 1=active, 2=pending approval',
+  `sort_order`        INT          NOT NULL DEFAULT 0,
+  `company_id`        INT UNSIGNED NULL DEFAULT NULL,
+  `created_by`        INT UNSIGNED NULL DEFAULT NULL,
+  `updated_by`        INT UNSIGNED NULL DEFAULT NULL,
+  `created_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at`        DATETIME     NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_subscription_plans_listing` (`company_id`, `deleted_at`, `sort_order`),
+  -- Non-UNIQUE: rows are soft-deleted, so UNIQUE would let a deleted plan hold
+  -- its code hostage. Uniqueness is enforced in the service against live rows.
+  KEY `idx_subscription_plans_code`    (`company_id`, `plan_code`),
+  KEY `idx_subscription_plans_scope`   (`company_id`, `event_category_id`, `event_type_id`, `religion_id`),
+  KEY `idx_subscription_plans_cycle`   (`company_id`, `billing_cycle`, `is_active`),
+  CONSTRAINT `fk_sub_plans_plan_type` FOREIGN KEY (`plan_type_id`)
+    REFERENCES `plan_types` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_sub_plans_category` FOREIGN KEY (`event_category_id`)
+    REFERENCES `event_categories` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_sub_plans_type` FOREIGN KEY (`event_type_id`)
+    REFERENCES `event_types` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_sub_plans_religion` FOREIGN KEY (`religion_id`)
+    REFERENCES `religions` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Wizard step 2 picks each menu per platform and step 4 hangs per-menu limits
+-- off it, so this cannot be a flat menu_ids JSON on the plan.
+CREATE TABLE IF NOT EXISTS `subscription_plan_menus` (
+  `id`          INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `plan_id`     INT UNSIGNED NOT NULL,
+  `menu_id`     INT UNSIGNED NOT NULL,
+  `for_website` TINYINT      NOT NULL DEFAULT 0,
+  `for_mobile`  TINYINT      NOT NULL DEFAULT 0,
+  `limits_json` JSON         NULL COMMENT 'keyed by LIMIT_CATALOG in subscriptionPlan.service.js',
+  `sort_order`  INT          NOT NULL DEFAULT 0,
+  `created_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_plan_menu` (`plan_id`, `menu_id`),
+  KEY `idx_plan_menus_menu` (`menu_id`),
+  CONSTRAINT `fk_plan_menus_plan` FOREIGN KEY (`plan_id`)
+    REFERENCES `subscription_plans` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_plan_menus_menu` FOREIGN KEY (`menu_id`)
+    REFERENCES `event_menus` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO `modules` (`name`, `slug`, `description`, `company_id`, `is_active`) VALUES
+('Subscription Plans', 'subscription_plans', 'Manage subscription plans', 1, 1);
+
+INSERT IGNORE INTO `permissions` (`name`, `slug`, `module`, `company_id`, `description`, `is_active`) VALUES
+('View Subscription Plans',   'subscription_plans.view',   'subscription_plans', 1, 'View subscription plans list',     1),
+('Create Subscription Plans', 'subscription_plans.create', 'subscription_plans', 1, 'Create new subscription plans',    1),
+('Edit Subscription Plans',   'subscription_plans.edit',   'subscription_plans', 1, 'Edit existing subscription plans', 1),
+('Delete Subscription Plans', 'subscription_plans.delete', 'subscription_plans', 1, 'Delete subscription plans',        1);
+
+UPDATE `permissions` p
+JOIN `modules` m ON m.`slug` = p.`module` AND m.`company_id` = p.`company_id`
+SET p.`module_id` = m.`id`
+WHERE p.`module` = 'subscription_plans';
+
+INSERT IGNORE INTO `role_permissions` (`role_id`, `permission_id`, `company_id`, `requires_approval`)
+SELECT 2, p.id, 1, 0 FROM `permissions` p WHERE p.`module` = 'subscription_plans';
+
+INSERT IGNORE INTO `role_permissions` (`role_id`, `permission_id`, `company_id`, `requires_approval`)
+SELECT 3, p.id, 1, CASE WHEN p.`slug` LIKE '%.view' THEN 0 ELSE 1 END
+FROM `permissions` p WHERE p.`module` = 'subscription_plans';
+
+INSERT INTO `translation_keys` (`key`, `default_value`, `group`, `company_id`) VALUES
+('nav.subscription_management', 'Subscription Management', 'nav', 1),
+('nav.subscription_plans',      'Plans',                   'nav', 1),
+('nav.plan_types',              'Plan Types',              'nav', 1)
+ON DUPLICATE KEY UPDATE `default_value` = VALUES(`default_value`), `group` = VALUES(`group`);
+
+INSERT IGNORE INTO `translations` (`translation_key_id`, `language_id`, `company_id`, `value`, `status`, `is_active`)
+SELECT tk.id, 1, 1, tk.default_value, 'reviewed', 1 FROM `translation_keys` tk
+WHERE tk.`key` IN ('nav.subscription_management', 'nav.subscription_plans', 'nav.plan_types');

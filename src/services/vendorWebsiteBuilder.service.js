@@ -1,4 +1,4 @@
-const { sequelize, Sequelize, Vendor, Subscription, District, City, ColorPalette } = require('../models');
+const { sequelize, Sequelize, Vendor, PlanType, District, City, ColorPalette } = require('../models');
 const ApiError = require('../utils/apiError');
 
 const { QueryTypes } = Sequelize;
@@ -1480,7 +1480,7 @@ const getPublicWebsitePayloadBySlug = async (slug) => {
 
   const vendorJson = vendor.toJSON ? vendor.toJSON() : vendor;
   const payload = await getBuilderPayload(vendorJson);
-  const subscriptionPlans = await Subscription.findAll({
+  const subscriptionPlans = await PlanType.findAll({
     where: { is_active: 1, is_custom: 0 },
     order: [['sort_order', 'ASC']],
     attributes: ['id', 'name', 'price', 'discounted_price', 'features', 'label_color'],

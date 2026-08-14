@@ -1,52 +1,52 @@
-const subscriptionService = require('../services/subscription.service');
+const planTypeService = require('../services/planType.service');
 const ApiResponse = require('../utils/apiResponse');
 const logger = require('../utils/logger');
 const { asyncHandler } = require('../utils/helpers');
 
 const getAll = asyncHandler(async (req, res) => {
-    const result = await subscriptionService.getAll(req.query, req.companyId);
+    const result = await planTypeService.getAll(req.query, req.companyId);
     logger.logRequest(req, `Fetched ${result.data.length} subscriptions`);
     return ApiResponse.paginated(res, result.data, result.pagination);
 });
 
 const getById = asyncHandler(async (req, res) => {
-    const subscription = await subscriptionService.getById(req.params.id, req.companyId);
+    const planType = await planTypeService.getById(req.params.id, req.companyId);
     logger.logRequest(req, `Fetched subscription ${req.params.id}`);
-    return ApiResponse.success(res, { subscription });
+    return ApiResponse.success(res, { planType });
 });
 
 const create = asyncHandler(async (req, res) => {
-    const subscription = await subscriptionService.create(req.body, req.user.id, req.companyId);
+    const planType = await planTypeService.create(req.body, req.user.id, req.companyId);
     logger.logRequest(req, `Created subscription: ${subscription.name}`);
-    return ApiResponse.success(res, { subscription }, 'Subscription created successfully', 201);
+    return ApiResponse.success(res, { planType }, 'Plan type created successfully', 201);
 });
 
 const update = asyncHandler(async (req, res) => {
-    const subscription = await subscriptionService.update(
+    const planType = await planTypeService.update(
         req.params.id,
         req.body,
         req.user.id,
         req.companyId
     );
     logger.logRequest(req, `Updated subscription ${req.params.id}`);
-    return ApiResponse.success(res, { subscription }, 'Subscription updated successfully');
+    return ApiResponse.success(res, { planType }, 'Plan type updated successfully');
 });
 
 const updateStatus = asyncHandler(async (req, res) => {
-    const subscription = await subscriptionService.updateStatus(
+    const planType = await planTypeService.updateStatus(
         req.params.id,
         req.body.is_active,
         req.user.id,
         req.companyId
     );
     logger.logRequest(req, `Updated status for subscription ${req.params.id}`);
-    return ApiResponse.success(res, { subscription }, 'Subscription status updated successfully');
+    return ApiResponse.success(res, { planType }, 'Plan type status updated successfully');
 });
 
 const deleteById = asyncHandler(async (req, res) => {
-    await subscriptionService.deleteById(req.params.id, req.user.id, req.companyId);
+    await planTypeService.deleteById(req.params.id, req.user.id, req.companyId);
     logger.logRequest(req, `Deleted subscription ${req.params.id}`);
-    return ApiResponse.success(res, null, 'Subscription deleted successfully');
+    return ApiResponse.success(res, null, 'Plan type deleted successfully');
 });
 
 module.exports = {

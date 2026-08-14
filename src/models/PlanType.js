@@ -1,7 +1,7 @@
 const { DataTypes } = require('sequelize');
 
 module.exports = (sequelize) => {
-    const Subscription = sequelize.define('Subscription', {
+    const PlanType = sequelize.define('PlanType', {
         id: {
             type: DataTypes.INTEGER.UNSIGNED,
             primaryKey: true,
@@ -72,7 +72,7 @@ module.exports = (sequelize) => {
             allowNull: true,
         },
     }, {
-        tableName: 'subscriptions',
+        tableName: 'plan_types',
         timestamps: true,
         paranoid: true,
         createdAt: 'created_at',
@@ -80,5 +80,5 @@ module.exports = (sequelize) => {
         deletedAt: 'deleted_at',
     });
 
-    return Subscription;
+    return PlanType;
 };

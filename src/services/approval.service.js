@@ -26,13 +26,16 @@ function getServiceMap() {
       media: require('./media.service'),
 
       menus: require('./menu.service'),
-      subscriptions: require('./subscription.service'),
+      plan_types: require('./planType.service'),
 
       // Menu Management
       event_categories: require('./eventCategory.service'),
       event_types: require('./eventType.service'),
       religions: require('./religion.service'),
       event_menus: require('./eventMenu.service'),
+
+      // Subscription Plans
+      subscription_plans: require('./subscriptionPlan.service'),
     };
   }
   return _serviceMap;

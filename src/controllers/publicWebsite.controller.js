@@ -2,7 +2,7 @@ const {
     Vendor,
     VendorClient,
     VendorSubscriber,
-    Subscription,
+    PlanType,
     District,
     City,
 } = require('../models');
@@ -89,7 +89,7 @@ const getPublicVendorWebsite = asyncHandler(async (req, res) => {
     });
     if (!vendor) throw ApiError.notFound('Vendor not found');
 
-    const subscriptionPlans = await Subscription.findAll({
+    const subscriptionPlans = await PlanType.findAll({
         where: { is_active: 1, is_custom: 0 },
         order: [['sort_order', 'ASC']],
         attributes: ['id', 'name', 'price', 'discounted_price', 'features', 'label_color'],

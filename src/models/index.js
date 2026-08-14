@@ -77,7 +77,11 @@ db.VendorSubscriber = require('./VendorSubscriber')(sequelize, Sequelize);
 
 // Menus & Subscriptions
 db.Menu = require('./Menu')(sequelize, Sequelize);
-db.Subscription = require('./Subscription')(sequelize, Sequelize);
+db.PlanType = require('./PlanType')(sequelize, Sequelize);
+
+// Subscription Plans (the 6-step wizard) + their per-plan menu rows
+db.SubscriptionPlan = require('./SubscriptionPlan')(sequelize, Sequelize);
+db.SubscriptionPlanMenu = require('./SubscriptionPlanMenu')(sequelize, Sequelize);
 
 // Menu Management — event menu catalogue and its taxonomies
 db.EventCategory = require('./EventCategory')(sequelize, Sequelize);
@@ -220,7 +224,8 @@ db.Vendor.belongsTo(db.City,     { foreignKey: 'pincode_id',  as: 'locality' });
 // Vendor Client & Staff Relationships
 db.Vendor.hasMany(db.VendorClient, { foreignKey: 'vendor_id', as: 'clients' });
 db.VendorClient.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
-db.VendorClient.belongsTo(db.Subscription, { foreignKey: 'subscription_id', as: 'subscription' });
+// subscription_id keeps its column name; it is an FK to plan_types.id now.
+db.VendorClient.belongsTo(db.PlanType, { foreignKey: 'subscription_id', as: 'subscription' });
 db.VendorClient.hasMany(db.ClientRefreshToken, { foreignKey: 'client_id', as: 'refreshTokens' });
 db.ClientRefreshToken.belongsTo(db.VendorClient, { foreignKey: 'client_id', as: 'client' });
 
@@ -280,5 +285,15 @@ db.EventType.hasMany(db.Religion, { foreignKey: 'event_type_id', as: 'religions'
 db.EventMenu.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'category' });
 db.EventMenu.belongsTo(db.EventType, { foreignKey: 'event_type_id', as: 'eventType' });
 db.EventMenu.belongsTo(db.Religion, { foreignKey: 'religion_id', as: 'religion' });
+
+// Subscription Plans
+db.SubscriptionPlan.belongsTo(db.PlanType, { foreignKey: 'plan_type_id', as: 'planType' });
+db.SubscriptionPlan.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'category' });
+db.SubscriptionPlan.belongsTo(db.EventType, { foreignKey: 'event_type_id', as: 'eventType' });
+db.SubscriptionPlan.belongsTo(db.Religion, { foreignKey: 'religion_id', as: 'religion' });
+
+db.SubscriptionPlan.hasMany(db.SubscriptionPlanMenu, { foreignKey: 'plan_id', as: 'planMenus' });
+db.SubscriptionPlanMenu.belongsTo(db.SubscriptionPlan, { foreignKey: 'plan_id', as: 'plan' });
+db.SubscriptionPlanMenu.belongsTo(db.EventMenu, { foreignKey: 'menu_id', as: 'menu' });
 
 module.exports = db;

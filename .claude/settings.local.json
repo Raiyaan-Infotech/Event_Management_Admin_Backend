@@ -106,7 +106,21 @@
       "Bash(node -r dotenv/config scratch/_backfill_menu_religion_tmp.js dotenv_config_path=.env --apply)",
       "Bash(echo \"tsc exit=$?\")",
       "Bash(node -r dotenv/config scratch/_verify_religion_scope_tmp.js dotenv_config_path=.env.production)",
-      "Bash(node -r dotenv/config scratch/_verify_religion_scope_tmp.js dotenv_config_path=.env)"
+      "Bash(node -r dotenv/config scratch/_verify_religion_scope_tmp.js dotenv_config_path=.env)",
+      "Bash(node -r dotenv/config scratch/_sub_state_tmp.js dotenv_config_path=.env.production)",
+      "Bash(grep -n \"Label\\\\|Controller\\\\|{/\\\\*\" src/app/admin/subscriptions/_components/subscriptions-content.tsx)",
+      "Bash(grep -rn \"FROM subscriptions\\\\|JOIN subscriptions\\\\|INTO subscriptions\\\\|\\\\`subscriptions\\\\`\" src/)",
+      "Bash(node -r dotenv/config scratch/_rename_plan_types_tmp.js dotenv_config_path=.env)",
+      "Bash(node -r dotenv/config scratch/_rename_plan_types_tmp.js dotenv_config_path=.env --apply)",
+      "Bash(node -r dotenv/config scratch/_rename_plan_types_tmp.js dotenv_config_path=.env.production --apply)",
+      "Bash(git mv *)",
+      "Bash(node -r dotenv/config scratch/_subscription_plans_tmp.js dotenv_config_path=.env --apply)",
+      "Bash(node -r dotenv/config scratch/_subscription_plans_tmp.js dotenv_config_path=.env.production --apply)",
+      "Bash(node -e \"const db=require\\('./src/models'\\); console.log\\('OK models load:', !!db.SubscriptionPlan, !!db.SubscriptionPlanMenu\\)\")",
+      "PowerShell($src = \"C:\\\\Users\\\\LKMEDI~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--Jamal-Event-Management-Admin-Backend\\\\50465e31-e241-4739-b819-059ade899935\\\\scratchpad\\\\subscription_plans.sql\"; $dst = \"d:\\\\Jamal\\\\Event_Management_Admin_Backend\\\\initial_setup.sql\"; Add-Content -Path $dst -Value \\(Get-Content $src -Raw\\) -Encoding utf8 -NoNewline; \"appended\")",
+      "Bash(grep -n \"CREATE TABLE IF NOT EXISTS \\\\`subscriptions\\\\`\" initial_setup.sql)",
+      "Bash(node -r dotenv/config scratch/_verify_all_tmp.js dotenv_config_path=.env.production)",
+      "Bash(node -r dotenv/config scratch/_verify_all_tmp.js dotenv_config_path=.env)"
     ],
     "additionalDirectories": [
       "D:\\Jamal\\Event_Management_Admin_Frontend\\src\\app\\admin\\website-builder\\how-it-works",
@@ -127,7 +141,8 @@
       "D:\\Jamal\\Event_Management_Admin_Frontend\\src\\app\\admin\\menu-management\\menus",
       "D:\\Jamal\\Event_Management_Admin_Frontend\\src\\components\\admin",
       "D:\\Jamal\\Event_Management_Admin_Frontend",
-      "D:\\Jamal\\Event_Management_Admin_Frontend\\src\\app\\admin\\menu-management\\menus\\create\\_components"
+      "D:\\Jamal\\Event_Management_Admin_Frontend\\src\\app\\admin\\menu-management\\menus\\create\\_components",
+      "D:\\Jamal\\Event_Management_Admin_Frontend\\src\\app\\admin\\subscriptions"
     ]
   }
 }
