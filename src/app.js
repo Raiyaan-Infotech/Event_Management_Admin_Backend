@@ -68,6 +68,9 @@ app.use('/api/v1/event-menus', require('./routes/eventMenu.routes'));
 app.use('/api/v1/plan-types', require('./routes/planType.routes'));
 app.use('/api/v1/subscription-plans', require('./routes/subscriptionPlan.routes'));
 app.use('/api/v1/plan-badges', require('./routes/planBadge.routes'));
+// People who signed up on a tenant's public website. The public signup
+// endpoint lives under /api/v1/public — everything here is admin-only.
+app.use('/api/v1/website-clients', require('./routes/websiteClient.routes'));
 app.use('/api/v1/payments', require('./routes/payment.routes'));
 app.use('/api/v1/setup', require('./routes/setup.routes'));
 app.use('/api/v1/timezones', require('./routes/timezone.routes'));

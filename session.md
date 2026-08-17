@@ -2734,3 +2734,136 @@ next build               compiled clean (after clearing a stale Turbopack chunk 
 4. Transactions / Invoices / Subscription Settings — sidebar entries, no design supplied.
 5. The three hand-rolled UI primitives (§141) are worth replacing with Radix wholesale.
 6. Local is still missing the 4 `plan_types` permission rows production has.
+
+---
+
+## Session 15 — Client auth screens (login + signup) and the Clients module
+
+> **Date:** 2026-08-17 | Continues from Session 14 (§138–147)
+> **Backend:** `Event_Management_Admin_Backend` · **Frontends:** `Event_Management_Public_Site` + `Event_Management_Admin_Frontend`
+> **Local DB migrated. Production NOT migrated. Nothing committed.**
+
+### 148. Project map added to the top of this file
+
+The Website Builder is **two apps** and they had been conflated. A "READ THIS FIRST" block now
+opens this file: `Event_Management_Public_Site` (port 3010) is the builder's **OUTPUT** — the
+rendered public website — while `Event_Managment_Website_Builder` (port 3004) is the **editor**.
+Section components exist in **two copies** (output app + admin preview); §113 already changed one
+and not the other.
+
+### 149. Login + Signup screens, built twice on purpose
+
+Both screens exist in the public site AND the admin preview, kept byte-identical by copying.
+
+| File | Both apps |
+|---|---|
+| `sections/login-section.tsx` | Login |
+| `sections/signup-section.tsx` | Signup + stats bar |
+| `sections/auth-shared.tsx` | mobile field, OTP entry, provider flow, password rules, brand marks |
+
+Wiring: `login`/`signup` added to `pageContents`; real routes at `/login` and `/signup` in the
+public app; the header's **Login** and **Get Started** buttons now navigate (they were plain
+`<button>` with no href — visible via the §89 toggles but dead).
+
+**Colour rule, corrected twice during the session.** Only the LAYOUT comes from the mockup. There is
+no palette in these files: every colour resolves from `theme` (`primaryButton` / `primaryText` /
+`paragraph` / `secondaryText`) and softer tints are mixed with `color-mix` at render time. A tenant
+whose brand is not pink does not get a pink login screen. The only fixed colours are the providers'
+own brand marks and one semantic success green.
+
+- **Apple sign-in removed** from both screens on request; Google + Facebook remain.
+- **Mobile number + OTP on both forms.** The OTP block only appears after "Send OTP".
+- **Provider flow** (`AuthFlowDialog`): account chooser → validating → mobile → OTP → success. One
+  dialog, only the inner box changes per step. Facebook starts a step later (no chooser).
+- Screens render **inside the site header/footer**, in the standard `max-w-[1280px]` container.
+
+> Still inert: `/forgot-password` has no route, so that link swallows its click rather than 404ing.
+> No SMS provider exists, so the OTP boxes are local-only UI.
+
+### 150. 106 new ui-chrome translation keys
+
+Every string on the new screens goes through `t()`, including the whole provider flow — otherwise
+this repeats §82's hardcoded-chrome mistake. `UI_CHROME_KEYS` went **123 → 229**, no duplicates,
+all at the single slot `ui-chrome|''|0`. Verified by running the sync: 106 keys registered locally.
+
+> `{company}`, `{provider}` and `{name}` are runtime variables — a translation MUST keep the braces.
+> **Production's registry is stale until a sync runs there** (§75).
+
+### 151. New `website_clients` table + admin Clients module
+
+Full stack: table → model → service → controller → routes → admin CRUD screen → signup POST.
+
+| Layer | Where |
+|---|---|
+| Table | `website_clients` (18 cols, 5 indexes, FK to `vendors`) |
+| Model | `models/WebsiteClient.js` — bcrypt hooks, `defaultScope` excludes `password` |
+| Service | `services/websiteClient.service.js` — `register()` + admin CRUD + `getStats()` |
+| Routes | admin `/api/v1/website-clients`, public `POST /api/v1/public/website-clients/register` |
+| Admin UI | `/admin/clients` + `_components/client-form-dialog.tsx`, hook `use-website-clients.ts` |
+
+**Chosen deliberately over reusing `vendor_clients`.** The trade-off was raised and accepted: the
+same person can exist in both tables with no link, and a website signup does **not** get a Client
+Portal login (that portal reads `vendor_clients`). Join on `(vendor_id, email)` if they ever converge.
+
+- `vendor_id` is **INT UNSIGNED** to match `vendors.id` — a signed INT makes the FK impossible.
+  That trap has now cost this codebase five times (§131, §139).
+- `vendor_id` defaults to **1** ("our company"), decided server-side.
+- Two whitelists: `REGISTRABLE_FIELDS` (public) is narrower than `WRITABLE_FIELDS` (admin), so a
+  visitor cannot set `is_active`, `source` or `vendor_id`. **Proven** — a POST carrying
+  `is_active:2, source:'admin', email_verified:1` was ignored on all three.
+- **Model timestamps must be mapped explicitly** (`createdAt: 'created_at'`, …), not via
+  `underscored: true` — that maps the column but leaves the JS attribute `createdAt`, so the API
+  answered `createdAt` while every other module answers `created_at`. Caught by `CommonTable`'s
+  row constraint.
+- `permissions.module` is a **NOT NULL slug column alongside `module_id`** — both must be set or the
+  insert fails with "Field 'module' doesn't have a default value".
+- `nav.clients` seeded into `translation_keys` + `translations`: the sidebar calls `t(labelKey)`
+  with **no fallback**, so a missing key renders the literal string `nav.clients` (§125).
+
+### 152. ⚠ Plaintext passwords were being written to the activity log
+
+Found while proving bcrypt covers every write path. `base.service.update` logged
+`newValues: data` — the incoming payload, which still holds the **plaintext** password at that
+point, because the model hashes it in `beforeUpdate`. `oldValues` comes from `record.toJSON()`,
+which leaks the stored **hash** for any model without a `defaultScope` exclusion.
+
+**Pre-existing and not limited to this module** — five models carry secrets: `EmailConfig`
+(SMTP password), `Vendor`, `VendorClient`, `VendorStaff`, `WebsiteClient`.
+
+Fixed centrally in `base.service.js`: a `REDACTED_FIELDS` set + `redactSensitive()` applied to both
+`oldValues` and `newValues`. Covers password variants, SMTP passwords, API keys, client secrets and
+tokens. Confirmed: the audit line now reads `"password":"[REDACTED]"`.
+
+### 153. Verified
+
+```
+public signup API      valid / duplicate email / weak password / bad email / privilege escalation — all correct
+bcrypt                 register, admin create, admin update, untouched-on-unrelated-edit,
+                       default scope hides hash — 6/6 PASS
+admin routes           401 not 404 (mounted + auth-gated)
+ui-chrome keys         123 -> 229, 0 duplicates, single slot
+tsc --noEmit           exit 0 — both frontends
+next build             both compiled; public site has /login + /signup, admin has /admin/clients (146 pages)
+```
+
+All temporary scratch scripts removed. **Kept** (still needed for production):
+`scratch/migrate_website_clients.js` and `scratch/seed_nav_clients_key.js` — both dry-run by
+default, `--apply [prod]` to write.
+
+> A `next build` failing on a stale `.next` chunk or a missing `.nft.json` is the §52/§146
+> environment issue, not a regression — `rm -rf .next` and rebuild.
+
+### 154. Open
+
+1. **Production not migrated** — run `migrate_website_clients.js --apply prod` and
+   `seed_nav_clients_key.js --apply prod`, then a translation sync to register the 106 new keys.
+2. **Nothing committed** in any of the three repos.
+3. **Nothing browser-tested** — carried since §127, now covering the two auth screens too.
+4. **No OTP delivery.** `mobile_verified` is stored but never set; the 6-box UI is local-only.
+   Joins newsletter and mail as no-delivery features.
+5. **Provider sign-in is not real OAuth** — the dialog advances local state. The account chooser
+   lists placeholder names from the mockup.
+6. `/forgot-password` has no route on the public site.
+7. Signup password rule is **"at least 8 characters"**, per the mockup — this differs from the
+   EXACTLY-8 policy the other three frontends use. Deliberate, but worth a decision.
+8. Website signups get **no login anywhere** — the Client Portal reads `vendor_clients` (§151).

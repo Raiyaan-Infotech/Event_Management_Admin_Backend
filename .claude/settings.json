@@ -3,10 +3,20 @@
     "allow": [
       "Bash(dir \"D:\\\\Jamal\\\\Event_Management_Admin_Frontend\\\\src\\\\app\\\\admin\\\\platform\\\\users\\\\_components\")",
       "Bash(dir \"D:\\\\Jamal\\\\Event_Management_Admin_Frontend\\\\src\\\\app\\\\admin\\\\platform\\\\users\" /b /s)",
-      "Bash(findstr /i \"vendor edit\")"
+      "Bash(findstr /i \"vendor edit\")",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(echo \"TSC_EXIT:$?\")",
+      "PowerShell(Set-Location \"D:\\\\Jamal\\\\Event_Management_Admin_Frontend\"; npx tsc --noEmit; \"tsc exit=$LASTEXITCODE\")",
+      "PowerShell(Set-Location \"D:\\\\Jamal\\\\Event_Management_Admin_Frontend\"; npx next build 2>&1 | Select-Object -Last 8; \"build exit=$LASTEXITCODE\")",
+      "Bash(python \"C:/Users/LKMEDI~1/AppData/Local/Temp/claude/d--Jamal-Event-Management-Admin-Backend/db42450e-e9d2-48c8-b7da-24f76b9bf96c/scratchpad/wire_auth_t.py\" src/components/site/sections/auth-shared.tsx)",
+      "Bash(node -e ' *)",
+      "Bash(python -c ' *)",
+      "Bash(node scratch/migrate_website_clients.js)"
     ],
     "additionalDirectories": [
-      "D:\\Jamal"
+      "D:\\Jamal",
+      "d:\\Jamal\\Event_Management_Public_Site\\src\\app\\s\\[host]\\[lang]\\login",
+      "d:\\Jamal\\Event_Management_Public_Site\\src\\app\\s\\[host]\\[lang]\\signup"
     ]
   },
   "hooks": {

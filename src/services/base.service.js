@@ -4,6 +4,47 @@ const ApiError = require('../utils/apiError');
 const { parsePagination, getPaginationMeta, parseSort } = require('../utils/helpers');
 
 /**
+ * Fields never written to the activity log or the Winston transports.
+ *
+ * `update` logs the incoming payload as `newValues`, and that payload carries
+ * the password BEFORE the model's beforeUpdate hook hashes it — so without
+ * this, changing a password wrote the plaintext into the audit trail and the
+ * log files. `oldValues` comes from `record.toJSON()`, which leaks the stored
+ * hash for any model that does not exclude it in a defaultScope.
+ *
+ * Five models carry secrets today (EmailConfig, Vendor, VendorClient,
+ * VendorStaff, WebsiteClient), so this is redacted centrally rather than in
+ * each service.
+ */
+const REDACTED_FIELDS = new Set([
+  'password',
+  'new_password',
+  'current_password',
+  'confirm_password',
+  'smtp_password',
+  'mail_password',
+  'api_key',
+  'api_secret',
+  'client_secret',
+  'secret',
+  'private_key',
+  'token',
+  'access_token',
+  'refresh_token',
+  'reset_token',
+]);
+
+/** Shallow copy with secret values replaced. Returns the input if not an object. */
+const redactSensitive = (values) => {
+  if (!values || typeof values !== 'object' || Array.isArray(values)) return values;
+  const safe = {};
+  for (const [key, value] of Object.entries(values)) {
+    safe[key] = REDACTED_FIELDS.has(key) ? '[REDACTED]' : value;
+  }
+  return safe;
+};
+
+/**
  * Build where clause for search and filters
  * @param {Object} query - Query parameters
  * @param {Array} searchFields - Fields to search in
@@ -222,8 +263,11 @@ const update = async (model, modelName, id, data, userId = null, companyId = und
     logger.logDB('update', modelName, id);
     await logger.logActivity(userId, 'update', modelName, `Updated ${modelName}`, {
       recordId: id,
-      oldValues,
-      newValues: data,
+      // Redacted: `data` still holds the PLAINTEXT password at this point (the
+      // model hashes it in beforeUpdate), and `oldValues` can hold the stored
+      // hash. Neither belongs in an audit record.
+      oldValues: redactSensitive(oldValues),
+      newValues: redactSensitive(data),
       companyId,
     });
 

@@ -91,6 +91,9 @@ db.EventType = require('./EventType')(sequelize, Sequelize);
 db.Religion = require('./Religion')(sequelize, Sequelize);
 db.EventMenu = require('./EventMenu')(sequelize, Sequelize);
 
+// Public website signups — people who registered themselves on a tenant site
+db.WebsiteClient = require('./WebsiteClient')(sequelize, Sequelize);
+
 // Translations
 db.Language = require('./Language')(sequelize, Sequelize);
 db.TranslationKey = require('./TranslationKey')(sequelize, Sequelize);
@@ -289,6 +292,12 @@ db.EventMenu.belongsTo(db.EventType, { foreignKey: 'event_type_id', as: 'eventTy
 db.EventMenu.belongsTo(db.Religion, { foreignKey: 'religion_id', as: 'religion' });
 db.EventMenu.belongsTo(db.User, { foreignKey: 'created_by', as: 'creator' });
 db.EventMenu.belongsTo(db.User, { foreignKey: 'updated_by', as: 'updater' });
+
+// Website clients. `creator`/`updater` are null for a self-signup and only set
+// when an admin touches the row, so both joins are optional.
+db.WebsiteClient.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
+db.WebsiteClient.belongsTo(db.User, { foreignKey: 'created_by', as: 'creator' });
+db.WebsiteClient.belongsTo(db.User, { foreignKey: 'updated_by', as: 'updater' });
 
 // Subscription Plans
 db.SubscriptionPlan.belongsTo(db.PlanType, { foreignKey: 'plan_type_id', as: 'planType' });
