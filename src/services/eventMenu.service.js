@@ -1,4 +1,4 @@
-const { Sequelize, EventMenu, EventCategory, EventType, Religion, sequelize } = require('../models');
+const { Sequelize, User, EventMenu, EventCategory, EventType, Religion, sequelize } = require('../models');
 const { Op } = Sequelize;
 const baseService = require('./base.service');
 const ApiError = require('../utils/apiError');
@@ -11,6 +11,8 @@ const MODULE_SLUG = 'event_menus';
 const WRITABLE_FIELDS = [
     'name',
     'slug',
+    'description',
+    'remarks',
     'menu_group',
     'event_category_id',
     'event_type_id',
@@ -203,10 +205,16 @@ const getAll = async (query = {}, companyId = undefined) => {
     return { ...result, data: result.data.map(withMenuType) };
 };
 
+/** Detail-only joins, so the view page can show Created By / Updated By. */
+const AUDIT_INCLUDE = [
+    { model: User, as: 'creator', attributes: ['id', 'full_name'], required: false },
+    { model: User, as: 'updater', attributes: ['id', 'full_name'], required: false },
+];
+
 const getById = async (id, companyId = undefined) => {
     const menu = await baseService.getById(EventMenu, MODEL_NAME, id, {
         companyId,
-        include: MENU_INCLUDE,
+        include: [...MENU_INCLUDE, ...AUDIT_INCLUDE],
     });
     return withMenuType(menu);
 };

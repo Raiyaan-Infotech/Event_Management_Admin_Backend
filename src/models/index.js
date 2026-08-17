@@ -287,6 +287,8 @@ db.EventType.hasMany(db.Religion, { foreignKey: 'event_type_id', as: 'religions'
 db.EventMenu.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'category' });
 db.EventMenu.belongsTo(db.EventType, { foreignKey: 'event_type_id', as: 'eventType' });
 db.EventMenu.belongsTo(db.Religion, { foreignKey: 'religion_id', as: 'religion' });
+db.EventMenu.belongsTo(db.User, { foreignKey: 'created_by', as: 'creator' });
+db.EventMenu.belongsTo(db.User, { foreignKey: 'updated_by', as: 'updater' });
 
 // Subscription Plans
 db.SubscriptionPlan.belongsTo(db.PlanType, { foreignKey: 'plan_type_id', as: 'planType' });

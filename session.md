@@ -2535,3 +2535,169 @@ rather than raw SQL so every row went through the same validation the wizard use
 4. Transactions / Invoices / Subscription Settings — sidebar entries with no design.
 5. `plan_type_id` is signed INT while every other new FK column is INT UNSIGNED, because
    `plan_types.id` predates the convention. Worth normalising if that table is ever rebuilt.
+
+---
+
+## Session 14 — Subscription screens completed, and three bugs in the hand-rolled UI primitives
+
+> **Date:** 2026-08-15 | Continues from Session 13 (§128–137)
+> **Both databases migrated and verified identical** — 9 tables, column-by-column.
+> **Still nothing committed. Still not browser-tested.**
+
+### 138. Six more screens
+
+| Screen | Route |
+|---|---|
+| View Plan Details — rebuilt to the supplied design | `/admin/subscriptions/[id]` |
+| View Pricing | `/admin/subscriptions/[id]/pricing` |
+| Manage Plan Menus | `/admin/subscriptions/[id]/menus` |
+| Manage Plan Badges | `/admin/subscriptions/badges` |
+| Deactivate Plan + success | `/admin/subscriptions/[id]/deactivate` |
+| Delete Plan + success | `/admin/subscriptions/[id]/delete` |
+| View Menu | `/admin/menu-management/menus/[id]` |
+
+Plan Updated Successfully was folded into the wizard's step 6 rather than given its own
+route — it is the outcome of a save, and a standalone route would be unreachable except by
+redirect.
+
+**Confirm and success share one route.** Not a shortcut: a deleted plan cannot be re-fetched, so
+the delete endpoint returns the pre-deletion snapshot and the success screen renders that.
+
+### 139. Schema added this session
+
+| Table | Columns | Why |
+|---|---|---|
+| `event_menus` | `description` TEXT, `remarks` VARCHAR(300) | The View Menu page's Additional Information card had no source |
+| `subscription_plans` | 7 audit columns — `deactivation_reason/comments/at/by`, `deletion_reason/comments`, `deleted_by` | The Deactivate/Delete screens demand a reason; the success screens read who/when/why back |
+| `plan_badges` + `plan_badge_plans` | new tables | The badges module |
+
+Also `EventMenu` and `SubscriptionPlan` gained `creator` / `updater` associations, so the detail
+screens show names instead of ids. The list reads do **not** join them — dead weight per row.
+
+> **The signedness trap, third and fourth occurrence.** The `deactivated_by` / `deleted_by`
+> foreign keys to `users.id` were rejected: `users.id` is a signed INT while those columns follow
+> the `created_by` convention of `INT UNSIGNED`. Left without a DB constraint, matching
+> `created_by` beside them — the joins resolve fine, verified returning "Super Admin".
+
+**Plan Badges settings** — badges on/off and corner position — live in the shared `settings` table
+under a `plan_badges` group rather than a one-row table. They belong to the module, not to a badge.
+
+Two behaviours worth keeping, both proven by test: a **status toggle preserves a badge's plan
+pins**, and switching `apply_to` back to `all` **clears** them so a later switch to `selected`
+cannot silently restore a selection nobody re-confirmed.
+
+### 140. ⚠ Hardcoded numbers on the Deactivate/Delete screens
+
+The Plan Usage panel (Total 118 / Active 96 / Cancelled 22) has **no data source**. Nothing in the
+database tracks who subscribes to a plan — `vendor_subscribers` is the newsletter signup table, and
+`vendor_clients.subscription_id` points at `plan_types`, not `subscription_plans`.
+
+Hardcoded on request, but made as loud as possible: a `PLACEHOLDER_PLAN_USAGE` constant with a ⚠
+comment saying they are not real, plus an italic line under the panel reading *"Sample figures —
+subscriber tracking is not wired up yet"*. Someone deciding whether to delete a plan should not
+read "118 subscribers" as fact.
+
+Making them real needs a `plan_subscriptions` table (plan, subscriber, status, dates, cancel
+reason) — which is also what Transactions and Invoices would need.
+
+### 141. The dropdown was cut off at the bottom of the list
+
+Reported as: open the three-dot menu on the last row, half the options are unreachable.
+
+`DropdownMenuContent` positioned itself at `top: rect.bottom + sideOffset` — **always downward,
+never flipping**. Being `position: fixed`, the part below the viewport could not be scrolled to.
+
+**These are hand-rolled components, not Radix** — so none of the collision handling you would
+normally get for free. Fixed in `components/ui/dropdown-menu.tsx`:
+
+- flips above the trigger when there is no room below
+- clamps to the viewport both axes
+- **measures its real width** instead of the hardcoded `rect.right - 192`, which was only ever
+  correct for `w-48` menus
+- scrolls internally if taller than the viewport, and stays hidden until measured so it does not
+  flash at the unflipped position
+- Escape closes it — previously outside-click only
+
+`SelectContent` had the identical `top: rect.bottom + 4` with no flip; same fix applied. Any select
+near the bottom of a form — the wizard's Pricing step, the taxonomy forms — would have clipped the
+same way.
+
+> That is now **three** bugs from these primitives (§129's raw-id `SelectValue`, plus these two).
+> Replacing them with Radix would close the whole category; patching symptom by symptom will not.
+
+### 142. A deactivated plan still showed "Active" in the list
+
+The screens disagreed: the view page said Inactive, the list said Active.
+
+**Checked the backend first — it was right.** After deactivating, `is_active = 0` in the mutation
+response, the detail endpoint *and* the list endpoint. All three agreed.
+
+The cause is `lib/query-client.ts`:
+
+```js
+staleTime: 10 * 60 * 1000,
+refetchOnMount: false,
+```
+
+The mutation *does* invalidate the list — but the list is **unmounted** at that moment (the user is
+on the deactivate screen). React Query only auto-refetches **active** queries; an inactive one is
+merely flagged stale. On return, `refetchOnMount: false` serves the ten-minute-old cache.
+
+Fixed by adding **`refetchType: 'all'`** to all 31 invalidations across the four hook files, which
+refetches inactive queries too. **The global defaults were deliberately left alone** — they are a
+considered performance setting, and overriding them app-wide to fix one module is the wrong lever.
+
+### 143. Loaders were missing on most actions
+
+Audited every action in the module. These fired with no feedback at all: the list's status switch,
+Activate, Save on Manage Plan Menus, badge create/update, badge settings, plan-types status toggle
+— and the Deactivate/Delete screens had **no `PageLoader` at all**.
+
+Each page's `PageLoader open={}` now covers *every* mutation on that page, not the one or two
+originally wired.
+
+Per the request, **12 in-button spinners removed** (`Loader2` inside buttons, plus two using the
+shared `Button`'s own `isLoading`). Those buttons keep `disabled` while pending so they cannot
+double-submit; the shared overlay is the only loading indicator.
+
+### 144. Smaller UI corrections
+
+- **Menu List** — the four Display/Active toggle columns removed. At 13 columns the Menu Name cell
+  collapsed to one character per line. Those flags are still set in the form and shown on the view
+  page. Header collapsed from two rows to one.
+- **Taxonomy lists** — the icon moved into the Name cell; standalone Icon column dropped.
+- **View Plan Details** — the `+N more` menu tile is now derived from the grid (2 rows × 10 cols)
+  rather than a magic 19 read off a screenshot, and only collapses when it actually saves a row.
+- The list's **Manage Menus** and **View Pricing** actions now open the real pages instead of
+  deep-linking into wizard steps; **Manage Badges** is no longer a disabled placeholder.
+- The Menu List's **View** action opens the new page, so `MenuViewDialog` was deleted rather than
+  leaving two ways to view one record.
+
+### 145. Schema reference published
+
+An artifact documenting all 9 tables with per-column rationale:
+`https://claude.ai/code/artifact/0a0f6fda-20ba-43ed-a18f-ed990671b347`
+
+Shared conventions (`id`, `company_id`, `is_active`, `sort_order`, `deleted_at`, audit) are
+explained once rather than repeated nine times, then each table covers only what is distinctive.
+
+### 146. Verified
+
+```
+local vs production      IDENTICAL — 9 tables, every column, type, nullability, index and FK
+Subscription Plans API   create/filter/duplicate/status, deactivate + reactivate + delete-with-reason
+Plan Badges API          validation, apply_to round-trip, status toggle preserving pins, settings
+Menu view data           description, remarks, updater name, tenant derivation all resolve
+tsc --noEmit             exit 0
+next build               compiled clean (after clearing a stale Turbopack chunk from the dev server)
+```
+
+### 147. Open
+
+1. **Nothing browser-tested.** Carried since §127. Now the single largest risk — 15 screens across
+   two modules exist and none has been clicked through.
+2. **Nothing committed.** Vercel still serves `594f484`.
+3. **Plan Usage is hardcoded** (§140) — needs `plan_subscriptions` before anyone acts on it.
+4. Transactions / Invoices / Subscription Settings — sidebar entries, no design supplied.
+5. The three hand-rolled UI primitives (§141) are worth replacing with Radix wholesale.
+6. Local is still missing the 4 `plan_types` permission rows production has.

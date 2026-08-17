@@ -27,6 +27,15 @@ module.exports = (sequelize) => {
             type: DataTypes.STRING(180),
             allowNull: false,
         },
+        // Shown on the View Menu page's Additional Information card.
+        description: {
+            type: DataTypes.TEXT,
+            allowNull: true,
+        },
+        remarks: {
+            type: DataTypes.STRING(300),
+            allowNull: true,
+        },
         // Drives the Core / Additional / Custom sections on Manage Plan Menus.
         menu_group: {
             type: DataTypes.ENUM('core', 'additional', 'custom'),
