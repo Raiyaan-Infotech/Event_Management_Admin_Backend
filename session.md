@@ -1,3 +1,36 @@
+# READ THIS FIRST — which project is which
+
+The Website Builder is **two separate apps**: the editor, and the site the editor produces.
+Confusing them has cost real time (§113 edited the wrong copy of a component), so map the folder
+before touching a file.
+
+| Folder | What it is | Port / URL |
+|---|---|---|
+| `D:\Jamal\Event_Management_Public_Site` | **The builder's OUTPUT — the rendered public website.** A separate app, NOT a builder admin. This is what a visitor sees. | 3010 · https://event-managment-public-website.vercel.app |
+| `D:\Jamal\Event_Managment_Website_Builder` | The **active builder ADMIN** app (the editor) | 3004 |
+| `D:\Jamal\Event_Management_Website_Builder_Frontend`, `D:\Jamal\Website_Builder` | Older builder ADMIN folders | — |
+| `D:\Jamal\Event_Management_Admin_Frontend` | Admin panel. Also still holds **legacy copies** of the public routes + the in-admin preview | 3001 |
+| `D:\Jamal\Event_Management_Admin_Backend` | Shared backend for all of the above | 5001 · Render |
+
+**How the output site gets its content** (§116–§120): it is **host-addressed**, not header-addressed.
+`GET /api/v1/public/site/resolve?host=` maps a host to a company via `company_websites.slug` /
+`.custom_domain`; `GET /api/v1/public/site/bundle?host=&lang=` returns the entire site in one
+server-side response. Server-rendered, so translated text is in the HTML rather than applied after
+hydration.
+
+**Three things that follow from this split, and are still open:**
+
+1. **The admin frontend still serves its own copies of the public routes** (`/features`, `/pricing`,
+   `/contact`, `/gallery`, `/templates`, `/how-it-works`, `/website-preview`). Those are the *preview*,
+   not the shipping site. They are due for deletion once the output app fully replaces them (§121.3) —
+   the same site living at two URLs is a Google penalty.
+2. **Editing a section component? There are two copies.** The rendered site comes from the output app;
+   the admin frontend copy only drives the in-admin preview. §113 changed one and not the other.
+3. **Login / Sign Up is still the ADMIN portal's, not the tenant site's.** `/auth/login`, `/auth/signup`,
+   `/auth/signin`, `/auth/register` live inside the admin frontend and use `useSmartLogin` (admin JWT).
+   In the preview header the Login / Get Started buttons are plain `<button>` with no `href` — visible
+   via the §89 toggles but navigating nowhere. The tenant site has no auth screens of its own yet.
+   (Separately, `Event_Managment_Website_Builder` has its own `src/app/login` for the editor itself.)
 
 ---
 
