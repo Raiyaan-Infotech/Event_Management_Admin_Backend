@@ -120,7 +120,14 @@
       "PowerShell($src = \"C:\\\\Users\\\\LKMEDI~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--Jamal-Event-Management-Admin-Backend\\\\50465e31-e241-4739-b819-059ade899935\\\\scratchpad\\\\subscription_plans.sql\"; $dst = \"d:\\\\Jamal\\\\Event_Management_Admin_Backend\\\\initial_setup.sql\"; Add-Content -Path $dst -Value \\(Get-Content $src -Raw\\) -Encoding utf8 -NoNewline; \"appended\")",
       "Bash(grep -n \"CREATE TABLE IF NOT EXISTS \\\\`subscriptions\\\\`\" initial_setup.sql)",
       "Bash(node -r dotenv/config scratch/_verify_all_tmp.js dotenv_config_path=.env.production)",
-      "Bash(node -r dotenv/config scratch/_verify_all_tmp.js dotenv_config_path=.env)"
+      "Bash(node -r dotenv/config scratch/_verify_all_tmp.js dotenv_config_path=.env)",
+      "Bash(grep -n \"PlatformSwitch\\\\|colSpan={13}\\\\|border-l border-border/60 text-center\\\\\">$\\\\|Sort Order\" src/app/admin/menu-management/menus/page.tsx)",
+      "Bash(echo \"tsc=$?\")",
+      "Bash(grep -oE \"\\(View|Edit|Duplicate|Change Order|Delete\\)$\")",
+      "Bash(grep -oE \"\\(View Details|Edit Plan|Duplicate Plan|Manage Menus|Manage Badges|View Pricing|Delete Plan\\)$\")",
+      "Bash(node scratch/seed_subscription_plans_demo.js)",
+      "Bash(node scratch/seed_subscription_plans_demo.js --apply)",
+      "Bash(node -e \"require\\('./src/app'\\); console.log\\('OK backend loads'\\)\")"
     ],
     "additionalDirectories": [
       "D:\\Jamal\\Event_Management_Admin_Frontend\\src\\app\\admin\\website-builder\\how-it-works",

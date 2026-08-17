@@ -13,6 +13,7 @@ router.use(extractCompanyContext);
 router.get('/', hasPermission('subscription_plans.view'), controller.getAll);
 // Before /:id, or "limit-catalog" is swallowed as an id.
 router.get('/limit-catalog', hasPermission('subscription_plans.view'), controller.getLimitCatalog);
+router.get('/reasons', hasPermission('subscription_plans.view'), controller.getReasons);
 router.get('/:id', hasPermission('subscription_plans.view'), controller.getById);
 
 router.post('/',
@@ -29,6 +30,19 @@ router.put('/:id',
 // Status toggle bypasses approval — the list's Status switch is a reversible
 // one-column write, same precedent as every other module here.
 router.patch('/:id/status', hasPermission('subscription_plans.edit'), controller.updateStatus);
+
+// Deactivate / reactivate carry a reason and stamp who+when. Gated on edit and
+// exempt from approval for the same reason the status switch is: reversible.
+router.patch('/:id/deactivate', hasPermission('subscription_plans.edit'), controller.deactivate);
+router.patch('/:id/reactivate', hasPermission('subscription_plans.edit'), controller.reactivate);
+
+// Delete WITH a recorded reason — the Delete Plan screen. The plain DELETE
+// below stays for the list's quick delete.
+router.post('/:id/delete',
+    hasPermission('subscription_plans.delete'),
+    checkApprovalRequired('subscription_plans', 'delete', 'subscription_plan'),
+    controller.deleteWithReason
+);
 
 router.post('/:id/duplicate',
     hasPermission('subscription_plans.create'),

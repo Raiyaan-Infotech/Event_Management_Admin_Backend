@@ -53,6 +53,47 @@ const updateStatus = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, { subscriptionPlan }, 'Subscription plan status updated successfully');
 });
 
+/** Reason options for the Deactivate / Delete confirm screens. */
+const getReasons = asyncHandler(async (req, res) => {
+    return ApiResponse.success(res, { reasons: subscriptionPlanService.getReasons() });
+});
+
+const deactivate = asyncHandler(async (req, res) => {
+    const subscriptionPlan = await subscriptionPlanService.deactivate(
+        req.params.id,
+        req.body,
+        req.user.id,
+        req.companyId
+    );
+    logger.logRequest(req, `Deactivated subscription plan ${req.params.id}`);
+    return ApiResponse.success(res, { subscriptionPlan }, 'Plan deactivated successfully');
+});
+
+const reactivate = asyncHandler(async (req, res) => {
+    const subscriptionPlan = await subscriptionPlanService.reactivate(
+        req.params.id,
+        req.user.id,
+        req.companyId
+    );
+    logger.logRequest(req, `Reactivated subscription plan ${req.params.id}`);
+    return ApiResponse.success(res, { subscriptionPlan }, 'Plan activated successfully');
+});
+
+/**
+ * Delete with a reason. The response carries the pre-deletion snapshot, because
+ * the success screen cannot re-read a soft-deleted row.
+ */
+const deleteWithReason = asyncHandler(async (req, res) => {
+    const subscriptionPlan = await subscriptionPlanService.deleteWithReason(
+        req.params.id,
+        req.body,
+        req.user.id,
+        req.companyId
+    );
+    logger.logRequest(req, `Deleted subscription plan ${req.params.id} with reason`);
+    return ApiResponse.success(res, { subscriptionPlan }, 'Plan deleted successfully');
+});
+
 const duplicate = asyncHandler(async (req, res) => {
     const subscriptionPlan = await subscriptionPlanService.duplicate(req.params.id, req.user.id, req.companyId);
     logger.logRequest(req, `Duplicated subscription plan ${req.params.id}`);
@@ -69,6 +110,10 @@ module.exports = {
     getAll,
     getById,
     getLimitCatalog,
+    getReasons,
+    deactivate,
+    reactivate,
+    deleteWithReason,
     create,
     update,
     updateStatus,

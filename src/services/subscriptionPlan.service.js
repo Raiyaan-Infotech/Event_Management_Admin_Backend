@@ -1,5 +1,6 @@
 const {
     Sequelize,
+    User,
     SubscriptionPlan,
     SubscriptionPlanMenu,
     PlanType,
@@ -69,6 +70,31 @@ const LIMIT_CATALOG = {
 
 const limitsForMenu = (slug) => LIMIT_CATALOG[slug] || [];
 
+/**
+ * Reason options for the Deactivate / Delete confirm screens. In code rather
+ * than a table for the same reason as LIMIT_CATALOG — they are a fixed list the
+ * UI renders, not data an admin curates.
+ */
+const REASONS = {
+    deactivation: [
+        'No longer offered',
+        'Replaced by another plan',
+        'Pricing under review',
+        'Low subscriber count',
+        'Temporarily unavailable',
+        'Other',
+    ],
+    deletion: [
+        'Plan is not required',
+        'Created by mistake',
+        'Duplicate plan',
+        'Replaced by another plan',
+        'Other',
+    ],
+};
+
+const getReasons = () => REASONS;
+
 /** The catalogue, so the wizard can render step 4 without hardcoding it. */
 const getLimitCatalog = () => LIMIT_CATALOG;
 
@@ -84,7 +110,7 @@ const MENU_INCLUDE = {
     as: 'planMenus',
     required: false,
     include: [
-        { model: EventMenu, as: 'menu', attributes: ['id', 'name', 'slug', 'icon', 'color'], required: false },
+        { model: EventMenu, as: 'menu', attributes: ['id', 'name', 'slug', 'menu_group', 'icon', 'color'], required: false },
     ],
 };
 
@@ -217,10 +243,18 @@ const getAll = async (query = {}, companyId = undefined) => {
     return { ...result, data: result.data.map(decorate) };
 };
 
+/** Detail-only joins: the list has no use for them. */
+const AUDIT_INCLUDE = [
+    { model: User, as: 'creator', attributes: ['id', 'full_name'], required: false },
+    { model: User, as: 'updater', attributes: ['id', 'full_name'], required: false },
+    { model: User, as: 'deactivator', attributes: ['id', 'full_name'], required: false },
+    { model: User, as: 'deleter', attributes: ['id', 'full_name'], required: false },
+];
+
 const getById = async (id, companyId = undefined) => {
     const plan = await baseService.getById(SubscriptionPlan, MODEL_NAME, id, {
         companyId,
-        include: [...PLAN_INCLUDE, MENU_INCLUDE],
+        include: [...PLAN_INCLUDE, MENU_INCLUDE, ...AUDIT_INCLUDE],
     });
     return decorate(plan);
 };
@@ -361,11 +395,105 @@ const duplicate = async (id, userId = null, companyId = undefined) => {
     return getById(copy.id, companyId);
 };
 
+/**
+ * Deactivate with a recorded reason — the Deactivate Plan screen.
+ *
+ * Distinct from updateStatus (the list's switch, which is a bare toggle): this
+ * one demands a reason and stamps who/when, so the success screen has something
+ * true to show.
+ */
+const deactivate = async (id, data = {}, userId = null, companyId = undefined) => {
+    const reason = String(data.reason || '').trim();
+    if (!reason) throw ApiError.badRequest('A reason for deactivation is required.');
+    if (!REASONS.deactivation.includes(reason)) {
+        throw ApiError.badRequest('Select a valid deactivation reason.');
+    }
+
+    const comments = String(data.comments || '').trim();
+    if (comments.length > 300) throw ApiError.badRequest('Comments must be 300 characters or fewer.');
+
+    await baseService.update(SubscriptionPlan, MODEL_NAME, id, {
+        is_active: 0,
+        deactivation_reason: reason,
+        deactivation_comments: comments || null,
+        deactivated_at: new Date(),
+        deactivated_by: userId,
+    }, userId, companyId);
+
+    await logger.logActivity(userId, 'update', MODEL_NAME, `Deactivated plan #${id}: ${reason}`, {
+        recordId: id,
+        companyId,
+    });
+    return getById(id, companyId);
+};
+
+/**
+ * Reactivating clears the deactivation record — leaving it behind would make
+ * the view screen show a stale "deactivated on" for a live plan.
+ */
+const reactivate = async (id, userId = null, companyId = undefined) => {
+    await baseService.update(SubscriptionPlan, MODEL_NAME, id, {
+        is_active: 1,
+        deactivation_reason: null,
+        deactivation_comments: null,
+        deactivated_at: null,
+        deactivated_by: null,
+    }, userId, companyId);
+    return getById(id, companyId);
+};
+
 const deleteById = async (id, userId = null, companyId = undefined) => {
     // subscription_plan_menus cascades on the FK, so the child rows go with it.
     return baseService.remove(SubscriptionPlan, MODEL_NAME, id, userId, companyId, {
         uniqueFields: ['plan_code'],
     });
+};
+
+/**
+ * Delete with a recorded reason — the Delete Plan screen.
+ *
+ * Soft delete: the row survives with deleted_at set, so Deleted On / Deleted By
+ * / Reason are still readable for the success screen and any later audit. It is
+ * invisible everywhere in the app, which is what the admin experiences.
+ *
+ * Returns the plan as it looked *before* deletion, because the success screen
+ * cannot re-fetch a soft-deleted row through the normal scoped read.
+ */
+const deleteWithReason = async (id, data = {}, userId = null, companyId = undefined) => {
+    const reason = String(data.reason || '').trim();
+    if (!reason) throw ApiError.badRequest('A reason for deletion is required.');
+    if (!REASONS.deletion.includes(reason)) {
+        throw ApiError.badRequest('Select a valid deletion reason.');
+    }
+
+    const comments = String(data.comments || '').trim();
+    if (comments.length > 300) throw ApiError.badRequest('Comments must be 300 characters or fewer.');
+
+    const snapshot = await getById(id, companyId);
+
+    // Stamped first: once destroy() runs, the scoped update would no longer
+    // find the row.
+    await baseService.update(SubscriptionPlan, MODEL_NAME, id, {
+        deletion_reason: reason,
+        deletion_comments: comments || null,
+        deleted_by: userId,
+    }, userId, companyId);
+
+    await baseService.remove(SubscriptionPlan, MODEL_NAME, id, userId, companyId, {
+        uniqueFields: ['plan_code'],
+    });
+
+    await logger.logActivity(userId, 'delete', MODEL_NAME, `Deleted plan #${id}: ${reason}`, {
+        recordId: id,
+        companyId,
+    });
+
+    return {
+        ...snapshot,
+        deletion_reason: reason,
+        deletion_comments: comments || null,
+        deleted_at: new Date().toISOString(),
+    };
 };
 
 module.exports = {
@@ -374,8 +502,13 @@ module.exports = {
     create,
     update,
     updateStatus,
+    deactivate,
+    reactivate,
     duplicate,
     deleteById,
+    deleteWithReason,
+    getReasons,
+    REASONS,
     getLimitCatalog,
     limitsForMenu,
     LIMIT_CATALOG,

@@ -36,6 +36,7 @@ function getServiceMap() {
 
       // Subscription Plans
       subscription_plans: require('./subscriptionPlan.service'),
+      plan_badges: require('./planBadge.service'),
     };
   }
   return _serviceMap;

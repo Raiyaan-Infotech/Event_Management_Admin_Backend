@@ -27,6 +27,12 @@ module.exports = (sequelize) => {
             type: DataTypes.STRING(180),
             allowNull: false,
         },
+        // Drives the Core / Additional / Custom sections on Manage Plan Menus.
+        menu_group: {
+            type: DataTypes.ENUM('core', 'additional', 'custom'),
+            allowNull: false,
+            defaultValue: 'core',
+        },
         event_category_id: {
             type: DataTypes.INTEGER.UNSIGNED,
             allowNull: true,

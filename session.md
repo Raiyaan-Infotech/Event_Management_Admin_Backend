@@ -2333,3 +2333,205 @@ To finish: start both servers so they stay up, then
 - Live browser testing cannot happen at all until the code is pushed â€” and **push was explicitly out
   of scope this session**, so "live testing" is blocked by design, not by an oversight.
 - Nothing is committed in either repo.
+
+---
+
+## Session 13 — Religion re-scoped, Subscription rebuilt as Plan Types + Subscription Plans
+
+> **Date:** 2026-08-15 | Continues from Session 12 (§122–127)
+> **Both databases migrated and verified.** Frontend `tsc` + `next build` clean.
+> **Nothing committed** — everything is working-tree only, so Vercel is still on `594f484`.
+> **Still not browser-tested.**
+
+### 128. Religion moved under Event Category → Event Type
+
+The taxonomy was flat: Category → Type, with Religion standing alone. Now it is a
+three-level cascade, and Menu creation follows the same chain.
+
+`religions` gained `event_category_id` + `event_type_id`, both **NOT NULL**, with
+`idx_religions_scope (company_id, event_category_id, event_type_id, deleted_at)` — the Menu form
+re-reads religions for the chosen category+type on every change.
+
+> **Production was not empty, contrary to what §127 recorded.** By the time the migration ran it
+> held 4 religions added through the UI (Islam, Hinduism, Christianity, Buddhism). The script's
+> guard **refused to force NOT NULL on unscoped rows** rather than erroring or mangling them; they
+> were backfilled to Wedding / wedding first. The earlier "production is empty" note was true when
+> written and stale by the time it mattered — re-check, don't trust a prior reading.
+
+Backfill picks the Wedding category, then a type **belonging to that category** (preferring
+"Hindu Wedding" where it exists). The first attempt looked for the type by name globally, found
+nothing on production, and backfilled zero rows.
+
+**Menus now require a religion**, and it must sit under the menu's own (category, type).
+`event_menus.religion_id` stays **nullable in the DB** — the mockup's list legitimately shows "—"
+for corporate events, so "required" is enforced on write, not by the schema, and stays reversible.
+
+### 129. The Select component was printing ids, not labels
+
+Reported as dropdowns showing `1`, `2`. Traced all three hops before touching anything:
+
+| Hop | Result |
+|---|---|
+| `GET /event-categories` | `{ id: 1, name: "Wedding" }` — correct |
+| The page | `<SelectItem value="1">{c.name}</SelectItem>` — correct |
+| `SelectValue` | `return <span>{value \|\| placeholder}</span>` — **prints the id** |
+
+This `Select` is **hand-rolled, not Radix**. Radix's `SelectValue` renders the selected item's
+text; this one had no lookup at all, so `SelectItem`'s children were never consulted.
+
+Not a Menu Management bug — **89 self-closing `<SelectValue />` call sites** app-wide, only one
+ever passed a label. Existing screens were equally affected: user status showed `1` for "Active",
+country/state showed raw ids.
+
+Fixed in the component: `Select` walks its children once (`useMemo`) building a value→label map,
+and `SelectValue` renders the label. Children are read from the JSX rather than each item
+registering on mount, because **`SelectContent` renders `null` while closed** — the items do not
+exist to register, yet the trigger still has to show a label. No match falls back to the
+placeholder, never a bare id.
+
+> A synthetic hardcoded test was written for this and correctly rejected. The three-hop trace
+> against the real API is what actually proved it.
+
+### 130. Old Subscription module → Plan Types
+
+The existing module became the **Plan Type** master feeding the wizard's "Plan Type" dropdown.
+First the unused fields went from its UI (menu, price, discounted price, validity, label colour),
+then the whole thing was renamed end to end:
+
+| Layer | Before | After |
+|---|---|---|
+| Table | `subscriptions` | `plan_types` (6 local / 3 prod rows carried) |
+| API | `/api/v1/subscriptions` | `/api/v1/plan-types` |
+| Model | `Subscription` | `PlanType` |
+| Permissions | `subscriptions.*` | `plan_types.*` — **12 role grants preserved** |
+| Admin route | `/admin/subscriptions` | `/admin/plan-types` |
+
+**Safe because nothing reads that table with raw SQL** — every consumer goes through the Sequelize
+model, so the `tableName` change carried them all. Verified before renaming, then repointed the
+three live consumers: `publicWebsite.controller`, `vendorWebsiteBuilder.service` (public pricing
+section) and `vendor-form.tsx` (the vendor's plan picker).
+
+`price` / `discounted_price` / `label_color` / `features` **stay on the row** — the public pricing
+section still selects them. They are simply no longer editable from the admin. Consequence worth
+knowing: a plan type created from now on gets `price = 0.00` and would show as ₹0 on the public
+site until the new module supplies pricing.
+
+`initial_setup.sql`'s legacy block was renamed too, or a fresh install would create `subscriptions`
+and the new FK to `plan_types` would fail.
+
+### 131. New Subscription Plans module
+
+`subscription_plans` + `subscription_plan_menus`, six indexes, six FKs.
+
+**Scope columns are nullable = "applies to all"**, which is exactly what the list renders as
+All Categories / All Types / All Religions.
+
+**`subscription_plan_menus` is a child table, not `menu_ids` JSON**: wizard step 2 picks each menu
+*per platform* and step 4 hangs per-menu limits off it. Neither fits a list of ids.
+
+> **FK signedness bit again.** `plan_types.id` is a signed `INT` (older table) while
+> `plan_type_id` was `INT UNSIGNED` — MySQL rejected the constraint. An FK column must match the
+> referenced column's type **and signedness** exactly. The migration now repairs a table created
+> before that was noticed.
+
+**Step 4's limit fields are a catalogue in code** (`LIMIT_CATALOG`, keyed by menu slug), served at
+`GET /subscription-plans/limit-catalog` so the wizard renders from one source. Same shape as
+`FIELD_CATALOG` in the translations service.
+
+**Two guards that matter**, both proven by test:
+- A **status toggle preserves the menu selection** — `update` only rewrites menus when the request
+  actually carries them.
+- `syncPlanMenus` updates existing rows and deletes only deselected ones, rather than
+  delete-all-then-reinsert. Re-inserting churns ids on every save and orphans anything referencing
+  them — the §64 id-reassignment family.
+
+### 132. Screens built
+
+| Screen | Route |
+|---|---|
+| Plans list | `/admin/subscriptions` |
+| Add / Edit Plan wizard (6 steps) | `/admin/subscriptions/create` |
+| View Plan Details | `/admin/subscriptions/[id]` |
+| View Pricing | `/admin/subscriptions/[id]/pricing` |
+| Manage Plan Menus | `/admin/subscriptions/[id]/menus` |
+| Manage Plan Badges | `/admin/subscriptions/badges` |
+
+**Still pending — no design supplied:** Transactions, Invoices, Subscription Settings.
+
+Notes worth keeping:
+- The list's **Status is always a Switch**, as specified. The **Trial** badge is *derived*
+  (`price === 0 && trial_days > 0`) rather than stored, so it can never contradict the price.
+- **View Pricing**'s "Next Billing Date (After Trial)" counts from the plan's creation date — the
+  only date on a plan record. A real subscription would count from its own start date.
+- **Manage Plan Menus** has one switch per menu, not per platform: the plan already decides which
+  platforms it targets. "Reset to Default" reverts to the **saved** state rather than switching
+  everything on.
+- **Plan Badges** stores its two module-level switches (enabled, corner position) in the existing
+  `settings` table under a `plan_badges` group — they belong to the module, not to any one badge.
+  Switching a badge back to "All Plans" **clears** its plan pins, so a later switch to "Selected"
+  cannot silently restore a selection nobody re-confirmed.
+- The badges design has **no list of saved badges**, which would make an existing badge
+  uneditable. A "Saved Badges" section was added.
+
+### 133. `event_menus.menu_group`
+
+Manage Plan Menus sections menus into **Core / Additional / Custom** and nothing in the data model
+expressed that. Added as an ENUM defaulting to `core`, with
+`idx_event_menus_group (company_id, menu_group, deleted_at)`. Existing rows all became `core`
+(8 local, 4 production).
+
+### 134. UI fixes
+
+- **Menu List column collapse.** 13 columns crushed Menu Name to one character per line. The four
+  Display/Active Status toggle columns were removed (they are still set in the form and shown in
+  the View dialog), the two-row header collapsed to one, and Menu Name given `min-w-[200px]`.
+- **Sidebar wrap.** The **top-level** collapsible label had no `truncate` while the sub-level did,
+  so "Subscription Management" wrapped to two lines and pushed the chevron out of line. Fixed for
+  every top-level group, not just this one.
+- **Missing route loaders.** Eight `loading.tsx` files exist in the codebase; none of the new
+  routes had one, so navigating showed nothing while the chunk resolved. Added for all new routes.
+- **Duplicate breadcrumbs** removed from 14 files plus `TaxonomyManager` — pages were rendering the
+  app's breadcrumb *and* a hardcoded one.
+- **Taxonomy icon** moved into the Name cell; the standalone Icon column dropped.
+
+### 135. The server was crashing silently
+
+Three separate causes, all presenting as nodemon's bare "app crashed":
+
+1. A **stale nodemon session** still held port 5001, so new terminals could never bind.
+2. **No `nodemon.json`** — it watched `*.*` from the project root, and Winston writes
+   `logs/application-*.log` on every request, so the server restarted on its own logging and the
+   rapid restarts raced on the port. Added a config watching `src` only.
+3. `node server.js` run from inside `src/` — `dotenv` resolves `.env` from the CWD, so
+   `DB_PASSWORD` was undefined and MySQL reported *"using password: NO"*.
+
+> **Why it was silent:** Winston has an exception file transport, so uncaught exceptions go to
+> `logs/exceptions-YYYY-MM-DD.log` and never reach the terminal. The EADDRINUSE stack was in there
+> the whole time. `tail logs/exceptions-*.log` is the diagnostic.
+
+### 136. Verified
+
+```
+Menu Management API      49/49 passed   median 27ms
+Subscription Plans API   all green — create with menus, filters, duplicate (auto PREMIUM-COPY),
+                         status toggle preserving menus, cascade delete
+Plan Badges API          all green — validation (25-char cap, bad style, missing text),
+                         apply_to round-trip, status toggle preserving pins, settings
+tsc --noEmit             exit 0
+next build               compiled, all routes present
+Both DBs                 identical structure, verified column-by-column
+```
+
+Demo data seeded on **local only**: 8 subscription plans matching the mockup rows, via the REST API
+rather than raw SQL so every row went through the same validation the wizard uses.
+
+### 137. Open
+
+1. **Nothing browser-tested.** Everything above is API + build level only. This is now the largest
+   outstanding risk and has been carried since §127.
+2. **Nothing committed** — 4+ files in the working tree; Vercel still serves `594f484`.
+3. **Local is missing the 4 `plan_types` permission rows** production has. Harmless while logged in
+   as super_admin (which bypasses `hasPermission`), but the two environments differ.
+4. Transactions / Invoices / Subscription Settings — sidebar entries with no design.
+5. `plan_type_id` is signed INT while every other new FK column is INT UNSIGNED, because
+   `plan_types.id` predates the convention. Worth normalising if that table is ever rebuilt.

@@ -82,6 +82,8 @@ db.PlanType = require('./PlanType')(sequelize, Sequelize);
 // Subscription Plans (the 6-step wizard) + their per-plan menu rows
 db.SubscriptionPlan = require('./SubscriptionPlan')(sequelize, Sequelize);
 db.SubscriptionPlanMenu = require('./SubscriptionPlanMenu')(sequelize, Sequelize);
+db.PlanBadge = require('./PlanBadge')(sequelize, Sequelize);
+db.PlanBadgePlan = require('./PlanBadgePlan')(sequelize, Sequelize);
 
 // Menu Management — event menu catalogue and its taxonomies
 db.EventCategory = require('./EventCategory')(sequelize, Sequelize);
@@ -292,8 +294,29 @@ db.SubscriptionPlan.belongsTo(db.EventCategory, { foreignKey: 'event_category_id
 db.SubscriptionPlan.belongsTo(db.EventType, { foreignKey: 'event_type_id', as: 'eventType' });
 db.SubscriptionPlan.belongsTo(db.Religion, { foreignKey: 'religion_id', as: 'religion' });
 
+// Audit users, so the view screen can show "Created By / Updated By" as names
+// rather than raw ids.
+db.SubscriptionPlan.belongsTo(db.User, { foreignKey: 'created_by', as: 'creator' });
+db.SubscriptionPlan.belongsTo(db.User, { foreignKey: 'updated_by', as: 'updater' });
+db.SubscriptionPlan.belongsTo(db.User, { foreignKey: 'deactivated_by', as: 'deactivator' });
+db.SubscriptionPlan.belongsTo(db.User, { foreignKey: 'deleted_by', as: 'deleter' });
+
 db.SubscriptionPlan.hasMany(db.SubscriptionPlanMenu, { foreignKey: 'plan_id', as: 'planMenus' });
 db.SubscriptionPlanMenu.belongsTo(db.SubscriptionPlan, { foreignKey: 'plan_id', as: 'plan' });
 db.SubscriptionPlanMenu.belongsTo(db.EventMenu, { foreignKey: 'menu_id', as: 'menu' });
+
+// Plan Badges — many-to-many, used only when a badge's apply_to is 'selected'.
+db.PlanBadge.belongsToMany(db.SubscriptionPlan, {
+  through: db.PlanBadgePlan,
+  foreignKey: 'badge_id',
+  otherKey: 'plan_id',
+  as: 'plans',
+});
+db.SubscriptionPlan.belongsToMany(db.PlanBadge, {
+  through: db.PlanBadgePlan,
+  foreignKey: 'plan_id',
+  otherKey: 'badge_id',
+  as: 'badges',
+});
 
 module.exports = db;

@@ -11,6 +11,7 @@ const MODULE_SLUG = 'event_menus';
 const WRITABLE_FIELDS = [
     'name',
     'slug',
+    'menu_group',
     'event_category_id',
     'event_type_id',
     'religion_id',
@@ -177,6 +178,11 @@ const getAll = async (query = {}, companyId = undefined) => {
 
     const religionId = numericFilter(query.religion_id);
     if (religionId !== undefined) where.religion_id = religionId;
+
+    // Core / Additional / Custom section filter — idx_event_menus_group
+    if (query.menu_group && query.menu_group !== 'all') {
+        where.menu_group = String(query.menu_group).toLowerCase();
+    }
 
     // menu_type=website|mobile — indexed via idx_event_menus_platform
     if (query.menu_type && query.menu_type !== 'all') {

@@ -89,6 +89,38 @@ module.exports = (sequelize) => {
             allowNull: false,
             defaultValue: 0,
         },
+        // Deactivation / deletion audit — feeds the confirm + success screens.
+        // No DB foreign key on the *_by columns: users.id is a signed INT while
+        // these follow created_by/updated_by as INT UNSIGNED. The Sequelize
+        // association still joins, exactly as created_by already does.
+        deactivation_reason: {
+            type: DataTypes.STRING(100),
+            allowNull: true,
+        },
+        deactivation_comments: {
+            type: DataTypes.STRING(300),
+            allowNull: true,
+        },
+        deactivated_at: {
+            type: DataTypes.DATE,
+            allowNull: true,
+        },
+        deactivated_by: {
+            type: DataTypes.INTEGER.UNSIGNED,
+            allowNull: true,
+        },
+        deletion_reason: {
+            type: DataTypes.STRING(100),
+            allowNull: true,
+        },
+        deletion_comments: {
+            type: DataTypes.STRING(300),
+            allowNull: true,
+        },
+        deleted_by: {
+            type: DataTypes.INTEGER.UNSIGNED,
+            allowNull: true,
+        },
         company_id: {
             type: DataTypes.INTEGER.UNSIGNED,
             allowNull: true,
