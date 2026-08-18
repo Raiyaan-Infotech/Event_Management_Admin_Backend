@@ -136,13 +136,31 @@ const login = async (data = {}, vendorId = DEFAULT_VENDOR_ID) => {
         throw ApiError.forbidden('Your account is not active. Please contact us.');
     }
 
-    // Gives the admin Clients list something real in its Last Login column.
-    // `silent` so the row's updated_at is not churned by a plain sign-in, and
-    // `hooks: false` so beforeUpdate cannot re-hash the already-hashed password.
-    await client.update({ last_login_at: new Date() }, { silent: true, hooks: false });
+    // Re-read through the default scope. This instance does not carry the
+    // password column at all, which is what makes the stamp below safe.
+    const safeClient = await WebsiteClient.findByPk(client.id);
 
-    // Re-read through the default scope so the hash cannot ride along.
-    return WebsiteClient.findByPk(client.id);
+    // Gives the admin Clients list something real in its Last Login column.
+    //
+    // Stamped on the default-scoped instance deliberately, NOT on `client`.
+    // `client` was loaded through `withPassword`, so it carries the hash, and
+    // the model's beforeUpdate hook hashes the password whenever a row is
+    // saved. Only that hook's own `changed('password')` check holds it off —
+    // and a hash fed back through bcrypt yields a hash OF the hash, which
+    // matches nothing. The account is then unrecoverable, and it fails
+    // silently: the login that breaks it still succeeds, and the NEXT one
+    // reads as a mistyped password. On `safeClient` the column is not loaded,
+    // so there is nothing there to re-hash.
+    //
+    // Note this DOES move updated_at, and Sequelize's `silent` option cannot
+    // stop it: the column is declared `ON UPDATE CURRENT_TIMESTAMP`, so MySQL
+    // rewrites it on any change to the row no matter what the ORM sends. So a
+    // sign-in reads as a modification in the admin Clients list. Left as is —
+    // the alternative is either writing the old value back by hand on every
+    // login, or dropping the DB default that every other table here relies on.
+    await safeClient.update({ last_login_at: new Date() });
+
+    return safeClient;
 };
 
 // ── Admin CRUD ───────────────────────────────────────────────────────────────
