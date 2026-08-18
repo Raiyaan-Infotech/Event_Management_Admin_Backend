@@ -351,19 +351,21 @@ const findOrCreateFromProfile = async ({ providerName, profile, vendorId, compan
 
     // 1 — already linked.
     //
-    // `paranoid: false` on both lookups is load-bearing. The model soft-deletes,
-    // but `uniq_website_client_email (vendor_id, email)` is a plain MySQL unique
-    // index that does not know what `deleted_at` means. Skipping deleted rows
-    // here means the INSERT below collides with one and Sequelize surfaces the
-    // useless message "Validation error" - which is exactly how this failed.
-    // A deleted row otherwise holds its email hostage forever (§123).
+    // Deleted rows are deliberately NOT matched here. A deleted account is gone,
+    // so someone signing in afterwards is a NEW client and starts the flow from
+    // scratch - including the mobile step, which a reclaimed row would skip by
+    // carrying its old number back with it. It also keeps this identical to the
+    // password signup path, which has always produced a fresh row.
+    //
+    // Safe only because deleting stamps the email (`uniqueFields: ['email']` in
+    // websiteClient.service), so the old row no longer occupies the unique
+    // index. Remove that and the insert below starts colliding again.
     let client = await WebsiteClient.findOne({
         where: {
             vendor_id: resolvedVendorId,
             source: providerName,
             provider_id: String(profile.provider_id),
         },
-        paranoid: false,
     });
 
     let created = false;
@@ -372,7 +374,6 @@ const findOrCreateFromProfile = async ({ providerName, profile, vendorId, compan
     if (!client && profile.email && profile.email_verified) {
         client = await WebsiteClient.findOne({
             where: { vendor_id: resolvedVendorId, email: profile.email },
-            paranoid: false,
         });
         if (client) {
             // Link, but do NOT rewrite `source`: that column records how the
@@ -383,44 +384,6 @@ const findOrCreateFromProfile = async ({ providerName, profile, vendorId, compan
                 email_verified: 1,
             });
         }
-    }
-
-    // A previously deleted client signing in again.
-    //
-    // Restored rather than refused: the provider has just PROVEN they control
-    // this email, and refusing would lock them out permanently with no way for
-    // an admin to notice - deleted rows are invisible in the Clients list.
-    // Logged loudly, because it does undo an admin's delete.
-    if (client && client.deleted_at) {
-        await client.restore();
-
-        // Deleting writes THREE things, and coming back has to undo all three:
-        //   deleted_at  — the soft delete itself
-        //   is_active   — set to 0 on the way out, so a half-undo leaves the
-        //                 account rejected by the guard below with "Your
-        //                 account is not active"
-        //   email       — stamped by `uniqueFields` to free the address, so a
-        //                 restored row would otherwise carry a mangled one
-        //
-        // Safe to rewrite the email because we only reach here having matched
-        // this row by the PROVIDER's id, and the provider has just confirmed
-        // the person controls that address.
-        await client.update(
-            {
-                is_active: 1,
-                email: profile.email || client.email,
-                name: client.name || profile.name,
-                avatar_url: client.avatar_url || profile.avatar_url,
-                email_verified: profile.email_verified ? 1 : client.email_verified,
-            },
-            { hooks: false }
-        );
-
-        logger.warn(
-            `Restored soft-deleted website_client ${client.id} (${client.email}) ` +
-                `after a verified ${providerName} sign-in`
-        );
-        created = true;
     }
 
     // 3 — new client.
@@ -439,10 +402,25 @@ const findOrCreateFromProfile = async ({ providerName, profile, vendorId, compan
         // the service — so a collision here is a real conflict, not a link.
         const clash = await WebsiteClient.findOne({
             where: { vendor_id: resolvedVendorId, email: profile.email },
-            attributes: ['id'],
+            attributes: ['id', 'email', 'deleted_at'],
             paranoid: false,
         });
-        if (clash) {
+
+        if (clash && clash.deleted_at) {
+            // Deleted BEFORE `uniqueFields: ['email']` shipped, so it still
+            // holds the address and would break the insert below with an opaque
+            // "Validation error". Free it the same way a delete does now, then
+            // carry on and create the new account. Self-healing beats asking
+            // someone to go and fix a row they cannot even see.
+            await clash.update(
+                { email: `${clash.email}-d${Date.now().toString().slice(-13)}`.slice(0, 255) },
+                { hooks: false, paranoid: false }
+            );
+            logger.warn(
+                `Freed the email held by soft-deleted website_client ${clash.id} ` +
+                    `so ${profile.email} could sign up again`
+            );
+        } else if (clash) {
             throw ApiError.badRequest(
                 'An account with this email already exists. Please sign in with your password.'
             );
