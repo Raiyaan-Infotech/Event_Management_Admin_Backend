@@ -393,6 +393,17 @@ const findOrCreateFromProfile = async ({ providerName, profile, vendorId, compan
     // Logged loudly, because it does undo an admin's delete.
     if (client && client.deleted_at) {
         await client.restore();
+
+        // `is_active` has to be reset too, not just `deleted_at`. base.service's
+        // soft delete writes `is_active = 0` on the way out ("so inactive status
+        // is immediately visible"), so a row that comes back still carries that
+        // 0 — and the is_active guard further down would then reject the very
+        // account we just restored, with "Your account is not active". Undoing
+        // the delete means undoing both halves of it.
+        if (client.is_active !== 1) {
+            await client.update({ is_active: 1 }, { hooks: false });
+        }
+
         logger.warn(
             `Restored soft-deleted website_client ${client.id} (${client.email}) ` +
                 `after a verified ${providerName} sign-in`
