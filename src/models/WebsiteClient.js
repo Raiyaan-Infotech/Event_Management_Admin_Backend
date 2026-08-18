@@ -45,6 +45,12 @@ module.exports = (sequelize) => {
                 defaultValue: 'website',
             },
 
+            // The provider's own user id (Google `sub`, Facebook id). This, not
+            // the email, is what identifies a social account: Facebook does not
+            // always share an email, and a Google email can change.
+            provider_id: { type: DataTypes.STRING(64), allowNull: true },
+            avatar_url: { type: DataTypes.STRING(500), allowNull: true },
+
             // Verification is tracked but NOT enforced: there is no SMS provider
             // configured in this backend, so the signup form's OTP is still a
             // local-only UI. Kept so wiring a provider later is a flag flip.

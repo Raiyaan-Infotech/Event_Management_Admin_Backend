@@ -35,4 +35,14 @@ router.post('/website-clients/register', websiteClientController.register);
 // sign into yet, so the screen just confirms the login was valid.
 router.post('/website-clients/login', websiteClientController.login);
 
+// ── Social sign-in ──────────────────────────────────────────────────────────
+// `start` and `callback` are top-level browser navigations that answer with a
+// 302, not JSON — the browser has to physically leave for the provider and come
+// back. Only ONE callback URL is registered per provider (this server's own);
+// the tenant site to return to travels inside the signed `state`, because
+// tenant domains are open-ended and cannot all be registered up front.
+router.get('/website-clients/oauth/providers', websiteClientController.oauthProviders);
+router.get('/website-clients/oauth/:provider/start', websiteClientController.oauthStart);
+router.get('/website-clients/oauth/:provider/callback', websiteClientController.oauthCallback);
+
 module.exports = router;

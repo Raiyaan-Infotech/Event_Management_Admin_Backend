@@ -1,4 +1,5 @@
 const websiteClientService = require('../services/websiteClient.service');
+const oauthService = require('../services/websiteClientOAuth.service');
 const ApiResponse = require('../utils/apiResponse');
 const logger = require('../utils/logger');
 const { asyncHandler } = require('../utils/helpers');
@@ -27,6 +28,104 @@ const login = asyncHandler(async (req, res) => {
     logger.logRequest(req, `Website login: ${client.email}`);
     return ApiResponse.success(res, { client }, 'Login successful');
 });
+
+// ── Public: social sign-in ───────────────────────────────────────────────────
+
+/**
+ * Sends the browser to the provider's consent screen.
+ *
+ * A top-level 302, not JSON: the browser has to LEAVE for accounts.google.com,
+ * which an XHR cannot do. So the frontend navigates here rather than fetching.
+ */
+const oauthStart = asyncHandler(async (req, res) => {
+    const { provider } = req.params;
+    const returnTo = req.query.return_to || req.get('referer');
+    const vendorId = req.query.vendor_id || req.companyId || undefined;
+
+    const url = await oauthService.buildAuthorizeUrl({
+        provider,
+        returnTo,
+        vendorId,
+        companyId: req.companyId ?? null,
+    });
+
+    logger.logRequest(req, `OAuth start: ${provider}`);
+    return res.redirect(url);
+});
+
+/**
+ * Where the provider sends the browser back.
+ *
+ * Every exit from here is a redirect to the site the visitor started on, with
+ * the outcome in the query string — never a JSON body, because the browser is
+ * doing a top-level navigation and would otherwise be left staring at raw JSON
+ * on the API's domain.
+ *
+ * The one exception is a `state` we cannot verify. That is the only case where
+ * we do not know where "back" is, and guessing from `referer` is exactly the
+ * open redirect the signing exists to prevent — so it answers 400 in place.
+ */
+const oauthCallback = asyncHandler(async (req, res) => {
+    const { provider } = req.params;
+    const { code, state } = req.query;
+
+    const decoded = oauthService.verifyState(state);
+    if (!decoded || decoded.p !== String(provider).toLowerCase()) {
+        logger.logRequest(req, `OAuth callback rejected: bad state (${provider})`);
+        return res.status(400).send('Sign-in link has expired or is invalid. Please try again.');
+    }
+
+    // Re-check the return URL even though it came out of a signed token. The
+    // signature only proves WE minted it, and start mints whatever it is asked
+    // for — the allowlist is the actual guard, so it runs on both legs.
+    if (!(await oauthService.isAllowedReturnTo(decoded.r))) {
+        logger.logRequest(req, `OAuth callback rejected: return_to not allowed`);
+        return res.status(400).send('Sign-in return address is not an allowed site.');
+    }
+
+    const back = (params) => {
+        const url = new URL(decoded.r);
+        Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+        return res.redirect(url.toString());
+    };
+
+    // The visitor pressed Cancel on the consent screen. Not an error worth a
+    // stack trace — send them back quietly.
+    if (req.query.error || !code) {
+        return back({ auth: 'cancelled' });
+    }
+
+    try {
+        const profile = await oauthService.exchangeCodeForProfile(provider, code);
+        const { client, created } = await oauthService.findOrCreateFromProfile({
+            providerName: String(provider).toLowerCase(),
+            profile,
+            vendorId: decoded.v,
+            companyId: decoded.c ?? null,
+        });
+
+        logger.logRequest(req, `OAuth ${created ? 'signup' : 'login'}: ${client.email} via ${provider}`);
+        return back({
+            auth: 'success',
+            mode: created ? 'signup' : 'login',
+            provider: String(provider).toLowerCase(),
+            name: client.name || '',
+        });
+    } catch (err) {
+        // Provider outages and refusals both land here. The visitor sees a
+        // readable sentence; the detail goes to the log.
+        const message = err?.isOperational
+            ? err.message
+            : 'Sign-in failed. Please try again.';
+        logger.error?.(`OAuth ${provider} failed: ${err?.message}`);
+        return back({ auth: 'error', message });
+    }
+});
+
+/** Lets the frontend hide a provider button that this server cannot serve. */
+const oauthProviders = asyncHandler(async (req, res) =>
+    ApiResponse.success(res, { providers: oauthService.listConfiguredProviders() })
+);
 
 // ── Admin ────────────────────────────────────────────────────────────────────
 
@@ -84,6 +183,9 @@ const deleteById = asyncHandler(async (req, res) => {
 module.exports = {
     register,
     login,
+    oauthStart,
+    oauthCallback,
+    oauthProviders,
     getAll,
     getStats,
     getById,
