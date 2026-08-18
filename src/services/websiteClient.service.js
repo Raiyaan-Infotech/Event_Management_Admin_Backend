@@ -78,12 +78,23 @@ const register = async (data = {}, vendorId = DEFAULT_VENDOR_ID, companyId = nul
     const resolvedVendorId = Number(vendorId) || DEFAULT_VENDOR_ID;
     await assertEmailFree(payload.email, resolvedVendorId);
 
+    // A public signup carries no company context, so this used to store NULL —
+    // and every admin read scopes by `company_id` (base.service adds
+    // `WHERE company_id = ?`), which NULL can never match. The rows existed but
+    // were invisible in the one module that exists to show them. The vendor is
+    // known, and it already belongs to a company, so derive it from there.
+    let resolvedCompanyId = companyId ?? null;
+    if (resolvedCompanyId == null) {
+        const vendor = await Vendor.findByPk(resolvedVendorId, { attributes: ['id', 'company_id'] });
+        resolvedCompanyId = vendor?.company_id ?? null;
+    }
+
     // Not verified: there is no SMS provider wired up, so the signup form's OTP
     // is a local-only UI. The flags exist so turning that on is a flag flip.
     const created = await WebsiteClient.create({
         ...payload,
         vendor_id: resolvedVendorId,
-        company_id: companyId ?? null,
+        company_id: resolvedCompanyId,
         source: 'website',
         email_verified: 0,
         mobile_verified: 0,
@@ -131,6 +142,29 @@ const login = async (data = {}, vendorId = DEFAULT_VENDOR_ID) => {
 
     const isValid = await bcrypt.compare(password, client.password);
     if (!isValid) throw ApiError.unauthorized('Invalid email or password.');
+
+    // The login form offers a mobile field, and it used to be ignored outright:
+    // any number at all — including one belonging to nobody — was accepted so
+    // long as the email and password matched. A field that looks like it is
+    // being checked and is not is worse than no field.
+    //
+    // Checked only when one is supplied, because mobile is optional at signup
+    // and a blank field means "not offered", not "must be empty". Compared on
+    // digits alone so +91 98765 43210 and 9876543210 are the same number.
+    //
+    // Deliberately AFTER the password check: reversing them would let anyone
+    // test whether a mobile number belongs to a given account without knowing
+    // the password.
+    const suppliedMobile = digitsOnly(data.mobile);
+    if (suppliedMobile) {
+        const storedMobile = digitsOnly(client.mobile);
+        if (!storedMobile) {
+            throw ApiError.unauthorized('This account has no mobile number on file.');
+        }
+        if (storedMobile !== suppliedMobile) {
+            throw ApiError.unauthorized('That mobile number does not match this account.');
+        }
+    }
 
     if (client.is_active !== 1) {
         throw ApiError.forbidden('Your account is not active. Please contact us.');

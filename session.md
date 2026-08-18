@@ -2901,3 +2901,168 @@ in §151 above if it ever needs rebuilding.
 6. **Website signups get no login anywhere.** The Client Portal reads `vendor_clients` (§151).
 7. Render/Vercel redeploy should be confirmed before testing on production — the DB is ahead of
    whatever is actually serving until those finish.
+
+---
+
+## Session 16 — Menu List reorder + form flow, and four Subscription fixes
+
+> **Date:** 2026-08-18 | Continues from Session 15 (§148–155)
+> **Frontend only:** `Event_Management_Admin_Frontend`. **No backend change, no schema change.**
+> **Nothing committed.** `tsc --noEmit` exit 0 · `next build` exit 0 from a clean `.next`.
+
+### 156. Change Order moved out of the three-dot menu and into the table
+
+Per request: the dropdown's **Change Order** item is gone, replaced by a **Change Order** column
+sitting directly after Menu Type with an up and a down arrow per row. Each press moves the row one
+position and writes immediately through the existing `PATCH /event-menus/reorder` — no separate
+save step, no dialog.
+
+`_components/menu-reorder-dialog.tsx` was its only consumer, so the file was **deleted** rather
+than left as dead code (§144's precedent, where `MenuViewDialog` went the same way).
+
+Three things about how the arrows behave, all deliberate:
+
+- **Only the visible page is reordered.** The arrows reuse the pool of `sort_order` values the
+  current page already holds, so rows on other pages keep their positions. The consequence is that
+  the first row's up arrow and the last row's down arrow are **disabled** — the neighbour they
+  would swap with is not loaded. The deleted dialog had the identical limitation and said so in
+  its header.
+- **Ties are renumbered, not swapped.** `parseSort` in `utils/helpers.js` returns
+  `[[sort_field, direction]]` — a **single** column, no tiebreak — so two adjacent rows sharing a
+  `sort_order` would have the same numbers written back and visibly not move. When the page's pool
+  contains duplicates it renumbers densely from the pool's minimum instead.
+- Both arrows disable while the mutation is pending, so a fast double-click cannot queue two
+  conflicting reorders. The page's existing `PageLoader` already covered `reorderMenus.isPending`.
+
+> The numeric **Sort Order** column was kept. It is arguably redundant beside the arrows, but it is
+> the only confirmation that the write actually landed.
+
+### 157. Menu form — one hook callback caused two separate reported bugs
+
+Reported as two things: Save redirects to the edit form instead of the list, and **Save & Add
+Another** *also* lands on the edit form instead of blanking for the next menu.
+
+Both were the same line. `useCreateEventMenu` was constructed with a navigation callback that did
+`router.replace('/admin/menu-management/menus/create?id=' + menu.id)`.
+
+That callback fires on **every** create. So "Save & Add Another" did correctly reset the form for
+the next entry — and was then immediately dragged onto the edit form by the hook.
+
+Navigation now lives at each call site, which is what the hook's own doc comment always asked for
+("navigation belongs to the component that knows where it wants to go"):
+
+| Button | Goes to |
+|---|---|
+| Save Menu (create) | Menu List |
+| Update Menu (edit) | Menu List |
+| Save & Add Another | nowhere — stays on the form |
+
+> This **reverses §125's decision** to stay on the form after create. That rationale was §109's
+> unmount-kills-the-translation-stream problem, which does not apply here: Menu Management has no
+> translation wiring at all. Requested explicitly.
+
+Also on this form:
+- **Reset moved to the header**, beside "Back to Menu List". The footer now holds only Save and
+  Save & Add Another.
+- **Save & Add Another now clears Description and Remarks** as well as name and icon. The taxonomy
+  selections still carry over (consecutive menus almost always belong to the same event), but the
+  previous menu's free text was silently riding along into the next record.
+
+### 158. Every new menu was saving at Sort Order 1
+
+The list showed a block of six rows all claiming position 1. `emptyForm()` had `sort_order: 1` as a
+literal, so every menu created through this form landed on 1 — and with no tiebreak behind the sort
+(§156), their relative order was then arbitrary.
+
+Sort Order now seeds to the highest existing position **+ 1**, read from a one-row
+`useEventMenus({ limit: 1, sort_by: 'sort_order', sort_order: 'DESC' })`. Reset uses the seeded
+value rather than dropping back to 1.
+
+Two guards worth keeping:
+- **Never seeds in edit mode.** A saved row already has its position; re-seeding would silently
+  move it.
+- **Typing in the field marks it seeded**, so a slow list query landing afterwards cannot overwrite
+  a position entered by hand.
+
+Rows already sitting at 1 keep their value — §156's arrows are how those get sorted out.
+
+### 159. Status → switch, taxonomy → colour-tinted badges
+
+Menu List, per request:
+
+- **Status** was a rounded pill button; it is now a `Switch` with the Active/Inactive label
+  beneath, matching the layout the Subscription Plans list already uses so the two tables read
+  alike. Same `updateStatus` mutation behind it.
+- **Event Category / Event Type / Religion** now render as badges through a new `TaxonomyBadge`.
+  No API change was needed — `MENU_INCLUDE` in `eventMenu.service.js` already selects
+  `['id', 'name', 'color']` for all three joins.
+
+> **The colour drives the dot, border and background wash — never the text.** These colours are
+> admin-picked and some real data is very pale (`#fdefc9`), which as a text colour is illegible on
+> a light chip. A taxonomy with no colour degrades to a plain neutral chip; a missing value still
+> renders `—` rather than an empty badge. Badges wrap (`max-w` + `break-words`) rather than
+> truncate — this table is auto-layout, so `truncate` collapses the column instead of clipping.
+
+A row with `is_active === 2` **keeps the amber Pending badge** instead of getting a switch: that
+status is not the admin's to flip until the approval request is decided. Rows locked by a pending
+approval keep the switch, disabled, as before.
+
+### 160. "Reset to Default" was working — the filter was hiding it
+
+Reported as broken on Manage Plan Menus: pressing it toasts "Reverted to the saved menu selection"
+while the list still reads "No menus match this plan's scope."
+
+The revert itself was correct (`setLoadedId(null)` re-runs the seeding effect). The real defect was
+one level up: **the category filter listed every company category**, while `allMenus` is already
+fetched scoped to the plan. On a Wedding/Nikah plan, selecting "Anniversary" can only ever match
+nothing — so the toggles reverted behind an empty list and nothing appeared to happen.
+
+Fixed both halves:
+1. Filter options are now derived from the menus actually loaded, and the filter **hides itself**
+   when they all sit in one category (one meaningful choice is not a filter).
+2. Reset clears the search box and the category filter along with the toggles, so the revert is
+   visible.
+
+`useEventCategories` became unused on that page and was removed.
+
+### 161. Three smaller Subscription fixes
+
+- **Trial Period (Days) moved to wizard step 1** (Plan Information), where the design puts it. It
+  was on step 3 (Pricing) and was removed from there — two inputs bound to one `form.trial_days`
+  would be confusing, and step 5's Review card already reads it back.
+- **Duplicate Plan now lands on a success screen** at `/admin/subscriptions/[id]/duplicated`, built
+  on the wizard's step-6 success pattern. It **reads the plan back by id** rather than carrying the
+  mutation response through navigation, so a refresh or a shared link still resolves.
+  `useDuplicateSubscriptionPlan` gained an optional `onSuccess(plan)` — the caller needs the NEW
+  plan's id. A `loading.tsx` was added alongside it (§134).
+- **The "Sample figures" caption was removed** from the Deactivate/Delete Plan Usage panel, on
+  request.
+
+> ⚠ **That caption was the only thing on screen marking those numbers as fake.** Total 118 /
+> Active 96 / Cancelled 22 are still invented (§140) — nothing in the database tracks plan
+> subscribers — and they now read as fact to anyone deciding whether to delete a plan. The
+> `PLACEHOLDER_PLAN_USAGE` doc comment was updated to record that the on-screen warning is gone, so
+> whoever wires up `plan_subscriptions` starts there.
+
+### 162. Verified
+
+```
+tsc --noEmit    exit 0
+next build      exit 0, all routes present incl. /admin/subscriptions/[id]/duplicated
+```
+
+> A first `next build` failed with `Cannot find module .next/server/pages/_document.js` right after
+> "Compiled successfully". Stale `.next` from an earlier run, not a regression — same trap as §52
+> and §146. `rmdir /s /q .next` then rebuild is clean. On Windows, `Remove-Item -Recurse -Force`
+> can fail with `ENOTEMPTY` on `.next\export`; `cmd /c rmdir` works.
+
+### 163. Open
+
+1. **Nothing browser-tested.** Carried since §127. Everything in this session is a UI flow change —
+   redirects, an arrow that writes on click, a switch, a new success route — which is precisely the
+   class a click-through catches and a typecheck cannot. Highest-value next step.
+2. **Nothing committed** in either repo.
+3. **Plan Usage figures are now unlabelled placeholders** (§161) — needs `plan_subscriptions`.
+4. Arrow reorder cannot cross a page boundary (§156). Fine at 9 menus; revisit if the list grows
+   past a page or two.
+5. Existing menu rows still clustered at `sort_order` 1 (§158) — cosmetic, fixable from the UI.
