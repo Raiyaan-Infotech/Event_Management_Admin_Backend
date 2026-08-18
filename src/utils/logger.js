@@ -85,12 +85,16 @@ const logger = winston.createLogger({
   ],
 });
 
-// Add console transport in development
-if (process.env.NODE_ENV !== 'production') {
-  logger.add(new winston.transports.Console({
-    format: consoleFormat,
-  }));
-}
+// Console transport everywhere, including production.
+//
+// It used to be development-only, which meant that on Render every error went
+// to a file on an ephemeral disk nobody can read - a failing request logged
+// nothing visible at all, and the only clue was morgan's status code. Render,
+// like every PaaS, captures stdout, so this is how errors actually reach you.
+// Production gets the plain format; the colourised one is for a real terminal.
+logger.add(new winston.transports.Console({
+  format: process.env.NODE_ENV === 'production' ? undefined : consoleFormat,
+}));
 
 // Helper methods for structured logging
 logger.logRequest = (req, message = 'Request received') => {

@@ -246,7 +246,8 @@ const buildAuthorizeUrl = async ({ provider: providerName, returnTo, vendorId, c
 
 // ── Step 2: code -> tokens -> profile ────────────────────────────────────────
 
-const exchangeCodeForProfile = async (providerName, code) => {
+const exchangeCodeForProfile = async (rawProviderName, code) => {
+    const providerName = String(rawProviderName || '').toLowerCase();
     const provider = getProvider(providerName);
 
     const tokenResponse = await axios.post(
@@ -264,11 +265,30 @@ const exchangeCodeForProfile = async (providerName, code) => {
         }
     );
 
+    // Graph API sometimes answers 200 with an error body rather than a 4xx, so
+    // axios does not throw and the missing token is the only symptom.
+    if (tokenResponse.data?.error) {
+        const detail = tokenResponse.data.error?.message || 'unknown error';
+        throw ApiError.badRequest(`${provider.label} rejected the sign-in: ${detail}`);
+    }
+
     const accessToken = tokenResponse.data?.access_token;
     if (!accessToken) throw ApiError.badRequest('The sign-in provider did not return an access token.');
 
+    // `appsecret_proof` is required when the app has "Require app secret for
+    // API calls" switched on (Advanced > Security). It is off by default, and
+    // when it is off Facebook simply ignores this - so sending it always costs
+    // nothing and removes one silent 400 from the list of possible failures.
+    const extraParams = {};
+    if (providerName === 'facebook') {
+        extraParams.appsecret_proof = crypto
+            .createHmac('sha256', provider.clientSecret())
+            .update(accessToken)
+            .digest('hex');
+    }
+
     const userInfo = await axios.get(provider.userInfoUrl, {
-        params: { ...(provider.userInfoParams || {}) },
+        params: { ...(provider.userInfoParams || {}), ...extraParams },
         headers: { Authorization: `Bearer ${accessToken}` },
         timeout: 15000,
     });

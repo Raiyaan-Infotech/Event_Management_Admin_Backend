@@ -126,12 +126,26 @@ const oauthCallback = asyncHandler(async (req, res) => {
                 : {}),
         });
     } catch (err) {
-        // Provider outages and refusals both land here. The visitor sees a
-        // readable sentence; the detail goes to the log.
+        // Provider outages and refusals both land here.
+        //
+        // An axios failure's own `message` is only "Request failed with status
+        // code 400" - the provider's actual explanation ("Error validating
+        // client secret", "redirect_uri mismatch") sits in the response body,
+        // and reporting the former told nobody anything.
+        const providerError =
+            err?.response?.data?.error?.message ||      // Facebook / Graph API
+            err?.response?.data?.error_description ||   // Google / OIDC
+            (typeof err?.response?.data?.error === 'string' ? err.response.data.error : null);
+
         const message = err?.isOperational
             ? err.message
-            : 'Sign-in failed. Please try again.';
-        logger.error?.(`OAuth ${provider} failed: ${err?.message}`);
+            : providerError || 'Sign-in failed. Please try again.';
+
+        logger.error(
+            `OAuth ${provider} failed: ${err?.message}` +
+                (err?.response?.data ? ` | provider said: ${JSON.stringify(err.response.data)}` : '') +
+                (err?.stack ? `\n${err.stack}` : '')
+        );
         return back({ auth: 'error', message });
     }
 });
