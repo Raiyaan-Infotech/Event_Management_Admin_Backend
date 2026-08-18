@@ -41,11 +41,32 @@ const assertPasswordValid = (password) => {
     if (!/[A-Z]/.test(value)) throw ApiError.badRequest('Password must include an uppercase letter.');
 };
 
+/**
+ * `paranoid: false` because `uniq_website_client_email (vendor_id, email)` is a
+ * plain unique index — it counts soft-deleted rows, while a normal lookup does
+ * not. Without this the insert collides and Sequelize reports only
+ * "Validation error", which says nothing about what went wrong.
+ *
+ * A deleted row is NOT silently reused here, unlike the social path. There a
+ * provider has proven the person controls the address; a password signup proves
+ * nothing, so handing over a previous occupant's record would be a takeover.
+ */
 const assertEmailFree = async (email, vendorId, excludeId = null) => {
     const where = { email, vendor_id: vendorId };
     if (excludeId) where.id = { [Op.ne]: excludeId };
-    const existing = await WebsiteClient.findOne({ where, attributes: ['id'] });
-    if (existing) throw ApiError.badRequest('An account with this email already exists.');
+    const existing = await WebsiteClient.findOne({
+        where,
+        attributes: ['id', 'deleted_at'],
+        paranoid: false,
+    });
+    if (!existing) return;
+
+    if (existing.deleted_at) {
+        throw ApiError.badRequest(
+            'An account with this email was removed previously. Please contact us to restore it.'
+        );
+    }
+    throw ApiError.badRequest('An account with this email already exists.');
 };
 
 // ── Public: self-signup from the website ─────────────────────────────────────

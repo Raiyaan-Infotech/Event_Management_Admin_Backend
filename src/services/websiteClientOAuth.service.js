@@ -350,12 +350,20 @@ const findOrCreateFromProfile = async ({ providerName, profile, vendorId, compan
     }
 
     // 1 — already linked.
+    //
+    // `paranoid: false` on both lookups is load-bearing. The model soft-deletes,
+    // but `uniq_website_client_email (vendor_id, email)` is a plain MySQL unique
+    // index that does not know what `deleted_at` means. Skipping deleted rows
+    // here means the INSERT below collides with one and Sequelize surfaces the
+    // useless message "Validation error" - which is exactly how this failed.
+    // A deleted row otherwise holds its email hostage forever (§123).
     let client = await WebsiteClient.findOne({
         where: {
             vendor_id: resolvedVendorId,
             source: providerName,
             provider_id: String(profile.provider_id),
         },
+        paranoid: false,
     });
 
     let created = false;
@@ -364,6 +372,7 @@ const findOrCreateFromProfile = async ({ providerName, profile, vendorId, compan
     if (!client && profile.email && profile.email_verified) {
         client = await WebsiteClient.findOne({
             where: { vendor_id: resolvedVendorId, email: profile.email },
+            paranoid: false,
         });
         if (client) {
             // Link, but do NOT rewrite `source`: that column records how the
@@ -374,6 +383,21 @@ const findOrCreateFromProfile = async ({ providerName, profile, vendorId, compan
                 email_verified: 1,
             });
         }
+    }
+
+    // A previously deleted client signing in again.
+    //
+    // Restored rather than refused: the provider has just PROVEN they control
+    // this email, and refusing would lock them out permanently with no way for
+    // an admin to notice - deleted rows are invisible in the Clients list.
+    // Logged loudly, because it does undo an admin's delete.
+    if (client && client.deleted_at) {
+        await client.restore();
+        logger.warn(
+            `Restored soft-deleted website_client ${client.id} (${client.email}) ` +
+                `after a verified ${providerName} sign-in`
+        );
+        created = true;
     }
 
     // 3 — new client.
@@ -393,6 +417,7 @@ const findOrCreateFromProfile = async ({ providerName, profile, vendorId, compan
         const clash = await WebsiteClient.findOne({
             where: { vendor_id: resolvedVendorId, email: profile.email },
             attributes: ['id'],
+            paranoid: false,
         });
         if (clash) {
             throw ApiError.badRequest(
