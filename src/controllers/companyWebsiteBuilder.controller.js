@@ -731,7 +731,13 @@ const getTemplates = asyncHandler(async (req, res) => {
         replacements.push(`%${search}%`, `%${search}%`);
     }
 
-    sql += ' ORDER BY t.sort_order ASC, t.id DESC';
+    // `id ASC`, not `id DESC`. Templates routinely share a sort_order (they all
+    // default to the same value), and the tiebreak is then the ONLY thing
+    // deciding the order. The public site sorts `sort_order ASC, id ASC` — the
+    // convention every other list here uses — so a DESC tiebreak made the admin
+    // table and the live page disagree for every template that had not been
+    // given a distinct position.
+    sql += ' ORDER BY t.sort_order ASC, t.id ASC';
 
     const rows = await sequelize.query(sql, { replacements, type: QueryTypes.SELECT });
     return ApiResponse.success(res, rows.map(parseRow), 'Templates retrieved');

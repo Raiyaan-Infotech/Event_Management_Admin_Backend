@@ -379,17 +379,27 @@ const FIELD_CATALOG = {
       const items = Array.isArray(settings?.items) ? settings.items : [];
       if (items.length === 0) return [];
 
+      // Keyed by the item's OWN id, not its position.
+      //
+      // Position was the original design and it breaks the moment anyone drags
+      // a card: the text moves, the translation slots do not, and every
+      // non-English visitor sees the right words on the wrong cards. Items
+      // already carry a stable id, so reordering is now free.
+      //
+      // `slotFor` falls back to the position for any legacy item that somehow
+      // has no id, so a malformed row degrades instead of throwing.
       const fields = [];
       items.forEach((item, index) => {
+        const slot = item?.id != null && item.id !== '' ? `i${item.id}` : `p${index + 1}`;
         const position = index + 1;
         fields.push({
-          key: `item_${position}_title`,
+          key: `item_${slot}_title`,
           label: `Card ${position} Title`,
           type: 'input',
           value: item?.title || '',
         });
         fields.push({
-          key: `item_${position}_description`,
+          key: `item_${slot}_description`,
           label: `Card ${position} Description`,
           type: 'input',
           value: item?.description || '',
