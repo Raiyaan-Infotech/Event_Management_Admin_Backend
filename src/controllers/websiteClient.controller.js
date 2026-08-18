@@ -105,11 +105,25 @@ const oauthCallback = asyncHandler(async (req, res) => {
         });
 
         logger.logRequest(req, `OAuth ${created ? 'signup' : 'login'}: ${client.email} via ${provider}`);
+
+        // A provider never tells us a phone number, so the mobile step happens
+        // after the round trip. Only asked for when the account has none —
+        // re-prompting someone who already verified would be noise.
+        const needsMobile = !client.mobile;
+
         return back({
             auth: 'success',
             mode: created ? 'signup' : 'login',
             provider: String(provider).toLowerCase(),
             name: client.name || '',
+            ...(needsMobile
+                ? {
+                      needs_mobile: '1',
+                      // Scoped to this client and this purpose, and short-lived.
+                      // There is no session to authorise the mobile write with.
+                      link_token: oauthService.signMobileToken(client.id),
+                  }
+                : {}),
         });
     } catch (err) {
         // Provider outages and refusals both land here. The visitor sees a
@@ -120,6 +134,31 @@ const oauthCallback = asyncHandler(async (req, res) => {
         logger.error?.(`OAuth ${provider} failed: ${err?.message}`);
         return back({ auth: 'error', message });
     }
+});
+
+/**
+ * Issues a code for the mobile step. See the service: the code is real, the
+ * DELIVERY is not — there is no SMS provider in this backend yet.
+ */
+const sendMobileOtp = asyncHandler(async (req, res) => {
+    const result = await oauthService.sendMobileOtp({
+        token: req.body.token,
+        dialCode: req.body.dial_code,
+        mobile: req.body.mobile,
+    });
+    return ApiResponse.success(res, result, 'Verification code sent.');
+});
+
+/** Checks the code and writes the number onto the account. */
+const verifyMobileOtp = asyncHandler(async (req, res) => {
+    const client = await oauthService.verifyMobileOtp({
+        token: req.body.token,
+        dialCode: req.body.dial_code,
+        mobile: req.body.mobile,
+        otp: req.body.otp,
+    });
+    logger.logRequest(req, `Mobile verified for website client ${client.id}`);
+    return ApiResponse.success(res, { client }, 'Mobile number verified.');
 });
 
 /** Lets the frontend hide a provider button that this server cannot serve. */
@@ -186,6 +225,8 @@ module.exports = {
     oauthStart,
     oauthCallback,
     oauthProviders,
+    sendMobileOtp,
+    verifyMobileOtp,
     getAll,
     getStats,
     getById,

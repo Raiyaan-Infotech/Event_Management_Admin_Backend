@@ -22,6 +22,7 @@
  * minted it, and we mint whatever the start request asks for.
  */
 const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
 const axios = require('axios');
 const jwt = require('jsonwebtoken');
 const { Op } = require('sequelize');
@@ -386,8 +387,178 @@ const findOrCreateFromProfile = async ({ providerName, profile, vendorId, compan
     return { client: safeClient, created };
 };
 
+
+// ── Mobile verification after a social sign-in ───────────────────────────────
+//
+// A provider tells us who someone is, never their phone number, so the mobile
+// step happens after the round trip rather than inside it.
+//
+// Authorising that step is the awkward part: these accounts have no session, so
+// there is no cookie to trust. Instead the callback mints a short-lived token
+// bound to that one client id and that one purpose. It cannot read anything,
+// cannot be replayed as a login, and expires in minutes.
+
+const MOBILE_TOKEN_TTL_SECONDS = 900;   // 15 min: enough to type a number
+const OTP_TTL_SECONDS = 600;            // 10 min
+const OTP_MAX_ATTEMPTS = 5;
+
+const signMobileToken = (clientId) =>
+    jwt.sign({ sub: Number(clientId), purpose: 'mobile_link' }, stateSecret(), {
+        expiresIn: MOBILE_TOKEN_TTL_SECONDS,
+    });
+
+const verifyMobileToken = (token) => {
+    try {
+        const decoded = jwt.verify(String(token || ''), stateSecret());
+        // The purpose check is what stops a token minted elsewhere with the
+        // same secret from being spent here.
+        if (decoded.purpose !== 'mobile_link') return null;
+        return decoded;
+    } catch {
+        return null;
+    }
+};
+
+const loadClientFromMobileToken = async (token) => {
+    const decoded = verifyMobileToken(token);
+    if (!decoded) throw ApiError.unauthorized('This verification link has expired. Please sign in again.');
+
+    const client = await WebsiteClient.scope('withPassword').findByPk(decoded.sub);
+    if (!client) throw ApiError.notFound('Account not found.');
+    if (client.is_active !== 1) throw ApiError.forbidden('Your account is not active.');
+    return client;
+};
+
+/**
+ * Issues a code for `mobile` and stores only its hash.
+ *
+ * ⚠ THERE IS NO SMS PROVIDER IN THIS BACKEND. The code is generated, hashed and
+ * checked for real — that half is not a stub — but nothing delivers it. Until a
+ * provider is wired, the only way to read it is the server log, or
+ * OTP_DEV_ECHO.
+ *
+ * OTP_DEV_ECHO=true returns the code in the API response so the flow can be
+ * exercised end to end. That hands the code to anyone who can call the
+ * endpoint, which defeats the entire point of an OTP — it must NEVER be set in
+ * production. It is refused outright when NODE_ENV is production.
+ */
+const sendMobileOtp = async ({ token, dialCode, mobile }) => {
+    const client = await loadClientFromMobileToken(token);
+
+    const digits = digitsOnly(mobile);
+    if (digits.length < 7 || digits.length > 15) {
+        throw ApiError.badRequest('Please enter a valid mobile number.');
+    }
+
+    // Same number, another account, same tenant — the collision the admin list
+    // would otherwise show as two identical contacts.
+    const taken = await WebsiteClient.findOne({
+        where: {
+            vendor_id: client.vendor_id,
+            mobile: digits,
+            id: { [Op.ne]: client.id },
+        },
+        attributes: ['id'],
+    });
+    if (taken) throw ApiError.badRequest('That mobile number is already used by another account.');
+
+    const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+    const otpHash = await bcrypt.hash(code, 10);
+
+    await client.update(
+        {
+            dial_code: String(dialCode || client.dial_code || '+91').trim(),
+            otp_hash: otpHash,
+            otp_expires_at: new Date(Date.now() + OTP_TTL_SECONDS * 1000),
+            otp_attempts: 0,
+        },
+        { hooks: false }
+    );
+
+    // The delivery seam. Replace this line with the SMS call and everything
+    // else in this flow keeps working unchanged.
+    logger.info?.(`[OTP] website_client ${client.id} -> ${dialCode}${digits}: ${code} (NOT SENT — no SMS provider)`);
+
+    const echo =
+        process.env.OTP_DEV_ECHO === 'true' && process.env.NODE_ENV !== 'production';
+
+    return {
+        expires_in: OTP_TTL_SECONDS,
+        delivered: false,
+        ...(echo ? { dev_code: code } : {}),
+    };
+};
+
+/** Checks the code and, only then, writes the number onto the account. */
+const verifyMobileOtp = async ({ token, dialCode, mobile, otp }) => {
+    const client = await loadClientFromMobileToken(token);
+
+    const digits = digitsOnly(mobile);
+    const code = digitsOnly(otp);
+
+    if (!client.otp_hash || !client.otp_expires_at) {
+        throw ApiError.badRequest('Please request a code first.');
+    }
+    if (new Date(client.otp_expires_at).getTime() < Date.now()) {
+        throw ApiError.badRequest('That code has expired. Please request a new one.');
+    }
+    if (client.otp_attempts >= OTP_MAX_ATTEMPTS) {
+        throw ApiError.badRequest('Too many incorrect attempts. Please request a new code.');
+    }
+
+    // ⚠ OTP_ACCEPT_ANY makes the code decorative.
+    //
+    // Nothing delivers the real code — there is no SMS provider — so without
+    // this nobody can finish the flow on a deployed site. It lets any 6 digits
+    // through. Turn it OFF the moment delivery is wired.
+    //
+    // While it is on, this endpoint proves only that someone typed six
+    // characters. It does NOT prove they hold the number, which is exactly why
+    // the number is not marked verified below.
+    const acceptAny = process.env.OTP_ACCEPT_ANY === 'true';
+
+    // With the bypass on, ANY value passes — including a partial or empty one.
+    // The 6-digit rule is deliberately inside the real branch only, so the
+    // bypass is a single switch rather than a second set of rules to reason about.
+    const matches = acceptAny || (code.length === 6 && (await bcrypt.compare(code, client.otp_hash)));
+
+    if (!matches) {
+        // Counted BEFORE returning, or the cap is decorative.
+        await client.update({ otp_attempts: client.otp_attempts + 1 }, { hooks: false });
+        throw ApiError.badRequest('That code is not correct.');
+    }
+
+    if (acceptAny) {
+        logger.warn?.(
+            `[OTP] OTP_ACCEPT_ANY is on — accepted an unchecked code for website_client ${client.id}`
+        );
+    }
+
+    await client.update(
+        {
+            dial_code: String(dialCode || client.dial_code || '+91').trim(),
+            mobile: digits,
+            // Only a real code proves the person holds this number. With the
+            // bypass on the number is stored but NOT marked verified — a `1`
+            // written here would outlive the flag and quietly mislead whatever
+            // later trusts it (SMS sends, account recovery, support).
+            mobile_verified: acceptAny ? 0 : 1,
+            // Cleared so a used code can never be replayed.
+            otp_hash: null,
+            otp_expires_at: null,
+            otp_attempts: 0,
+        },
+        { hooks: false }
+    );
+
+    return WebsiteClient.findByPk(client.id);
+};
+
 module.exports = {
     PROVIDERS,
+    signMobileToken,
+    sendMobileOtp,
+    verifyMobileOtp,
     getProvider,
     isProviderConfigured,
     listConfiguredProviders,

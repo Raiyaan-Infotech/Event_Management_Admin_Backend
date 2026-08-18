@@ -57,6 +57,13 @@ module.exports = (sequelize) => {
             email_verified: { type: DataTypes.TINYINT, allowNull: false, defaultValue: 0 },
             mobile_verified: { type: DataTypes.TINYINT, allowNull: false, defaultValue: 0 },
 
+            // Mobile verification for the step that follows a social sign-in.
+            // The code is stored hashed and never returned; `otp_attempts` caps
+            // guessing, since six digits is only strong if you get few tries.
+            otp_hash: { type: DataTypes.STRING(255), allowNull: true },
+            otp_expires_at: { type: DataTypes.DATE, allowNull: true },
+            otp_attempts: { type: DataTypes.TINYINT, allowNull: false, defaultValue: 0 },
+
             // 0=inactive, 1=active, 2=blocked — same convention as User/VendorClient.
             is_active: { type: DataTypes.TINYINT, allowNull: false, defaultValue: 1 },
 
@@ -79,7 +86,7 @@ module.exports = (sequelize) => {
             deletedAt: 'deleted_at',
             defaultScope: {
                 // A password hash must never leave the service by accident.
-                attributes: { exclude: ['password'] },
+                attributes: { exclude: ['password', 'otp_hash'] },
             },
             scopes: {
                 withPassword: { attributes: { include: ['password'] } },

@@ -45,4 +45,10 @@ router.get('/website-clients/oauth/providers', websiteClientController.oauthProv
 router.get('/website-clients/oauth/:provider/start', websiteClientController.oauthStart);
 router.get('/website-clients/oauth/:provider/callback', websiteClientController.oauthCallback);
 
+// Mobile step that follows a social sign-in. Authorised by the short-lived
+// `link_token` the callback handed over, not by a session — these accounts do
+// not have one.
+router.post('/website-clients/mobile/send-otp', websiteClientController.sendMobileOtp);
+router.post('/website-clients/mobile/verify', websiteClientController.verifyMobileOtp);
+
 module.exports = router;
