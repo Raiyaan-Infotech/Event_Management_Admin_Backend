@@ -17,6 +17,17 @@ const register = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, { client }, 'Account created successfully', 201);
 });
 
+/**
+ * No auth, and no session issued — see the service. Answers 401 for bad
+ * credentials, which is what the form shows as an inline error.
+ */
+const login = asyncHandler(async (req, res) => {
+    const vendorId = req.body.vendor_id || req.query.vendor_id || req.companyId || undefined;
+    const client = await websiteClientService.login(req.body, vendorId);
+    logger.logRequest(req, `Website login: ${client.email}`);
+    return ApiResponse.success(res, { client }, 'Login successful');
+});
+
 // ── Admin ────────────────────────────────────────────────────────────────────
 
 const getAll = asyncHandler(async (req, res) => {
@@ -72,6 +83,7 @@ const deleteById = asyncHandler(async (req, res) => {
 
 module.exports = {
     register,
+    login,
     getAll,
     getStats,
     getById,

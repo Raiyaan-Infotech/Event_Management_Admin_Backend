@@ -19,12 +19,29 @@ const ALLOWED_ORIGINS = (process.env.FRONTEND_URL || 'http://localhost:3000,http
   .split(',')
   .map(o => o.trim());
 
-app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-    cb(new Error(`CORS blocked: ${origin}`));
-  },
-  credentials: true,
+// `/api/v1/public/*` is the tenant public-site read model plus its signup,
+// newsletter and contact forms. Every tenant site gets its own subdomain or
+// custom domain, so the set of legitimate browser origins is open-ended and an
+// env whitelist can never enumerate it — each new customer domain would be
+// blocked until someone remembered to add it. Those routes are unauthenticated
+// and touch no cookies (nothing under /public calls res.cookie; the vendor
+// client login hands its token back in the response body), so they are served
+// with permissive, credential-less CORS.
+//
+// Everything else keeps the strict credentialed whitelist — that is what
+// carries the admin, vendor and staff JWT cookies, and `credentials: true`
+// with a reflected origin is only safe against a closed list.
+const isPublicSiteRoute = (req) => req.path.startsWith('/api/v1/public/');
+
+app.use(cors((req, cb) => {
+  if (isPublicSiteRoute(req)) {
+    return cb(null, { origin: '*', credentials: false });
+  }
+  const origin = req.headers.origin;
+  if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+    return cb(null, { origin: true, credentials: true });
+  }
+  cb(new Error(`CORS blocked: ${origin}`));
 }));
 app.use(morgan('dev'));
 app.use(express.json({ limit: '50mb' }));

@@ -31,5 +31,8 @@ router.post('/vendors/:slug/contact', submitPublicVendorContact);
 // admin panel's Clients module lists. No session is issued — these accounts
 // have no portal to log into yet.
 router.post('/website-clients/register', websiteClientController.register);
+// Verifies credentials only — no token, no cookie. There is no client portal to
+// sign into yet, so the screen just confirms the login was valid.
+router.post('/website-clients/login', websiteClientController.login);
 
 module.exports = router;

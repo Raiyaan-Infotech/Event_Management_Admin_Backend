@@ -2735,6 +2735,7 @@ next build               compiled clean (after clearing a stale Turbopack chunk 
 5. The three hand-rolled UI primitives (§141) are worth replacing with Radix wholesale.
 6. Local is still missing the 4 `plan_types` permission rows production has.
 
+
 ---
 
 ## Session 15 — Client auth screens (login + signup) and the Clients module
@@ -2853,17 +2854,50 @@ default, `--apply [prod]` to write.
 > A `next build` failing on a stale `.next` chunk or a missing `.nft.json` is the §52/§146
 > environment issue, not a regression — `rm -rf .next` and rebuild.
 
-### 154. Open
+### 154. Production migrated + everything shipped
 
-1. **Production not migrated** — run `migrate_website_clients.js --apply prod` and
-   `seed_nav_clients_key.js --apply prod`, then a translation sync to register the 106 new keys.
-2. **Nothing committed** in any of the three repos.
-3. **Nothing browser-tested** — carried since §127, now covering the two auth screens too.
-4. **No OTP delivery.** `mobile_verified` is stored but never set; the 6-box UI is local-only.
+Applied to production (Aiven), dry-run first, additive only — no updates or deletes:
+
+```
+website_clients        18 columns · 5 indexes · 1 FK        created
+modules                'website_clients' (id=71)            created
+permissions            website_clients.{view,create,edit,delete}
+translation_keys       nav.clients (id=483) + English value 'Clients'
+ui-chrome registry     583 -> 689 keys  (+106 auth keys, 2,993ms)
+```
+
+Verified local vs production **column-by-column**: columns, indexes, foreign keys, permission count
+and the nav key/value all MATCH. All 106 auth keys present on both with **identical English source
+text** — a differing `default_value` would make the two environments auto-translate from different
+English.
+
+All three repos are **committed and pushed**, level with `origin/main`:
+
+```
+Backend         0e07a8d   Public Site  6b2ab0a   Admin Frontend  16129f9
+```
+
+The §152 log-redaction fix and the §151 timestamp fix are both confirmed in `HEAD`.
+
+Migration scripts have been run on both databases and were deleted afterwards; the SQL is recorded
+in §151 above if it ever needs rebuilding.
+
+> **12 orphan ui-chrome keys on production** (`pricing.limit.*`, `pricing.matrix.*`) predate this
+> work: they are not in the current `UI_CHROME_KEYS` and nothing in either frontend reads them.
+> They survive because ui-chrome is **exempt from pruning** (§67, no table to scan), so a key added
+> by an older deploy stays forever. Harmless dead rows, same class as §93's orphans. Not cleaned.
+
+### 155. Open
+
+1. **Nothing browser-tested** — carried since §127, now covering the two auth screens, the provider
+   flow dialog and `/admin/clients`. This remains the single largest outstanding risk.
+2. **No OTP delivery.** `mobile_verified` is stored but never set; the 6-box UI is local-only.
    Joins newsletter and mail as no-delivery features.
-5. **Provider sign-in is not real OAuth** — the dialog advances local state. The account chooser
+3. **Provider sign-in is not real OAuth** — the dialog advances local state, and the account chooser
    lists placeholder names from the mockup.
-6. `/forgot-password` has no route on the public site.
-7. Signup password rule is **"at least 8 characters"**, per the mockup — this differs from the
-   EXACTLY-8 policy the other three frontends use. Deliberate, but worth a decision.
-8. Website signups get **no login anywhere** — the Client Portal reads `vendor_clients` (§151).
+4. `/forgot-password` has no route on the public site; the link deliberately swallows its click.
+5. Signup password rule is **"at least 8 characters"** per the mockup, which differs from the
+   EXACTLY-8 policy the other three frontends use. Deliberate — worth a decision.
+6. **Website signups get no login anywhere.** The Client Portal reads `vendor_clients` (§151).
+7. Render/Vercel redeploy should be confirmed before testing on production — the DB is ahead of
+   whatever is actually serving until those finish.

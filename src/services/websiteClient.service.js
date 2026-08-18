@@ -95,6 +95,56 @@ const register = async (data = {}, vendorId = DEFAULT_VENDOR_ID, companyId = nul
     return WebsiteClient.findByPk(created.id);
 };
 
+// ── Public: login from the website ───────────────────────────────────────────
+
+/**
+ * Verifies a website client's credentials.
+ *
+ * Deliberately issues NO token and NO cookie. These accounts still have no
+ * portal to land in, so the screen only confirms the credentials were right —
+ * handing back a session would imply access that does not exist. When a client
+ * area is built, this is where the token gets minted.
+ *
+ * The same "Invalid email or password" is returned for an unknown email and a
+ * wrong password, so the response cannot be used to enumerate registered
+ * addresses. An inactive account is told apart, because that is a state the
+ * person cannot fix by guessing again.
+ */
+const login = async (data = {}, vendorId = DEFAULT_VENDOR_ID) => {
+    const email = normalizeEmail(data.email);
+    const password = String(data.password || '');
+
+    if (!email || !password) {
+        throw ApiError.badRequest('Email and password are required.');
+    }
+
+    const resolvedVendorId = Number(vendorId) || DEFAULT_VENDOR_ID;
+
+    // `defaultScope` drops the hash, so it has to be asked for explicitly. The
+    // model declares a `withPassword` scope for exactly this — an explicit scope
+    // replaces the default one, so the hash comes back.
+    const client = await WebsiteClient.scope('withPassword').findOne({
+        where: { email, vendor_id: resolvedVendorId },
+    });
+
+    if (!client || !client.password) throw ApiError.unauthorized('Invalid email or password.');
+
+    const isValid = await bcrypt.compare(password, client.password);
+    if (!isValid) throw ApiError.unauthorized('Invalid email or password.');
+
+    if (client.is_active !== 1) {
+        throw ApiError.forbidden('Your account is not active. Please contact us.');
+    }
+
+    // Gives the admin Clients list something real in its Last Login column.
+    // `silent` so the row's updated_at is not churned by a plain sign-in, and
+    // `hooks: false` so beforeUpdate cannot re-hash the already-hashed password.
+    await client.update({ last_login_at: new Date() }, { silent: true, hooks: false });
+
+    // Re-read through the default scope so the hash cannot ride along.
+    return WebsiteClient.findByPk(client.id);
+};
+
 // ── Admin CRUD ───────────────────────────────────────────────────────────────
 
 const getAll = async (query = {}, companyId = undefined) => {
@@ -217,6 +267,7 @@ const getStats = async (companyId = undefined) => {
 
 module.exports = {
     register,
+    login,
     getAll,
     getById,
     getStats,
