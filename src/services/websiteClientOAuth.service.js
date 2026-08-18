@@ -77,7 +77,13 @@ const PROVIDERS = {
         scope: 'email,public_profile',
         clientId: () => process.env.FACEBOOK_APP_ID,
         clientSecret: () => process.env.FACEBOOK_APP_SECRET,
-        extraAuthParams: {},
+        // `auth_type: 'rerequest'` matters more than it looks. Facebook lets a
+        // person untick "email address" on the consent screen, and once they
+        // have declined it, authorising again NEVER asks a second time - the
+        // dialog just flashes past and the profile comes back without an email
+        // forever. This is the documented way to ask again. Costs nothing when
+        // the permission was already granted.
+        extraAuthParams: { auth_type: 'rerequest' },
         userInfoParams: { fields: 'id,name,email,picture.type(large)' },
         normalizeProfile: (data) => ({
             provider_id: data.id,
@@ -250,20 +256,37 @@ const exchangeCodeForProfile = async (rawProviderName, code) => {
     const providerName = String(rawProviderName || '').toLowerCase();
     const provider = getProvider(providerName);
 
-    const tokenResponse = await axios.post(
-        provider.tokenUrl,
-        new URLSearchParams({
-            client_id: provider.clientId(),
-            client_secret: provider.clientSecret(),
-            code,
-            redirect_uri: callbackUrl(providerName),
-            grant_type: 'authorization_code',
-        }).toString(),
-        {
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
-            timeout: 15000,
+    let tokenResponse;
+    try {
+        tokenResponse = await axios.post(
+            provider.tokenUrl,
+            new URLSearchParams({
+                client_id: provider.clientId(),
+                client_secret: provider.clientSecret(),
+                code,
+                redirect_uri: callbackUrl(providerName),
+                grant_type: 'authorization_code',
+            }).toString(),
+            {
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    Accept: 'application/json',
+                },
+                timeout: 15000,
+            }
+        );
+    } catch (err) {
+        // An authorization code is single-use. Browsers re-issue the callback
+        // (prefetch, a refresh, a double navigation), so the losing requests
+        // report a SPENT code while the winning one is still working. Reported
+        // as-is, that reads like the cause of the failure when it is a
+        // side-effect of it - which is exactly how this one hid.
+        const detail = err?.response?.data?.error;
+        if (detail?.error_subcode === 36009 || /already been used|has been used/i.test(detail?.message || '')) {
+            throw ApiError.badRequest('This sign-in link was already used. Please try signing in again.');
         }
-    );
+        throw err;
+    }
 
     // Graph API sometimes answers 200 with an error body rather than a 4xx, so
     // axios does not throw and the missing token is the only symptom.
@@ -274,6 +297,7 @@ const exchangeCodeForProfile = async (rawProviderName, code) => {
 
     const accessToken = tokenResponse.data?.access_token;
     if (!accessToken) throw ApiError.badRequest('The sign-in provider did not return an access token.');
+
 
     // `appsecret_proof` is required when the app has "Require app secret for
     // API calls" switched on (Advanced > Security). It is off by default, and
@@ -358,7 +382,8 @@ const findOrCreateFromProfile = async ({ providerName, profile, vendorId, compan
             // Facebook can withhold it. Better a clear message than a row with
             // a fabricated address that can never sign in with a password.
             throw ApiError.badRequest(
-                'Your provider did not share an email address, so an account could not be created.'
+                'We need your email address to create an account. Please try again and ' +
+                    'leave the email permission ticked on the provider\'s consent screen.'
             );
         }
 
