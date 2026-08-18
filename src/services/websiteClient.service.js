@@ -310,8 +310,28 @@ const updateStatus = async (id, is_active, userId = null, companyId = undefined)
         companyId
     );
 
+/**
+ * `uniqueFields: ['email']` is the important part.
+ *
+ * These are self-signup accounts, so a deleted person coming back and signing
+ * up again is ordinary user behaviour, not an edge case. The row is only soft
+ * deleted, but `uniq_website_client_email (vendor_id, email)` is a plain unique
+ * index that still counts it — so without this the address stays occupied
+ * forever and the next signup dies on a duplicate key that Sequelize reports
+ * only as "Validation error".
+ *
+ * base.service already solves this: it stamps the listed unique fields on the
+ * way out so the value can be reused. It just defaults to ['slug', 'key'], and
+ * nobody told it this table's unique field is the email.
+ *
+ * With this, deleting frees the address immediately and a returning visitor
+ * simply signs up again and gets a working account — no restore, no admin
+ * having to switch anything back on.
+ */
 const deleteById = async (id, userId = null, companyId = undefined) =>
-    baseService.remove(WebsiteClient, MODEL_NAME, id, userId, companyId);
+    baseService.remove(WebsiteClient, MODEL_NAME, id, userId, companyId, {
+        uniqueFields: ['email'],
+    });
 
 /** Counts for the list header. One grouped query, not four. */
 const getStats = async (companyId = undefined) => {
