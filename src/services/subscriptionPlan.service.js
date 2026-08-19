@@ -4,6 +4,7 @@ const {
     SubscriptionPlan,
     SubscriptionPlanMenu,
     PlanType,
+    PlanBadge,
     EventCategory,
     EventType,
     Religion,
@@ -25,6 +26,7 @@ const WRITABLE_FIELDS = [
     'event_category_id', 'event_type_id', 'religion_id',
     'currency_code', 'price', 'trial_days',
     'is_visible', 'is_active', 'sort_order',
+    'plan_badge_id',
 ];
 
 /**
@@ -103,6 +105,7 @@ const PLAN_INCLUDE = [
     { model: EventCategory, as: 'category', attributes: ['id', 'name', 'color'], required: false },
     { model: EventType, as: 'eventType', attributes: ['id', 'name', 'color'], required: false },
     { model: Religion, as: 'religion', attributes: ['id', 'name', 'color'], required: false },
+    { model: PlanBadge, as: 'planBadge', attributes: ['id', 'text', 'style', 'color'], required: false },
 ];
 
 const MENU_INCLUDE = {
@@ -259,6 +262,38 @@ const getById = async (id, companyId = undefined) => {
     return decorate(plan);
 };
 
+/**
+ * A plan may only wear a badge that exists, is live and belongs to the same
+ * company — otherwise a crafted request could pin another tenant's badge, and
+ * the FK alone would happily allow it (it only checks the id exists).
+ *
+ * Normalises '' / 0 / 'null' to NULL, because the wizard's "No badge" option
+ * submits an empty string and the FK would reject that outright.
+ */
+const normaliseBadge = async (payload, companyId) => {
+    if (payload.plan_badge_id === undefined) return;
+
+    const raw = payload.plan_badge_id;
+    if (raw === null || raw === '' || raw === 'null' || Number(raw) === 0) {
+        payload.plan_badge_id = null;
+        return;
+    }
+
+    const badgeId = Number(raw);
+    if (!Number.isInteger(badgeId) || badgeId < 1) {
+        throw ApiError.badRequest('Select a valid plan badge.');
+    }
+
+    const where = { id: badgeId };
+    if (companyId !== undefined && companyId !== null) {
+        where.company_id = { [Op.or]: [companyId, null] };
+    }
+    const badge = await PlanBadge.findOne({ where, attributes: ['id'] });
+    if (!badge) throw ApiError.badRequest('Select a valid plan badge.');
+
+    payload.plan_badge_id = badgeId;
+};
+
 const create = async (data, userId = null, companyId = undefined) => {
     const payload = pickWritable(data);
 
@@ -274,6 +309,8 @@ const create = async (data, userId = null, companyId = undefined) => {
     if (!payload.for_website && !payload.for_mobile) {
         throw ApiError.badRequest('Select at least one platform for this plan (Website or Mobile App).');
     }
+
+    await normaliseBadge(payload, companyId);
 
     const plan = await sequelize.transaction(async (transaction) => {
         if (companyId !== undefined && companyId !== null) payload.company_id = companyId;
@@ -322,6 +359,8 @@ const update = async (id, data, userId = null, companyId = undefined) => {
             throw ApiError.badRequest('Select at least one platform for this plan (Website or Mobile App).');
         }
     }
+
+    await normaliseBadge(payload, companyId);
 
     const oldValues = plan.toJSON();
     if (userId) payload.updated_by = userId;

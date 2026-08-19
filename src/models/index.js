@@ -330,4 +330,11 @@ db.SubscriptionPlan.belongsToMany(db.PlanBadge, {
   as: 'badges',
 });
 
+// The plan's OWN badge, chosen in the plan wizard. This is the one the plan
+// card renders — `badges` above is the legacy badge-side pinning, which the
+// wizard does not write to. Two ways to express one relationship, so read
+// precedence is: plan.plan_badge_id first, badge-side pinning only as fallback.
+db.SubscriptionPlan.belongsTo(db.PlanBadge, { foreignKey: 'plan_badge_id', as: 'planBadge' });
+db.PlanBadge.hasMany(db.SubscriptionPlan, { foreignKey: 'plan_badge_id', as: 'badgedPlans' });
+
 module.exports = db;

@@ -89,6 +89,13 @@ module.exports = (sequelize) => {
             allowNull: false,
             defaultValue: 0,
         },
+        // The badge shown on this plan's card, picked in wizard step 1.
+        // Nullable because most plans carry no badge, and the FK is
+        // ON DELETE SET NULL so deleting a badge never deletes the plan.
+        plan_badge_id: {
+            type: DataTypes.INTEGER.UNSIGNED,
+            allowNull: true,
+        },
         // Deactivation / deletion audit — feeds the confirm + success screens.
         // No DB foreign key on the *_by columns: users.id is a signed INT while
         // these follow created_by/updated_by as INT UNSIGNED. The Sequelize

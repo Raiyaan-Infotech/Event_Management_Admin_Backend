@@ -3024,6 +3024,12 @@ CREATE TABLE IF NOT EXISTS `subscription_plans` (
   `is_visible`        TINYINT      NOT NULL DEFAULT 1,
   `is_active`         TINYINT      NOT NULL DEFAULT 1 COMMENT '0=inactive, 1=active, 2=pending approval',
   `sort_order`        INT          NOT NULL DEFAULT 0,
+  -- The badge shown on this plan card, chosen in wizard step 1. NULL = none.
+  -- NOTE: `plan_badges` is NOT defined in this file (it was created by a
+  -- migration script that has since been deleted), so the FK cannot be
+  -- declared here. scratch/migrate_plan_badge_on_plans.js adds
+  -- fk_subscription_plans_badge (ON DELETE SET NULL) where that table exists.
+  `plan_badge_id`     INT UNSIGNED NULL DEFAULT NULL COMMENT 'badge shown on this plan card; NULL = none',
   `company_id`        INT UNSIGNED NULL DEFAULT NULL,
   `created_by`        INT UNSIGNED NULL DEFAULT NULL,
   `updated_by`        INT UNSIGNED NULL DEFAULT NULL,
@@ -3032,6 +3038,7 @@ CREATE TABLE IF NOT EXISTS `subscription_plans` (
   `deleted_at`        DATETIME     NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_subscription_plans_listing` (`company_id`, `deleted_at`, `sort_order`),
+  KEY `idx_subscription_plans_badge`   (`company_id`, `plan_badge_id`),
   -- Non-UNIQUE: rows are soft-deleted, so UNIQUE would let a deleted plan hold
   -- its code hostage. Uniqueness is enforced in the service against live rows.
   KEY `idx_subscription_plans_code`    (`company_id`, `plan_code`),

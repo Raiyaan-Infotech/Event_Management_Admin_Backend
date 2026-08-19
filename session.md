@@ -3066,3 +3066,316 @@ next build      exit 0, all routes present incl. /admin/subscriptions/[id]/dupli
 4. Arrow reorder cannot cross a page boundary (§156). Fine at 9 menus; revisit if the list grows
    past a page or two.
 5. Existing menu rows still clustered at `sort_order` 1 (§158) — cosmetic, fixable from the UI.
+
+---
+
+## Session 17 — Client auth: CORS, login endpoint, social sign-in, OTP, and the delete/reactivate chain
+
+> **Date:** 2026-08-18 | Continues from Session 16 (§156–163)
+> **Backend:** `Event_Management_Admin_Backend` · **Frontends:** `Event_Management_Public_Site` + `Event_Management_Admin_Frontend`
+> **Backend pushed mid-session (`0e07a8d` landed on Render); everything from social sign-in onward is uncommitted.**
+
+### 164. Signup silently failed on live — CORS, not the route
+
+Reported: public-site signup does nothing. Two separate causes stacked, each hiding the next:
+
+1. **Render was serving an older commit.** `/api/v1/public/website-clients/register` answered `404
+   Cannot POST` — the route from §151 was on `origin/main` but not on the running deploy.
+   Confirmed by probing a known-old route (`/site/resolve` → 200) against a known-new one
+   (`/website-clients` → 404). Resolved by the user redeploying.
+2. **CORS then blocked it anyway.** `src/app.js`'s whitelist (`FRONTEND_URL`, comma-separated)
+   has no entry for the public site's Vercel origin, and — per §120 — never can: tenant sites live
+   on open-ended subdomains/custom domains, so a static list can't enumerate them.
+
+**Fix:** `/api/v1/public/*` now gets its own permissive, credential-less CORS
+(`origin: '*', credentials: false`); every other route keeps the strict whitelist unchanged.
+Safe because nothing under `/public` sets a cookie — the vendor-client login hands a token back in
+the body, not a `Set-Cookie`. Verified: preflight from the public site's origin now `204`s with
+`Access-Control-Allow-Origin: *`; `/api/v1/users` from an unlisted origin still `500`s.
+
+### 165. Login endpoint didn't exist — built it
+
+`login-section.tsx`'s `handleSubmit` was `event.preventDefault()` and nothing else (deliberately,
+per its own header comment — §155.6 flagged "website signups get no login anywhere").
+
+Added `POST /api/v1/public/website-clients/login` — verifies credentials, issues **no token, no
+cookie** (there is still no client portal to land in). Same "Invalid email or password" for an
+unknown email and a wrong password, so the response can't be used to enumerate registered
+addresses. Wired in both frontend copies (public site + admin preview, per the §148 two-copies
+rule) via a new `website-client-auth.ts` — deliberately **not** routed through the shared
+`apiClient`, whose 401-interceptor would otherwise read a visitor's wrong password as the *admin's*
+session expiring and fire a token refresh / logout.
+
+`Toaster` moved `top-center` → `top-right` on request.
+
+### 166. Two bugs found while wiring login itself
+
+1. **A double-hash risk in the "stamp last login" write.** Checking the password requires loading
+   the row through `withPassword` (hash included); saving THAT instance risks the model's
+   `beforeUpdate` hook re-hashing an already-hashed value — a hash of a hash matches nothing,
+   silently and permanently locking the account, with the breaking login itself still succeeding
+   (only the *next* login fails, reading as a mistyped password). Fixed by stamping
+   `last_login_at` on a **separately re-read, default-scoped** instance that never carries the
+   hash — no guard needed, because there is nothing there to re-hash. Two earlier attempts (a
+   static `Model.update()`; `{ silent: true }`) were tried and reverted — `updated_at` on this
+   table is `ON UPDATE CURRENT_TIMESTAMP` at the MySQL level, so `silent` can never suppress it;
+   documented rather than fought further.
+2. **The mobile field was accepted but never checked.** Typing any number, including one belonging
+   to nobody, logged in fine as long as the password matched. Fixed: when `mobile` is supplied it
+   must match the account's stored number (digits-only comparison), checked **after** the
+   password (reversing the order would let a bad actor probe whether a number belongs to a given
+   account without knowing the password). Optional — a blank field means "not offered".
+
+### 167. Signup wrote `company_id = NULL` — invisible in the admin Clients module
+
+Reported: "signup happened in prod but the client doesn't show in the Clients list."
+`register()` stored `company_id: NULL` (a public request carries no company context); every admin
+read adds `WHERE company_id = ?`, and `NULL = 1` is never true in SQL. The rows existed and could
+never be returned.
+
+Fixed: `company_id` is now derived from the vendor when not supplied. Existing NULL rows fixed via
+`scratch/backfill_website_client_company_id.js` (dry-run default) — one JOIN-UPDATE, not a row
+loop (§103). Applied to local and production; confirmed the user's own prior signup (`id=1`,
+`developer@raiyaaninfotech.com`) picked up `company_id=1`.
+
+### 168. The admin preview's login/signup were still the §148 decoys
+
+Both existed twice, same as every auth screen. The public-site copies got wired in §164–166; the
+**admin preview copies were untouched** — still bare `preventDefault()`, including signup, which
+had never been wired there at all. Fixed identically in both, through the same
+non-`apiClient` `website-client-auth.ts` lib.
+
+### 169. Social sign-in — Google + Facebook, server-side OAuth
+
+Built the real authorization-code flow, not a client-side SDK: the client secret never reaches a
+browser, and the code-for-token exchange + profile read happen server-side over TLS.
+
+**Schema** — `provider_id`, `avatar_url` + `(vendor_id, source, provider_id)` index on
+`website_clients` (`scratch/migrate_website_client_oauth.js`, applied both DBs). Index deliberately
+**not unique** — same reasoning as §123's menu slugs: a soft-deleted row must not hold a
+`provider_id` hostage.
+
+**One callback URL per provider, forever.** Tenant sites live on open-ended domains (§120) and
+can't all be registered with Google/Facebook. So every provider redirects back to *this backend*
+only; the tenant URL to return to rides inside a signed, short-lived `state` JWT
+(`ACCESS_TOKEN_SECRET`, 10 min TTL).
+
+**Open-redirect guard, defence in depth.** `state` is signed AND the URL inside is **re-checked**
+against an allowlist on the way back — signing alone only proves *we* minted it, and `start` mints
+whatever it's asked for. Allowlist: exact origin in `FRONTEND_URL`, OR host under
+`PUBLIC_SITE_ROOT_DOMAINS`, OR a real row in `company_websites`. Verified: forged `return_to`,
+missing `return_to`, forged `state`, and a `state` minted for one provider replayed on another —
+all `400`, none leak.
+
+**Account resolution**, scoped per vendor throughout:
+1. `(vendor, source, provider_id)` — already linked.
+2. `(vendor, email)`, **only if the provider says the email is verified** — links an existing
+   account to a new sign-in method. Without the verification check, anyone could register your
+   email at a provider that never confirms it and take over your local account.
+3. Otherwise create. No password at all (nullable column) — a social-only account cannot be signed
+   into by guessing a password.
+
+Routes: `GET /oauth/providers` (which are configured), `GET /oauth/:provider/start` (302 to
+consent), `GET /oauth/:provider/callback`. `providers`/`start`/`callback` are all top-level
+navigations, not fetches — the browser has to physically leave for the provider.
+
+Frontend: `AuthFlowDialog` (the account-chooser mockup from §149) removed from all four sections —
+Google/Facebook show their *own* real chooser, so a fake one in front of it would be confusing, not
+missing functionality. `startSocialAuth()` navigates; `useSocialAuthResult()` reads the outcome
+back off the query string and toasts it, then strips the params (a bookmarked/pasted URL must not
+carry the mobile-link token — see §171).
+
+### 170. Two rounds of debugging Facebook, both traced to real causes
+
+**First: production logs went nowhere.** Winston's console transport was
+`NODE_ENV !== 'production'`-gated, so every OAuth error on Render wrote to a file on an ephemeral
+disk nobody could read — the only visible symptom was the generic
+`"Sign-in failed. Please try again."` Console transport now runs in production too (Render
+captures stdout). Also: an axios error's own `.message` is just `"Request failed with status code
+400"`; the controller now reads the provider's actual explanation out of `err.response.data` and
+both shows and logs it.
+
+**Second, once visible: two genuine causes, not one.**
+1. `"This authorization code has been used."` (subcode 36009) — a duplicate callback request
+   losing the race against the one that actually worked; an auth code is single-use. Now detected
+   and reported as "already used, please try again" instead of masquerading as the real failure.
+2. **The actual failure:** Facebook returned a profile with **no email**. Facebook lets a visitor
+   untick the email permission on consent, and — critically — once declined, re-authorising *never
+   asks again* by default. Fixed with `auth_type: 'rerequest'` on the Facebook authorize URL only
+   (documented Facebook mechanism; a no-op when the permission was already granted). Also handled:
+   Graph API can answer `200` with an error body instead of a 4xx, so a bare "no access_token"
+   check was silently swallowing it; `appsecret_proof` added for API calls (harmless when the
+   app's "require app secret" setting is off, which it is by default).
+
+> Facebook console setup, for the record: redirect URI must be added under **Facebook Login →
+> Settings → Valid OAuth Redirect URIs** (not personal Facebook settings — a wrong page the user
+> initially landed on). Facebook refuses `http://`/`localhost` redirects, so only Google could be
+> tested locally; Facebook only works against the deployed Render URL. Development-mode apps work
+> immediately for the app's own Admin/Developer/Tester accounts with no privacy policy required —
+> that's only needed to go Live.
+
+### 171. Mobile number + OTP after a social sign-in
+
+Per explicit request: after Google/Facebook, if the account has no phone number on file, ask for
+one, then an OTP, **then** show "Login successful" — not before.
+
+**Schema:** `otp_hash`, `otp_expires_at`, `otp_attempts` on `website_clients`
+(`scratch/migrate_website_client_otp.js`). Stored hashed (bcrypt), excluded from `defaultScope`
+like the password.
+
+**Authorising the step is the hard part** — these accounts have no session/cookie. The callback
+mints a short-lived (`link_token`, 15 min) JWT scoped to exactly one client id and the single
+purpose `mobile_link`; it can't read anything else and can't be replayed as a login. Stripped from
+the URL immediately client-side so a bookmarked link can't carry that power forward.
+
+`sendMobileOtp` / `verifyMobileOtp`: 10-min expiry, 5-attempt cap (counted *before* the rejection
+return, or the cap is decorative), cleared on success so a code can't be replayed. New
+`MobileVerifyDialog` in both `auth-shared.tsx` copies; "Skip for now" is explicit (closing any
+other way would strand the person with no way back in without signing in again).
+
+> **⚠ There is no SMS provider.** The verification logic is real; delivery is not. `OTP_DEV_ECHO`
+> (local only, refused when `NODE_ENV=production`) returns the code in the response so the flow
+> can be exercised. Per explicit request, `OTP_ACCEPT_ANY=true` now also exists — accepts literally
+> any value including empty — because nothing can deliver a real code on a deployed site yet.
+> Deliberately does **not** mark `mobile_verified=1` while the bypass is on: a `1` written now would
+> outlive the flag and mislead anything that later trusts it. Flip `OTP_ACCEPT_ANY=false` the
+> moment SMS delivery exists; nothing else needs to change.
+
+**Toast-ordering bug, found by the user testing it live:** "Login successful" never appeared after
+Google sign-in. Root cause — React runs effects bottom-up, so the section's mount effect (which
+raised the toast) fired **before** the root-layout `<Toaster>` had run its own subscribe effect;
+the toast was published to no subscriber and silently dropped. A password-login toast always
+worked because it fires from a click, long after mount. Fixed with a one-tick `setTimeout` defer
+for any toast raised during mount; success is now also explicitly **held** until the mobile step
+closes (verified or skipped) so it lands last, matching the requested order.
+
+### 172. The delete → reactivate chain — three compounding bugs, found one at a time
+
+Reported by the user testing end-to-end: delete a client in the admin, then sign back in with
+Google. Each fix exposed the next failure underneath it.
+
+1. **`"Validation error"` on second sign-in.** `uniq_website_client_email (vendor_id, email)` is a
+   plain MySQL unique index — it has no idea what `deleted_at` means. The model's `paranoid` mode
+   made every lookup skip the soft-deleted row, so the code concluded "doesn't exist" and tried to
+   INSERT — straight into the same email the deleted row still held. Sequelize's message for a
+   unique-constraint hit is the bare string `"Validation error"`, which is why the log said
+   nothing useful. **Reproduced locally before believing the diagnosis**
+   (`scratch` repro script: create → soft-delete → sign in again → fails with exactly that message).
+   First fix: `paranoid: false` on the identity lookups, restore a matched deleted row instead of
+   colliding with it (logged loudly — it does undo an admin's delete). Refused, not restored, on
+   the *password* signup path — a password proves nothing about who owns the address, so handing
+   over a previous occupant's row there would be a takeover; that path instead reports "was removed
+   previously, please contact us."
+
+2. **`"Your account is not active."` right after that fix shipped.** `base.service`'s soft-delete
+   also sets `is_active = 0` on the way out ("so inactive status is immediately visible") — the
+   restore only cleared `deleted_at`, leaving `is_active` behind. Fixed: the restore branch now
+   resets `is_active` (and re-syncs name/avatar/email_verified from the fresh profile) in the same
+   update.
+
+3. **User's real objection: "delete → signup → asks for phone; delete again → signup → does NOT ask
+   — but it should every time."** Correct catch — reclaiming the *same* row on Google sign-in
+   (id stayed constant across cycles) meant a previously-entered phone number came back with it,
+   so `!client.mobile` was false on the second round. This also made Google inconsistent with
+   password signup, which had always produced a fresh row per signup.
+
+   **Reworked rather than patched again:** now that delete frees the email address (see below), the
+   "restore the old row" branch is unnecessary and was removed outright — a deleted account is
+   simply gone, and signing in afterwards (any method) creates a genuinely new row every time.
+   Proven with 3 consecutive delete→signup cycles: ids 18→19→20, phone prompt fires on all three.
+
+   **Root fix, the one that should have been there from the start:** `base.service.remove()`
+   already supports `uniqueFields` — stamping a unique column on delete so the value can be
+   reused — defaulting to `['slug', 'key']`. `website_clients`'s delete call never passed
+   `uniqueFields: ['email']`, so the email was never freed and every symptom above traced back to
+   that one omission. Fixed at the source; the two service-level workarounds above are now mostly
+   redundant but left in place as defence (e.g. a self-healing branch frees the email of any row
+   soft-deleted *before* this fix shipped, rather than erroring, so no legacy row can block a new
+   signup).
+
+> **Left stranded, needs one manual click:** production client id 4
+> (`ra.ashadhullah@gmail.com`) was restored by the *first* (incomplete) version of this fix —
+> `deleted_at` is already NULL, so no code path will ever touch it again, but `is_active` is still
+> `0`. Fix: Admin → Clients → switch that row to Active. One-time; the corrected delete logic
+> prevents any new row from landing in this state.
+
+### 173. Templates list order vs. public site — reversed tiebreak
+
+Reported: template order in the admin table doesn't match the live preview/site.
+Production data confirmed it outright — **every template has `sort_order = 0`**, so the tiebreak
+was the only thing deciding order, and the two queries disagreed on it:
+admin `ORDER BY t.sort_order ASC, t.id DESC` vs. public bundle
+`ORDER BY sort_order ASC, id ASC` — exactly reversed. Fixed the admin query to `id ASC`, matching
+the public site and the convention (`SORTED = 'sort_order ASC, id ASC'`) every other list in this
+service already uses. Backend-only — covers the admin preview and the public site in one change.
+
+### 174. Highlights "order" bug — not an ordering bug; translations keyed by position
+
+Reported alongside the templates issue, on Templates-page and Contact-page highlight blocks.
+Traced the whole render path first: nothing sorts, reverses, or slices — cards render in plain
+array order everywhere, and production data proved reordering itself saves correctly (custom
+non-default orders present and stable).
+
+**The actual defect (§42's original design, now paid for):** highlight translation keys were
+registered as `item_<position>_title` / `item_<position>_description`. Dragging a card moves the
+*text* but not its translation slot — so on any translated language the right words land on the
+wrong card. English looks perfectly ordered, which is why this read as a scrambled-order bug.
+Confirmed directly: production's `template` block had cards `2, 1` swapped from their registered
+key order.
+
+**Fixed by keying on the card's own stable `id`** (`item_i7_title`) instead of position, in all
+four places that must agree: the backend extractor (`websiteBuilderTranslation.service.js`), the
+admin highlights form, and both public/admin-preview render copies. A shared `slotFor(item, index)`
+helper (id if present, else `p<position>` as a legacy fallback) keeps all four in lock-step.
+
+**Migration, not a blind rename:** `scratch/remap_highlight_translation_slots.js` matches each old
+position-keyed row to its card by **English source text**, not position — position is exactly what
+had drifted, so mapping by it would have permanently welded the wrong text onto the wrong card.
+Rewrites both the keys table and the translations table (this schema addresses translations by a
+5-part slot, not a `key_id` FK — §111.7 — so both must move together or values orphan). Refuses to
+overwrite an existing destination key; anything whose English changed since registration is
+reported unmatched and left alone rather than guessed at.
+
+Dry run: local 84 keys / production 74 keys, **0 unmatched** on either. Applied locally. Production
+dry-run only — must run `--apply` **before** the code deploys, or highlights briefly lose their
+translations between deploy and migration.
+
+### 175. Verified
+
+```
+CORS preflight (public origin)      204, ACAO: *          |  strict routes unaffected: 500 still on unlisted origin
+login round trip                    correct pw 200 · wrong pw 401 · wrong mobile 401 · no mobile 200 (optional)
+password re-hash guard              4 consecutive logins, hash unchanged ($2a$12$, 60 chars) each time
+company_id backfill                 local + prod: NULL rows -> derived vendor's company_id; new signups correct immediately
+OAuth open-redirect guard           forged return_to / missing / forged state / cross-provider state replay -> all 400
+Facebook auth_type=rerequest        confirmed present on facebook/start only; google/start unchanged
+OTP flow                            issue -> wrong code 400 -> correct code 200, mobile_verified=1 -> replay 400 -> forged link_token 401
+delete/reactivate cycle             3x delete->signin: new id each time, phone prompt fires every time (18,19,20)
+templates order fix                 admin query now id ASC, matches public bundle
+highlights remap dry-run            local 84 / prod 74 keys, 0 unmatched, swapped template-page pair confirmed
+tsc --noEmit                        exit 0, both frontends, after every round in this session
+```
+
+### 176. Open — carried to next session
+
+1. **Nothing committed except the CORS + login-route fix that was pushed mid-session
+   (`0e07a8d`).** Everything from §169 (social sign-in) onward — OAuth, OTP, the delete/reactivate
+   rework, templates order, highlights remap — is uncommitted in the backend, and the corresponding
+   frontend changes are uncommitted in both `Event_Management_Public_Site` and
+   `Event_Management_Admin_Frontend`.
+2. **Production still needs, in this order:** run `remap_highlight_translation_slots.js prod
+   --apply` and `migrate_website_client_otp.js prod --apply` (OAuth columns already applied last
+   session) **before** deploying the new backend code — deploying first would briefly break
+   highlights translations and crash the mobile-OTP endpoints on missing columns.
+3. Production client id 4 needs one manual Active toggle in Admin → Clients (§172).
+4. `OTP_ACCEPT_ANY=true` must be set on Render (and `OTP_DEV_ECHO` must NOT be) once this deploys,
+   or the live mobile step is unusable.
+5. No SMS provider exists — OTP delivery is still entirely a stub (§171).
+6. Provider sign-in has no real profile UI yet beyond the one-time mobile prompt; avatar_url is
+   captured but nothing displays it.
+7. Rotate the Google/Facebook client secrets pasted into this session's chat history — standard
+   hygiene once wiring is confirmed working, independent of any bug above.
+8. Plan Badges module (asked about, not changed this session): confirmed it is a **standalone**
+   CRUD module with no wiring into plan creation or the plans list/detail — `apply_to`/
+   `plan_badge_plans` model the relationship from the badge's side, but nothing currently renders a
+   badge anywhere. Flagged as a possible next task, not started.
