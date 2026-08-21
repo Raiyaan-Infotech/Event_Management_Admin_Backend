@@ -128,6 +128,31 @@ const oauthCallback = asyncHandler(async (req, res) => {
 
         logger.logRequest(req, `OAuth ${created ? 'signup' : 'login'}: ${client.email} via ${provider}`);
 
+        /**
+         * ── ISSUE THE SESSION. THIS WAS MISSING ENTIRELY ─────────────────────
+         * The password login has always minted these cookies; this branch never
+         * did. It logged "OAuth login: <email>", redirected back with
+         * `auth=success`, and left the browser holding NOTHING — so the site
+         * said "Login successful", the portal then called /client/me, and got a
+         * 401 in under a millisecond because no cookie was ever sent.
+         *
+         * Social sign-in has therefore never produced a working session. It
+         * looked fine from the website, because the website only reads the
+         * query string; the failure only showed up one app later.
+         *
+         * Set BEFORE the redirect: Set-Cookie on a 302 is stored by the browser
+         * before it follows the Location header, which is exactly what is
+         * wanted here.
+         *
+         * Issued even when the mobile step is still pending. The provider has
+         * already proven who this is — collecting a phone number is profile
+         * completion, not authentication — and the front end keeps the visitor
+         * on the page for that step regardless.
+         */
+        const accessToken = generateWebsiteClientAccessToken(client);
+        const refreshToken = generateWebsiteClientRefreshToken(client);
+        setWebsiteClientCookies(res, accessToken, refreshToken);
+
         // A provider never tells us a phone number, so the mobile step happens
         // after the round trip. Only asked for when the account has none —
         // re-prompting someone who already verified would be noise.
@@ -142,7 +167,9 @@ const oauthCallback = asyncHandler(async (req, res) => {
                 ? {
                       needs_mobile: '1',
                       // Scoped to this client and this purpose, and short-lived.
-                      // There is no session to authorise the mobile write with.
+                      // Kept even though a session cookie is now issued above:
+                      // the mobile endpoint accepts this token, and changing
+                      // both sides at once would break any tab mid-flow.
                       link_token: oauthService.signMobileToken(client.id),
                   }
                 : {}),
