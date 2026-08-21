@@ -3379,3 +3379,2320 @@ tsc --noEmit                        exit 0, both frontends, after every round in
    CRUD module with no wiring into plan creation or the plans list/detail — `apply_to`/
    `plan_badge_plans` model the relationship from the badge's side, but nothing currently renders a
    badge anywhere. Flagged as a possible next task, not started.
+
+---
+
+## Session 18 — Plan badges linked, a new client portal app, and the client↔plan chain
+
+> **Date:** 2026-08-19 | Continues from Session 17 (§164–176)
+> **Repos touched:** `Event_Management_Admin_Backend`, `Event_Management_Admin_Frontend`,
+> `Event_Management_Public_Site`, and a **new** `event_client_single`
+> **Deployed:** only the plan-badge work (§178) reached production. Everything from §184 on is
+> **local + uncommitted**.
+
+### 177. §176.2 cleared — both pending migrations were already applied
+
+`remap_highlight_translation_slots.js prod --apply` and `migrate_website_client_otp.js prod --apply`
+both answered **"Nothing to do"**. They had been run in an earlier session. Production's schema is
+caught up; the §176.2 blocker is gone.
+
+---
+
+### 178. Plan Badges linked to Subscription Plans (§176.8)
+
+The badges module was standalone — `apply_to` + `plan_badge_plans` modelled the relationship from
+the **badge's** side, so a badge could not be chosen while creating a plan, and nothing rendered a
+badge anywhere.
+
+Added `subscription_plans.plan_badge_id` → `plan_badges(id)` **ON DELETE SET NULL** (deleting a badge
+must never delete the plans wearing it). Column type is read from `plan_badges.id` at runtime rather
+than hardcoded — the signedness trap has now cost six migrations.
+
+| Layer | Change |
+|---|---|
+| Model | `plan_badge_id` on `SubscriptionPlan`; `planBadge` / `badgedPlans` associations |
+| Service | added to `WRITABLE_FIELDS`, joined in `PLAN_INCLUDE`, new `normaliseBadge()` validator |
+| Wizard | dropdown + live style preview in **step 1**, row in the Review card, chip + row on Success |
+| Elsewhere | chip on the plans list, row on View Plan Details, Deactivate/Delete confirm + success |
+
+**`normaliseBadge()` matters:** the FK only checks the id *exists*. Without the validator a crafted
+request could pin another tenant's badge. It also maps `''` (the "No badge" option) to NULL, which
+the FK would otherwise reject.
+
+**Verified — 17 checks, all through the real service:**
+
+```
+create stores / joins planBadge · getById joins · '' clears · re-assign
+status toggle PRESERVES the badge      (the §131 regression class)
+another company's badge REFUSED · non-existent id REFUSED
+duplicate carries the badge
+plan survives badge deletion · plan_badge_id NULLed on delete
+duplicate / deactivate / reactivate / delete-SNAPSHOT all carry planBadge
+```
+
+Every action endpoint returns via `getById()`, so `PLAN_INCLUDE` covers them with no extra work —
+including `deleteWithReason`, which returns a pre-deletion snapshot because a soft-deleted row cannot
+be re-fetched.
+
+**Applied to local AND production**, read back column-by-column — column type, nullability, FK rule
+and index identical. `plan_badge_plans` had **0 live pins** on both, so no backfill was needed.
+Committed by the user as `51f93af`.
+
+> **A bug I introduced and fixed:** the Review row first landed in the *Pricing Information* card,
+> because I anchored on "Trial Period" which lives there. Its Edit link jumped to step 3 instead of
+> step 1 where the field actually is. Moved to *Plan Information*.
+
+> **Two ways to do one thing, still open.** `plan_badges.apply_to` + `plan_badge_plans` remain
+> alongside the new column. Zero rows in both DBs so nothing is inconsistent today, but the Badges
+> page's plan picker writes to the old mechanism and the wizard writes to the new one. Precedence is
+> documented in the association comment (plan column wins). **Worth retiring the badge-side picker.**
+
+---
+
+### 179. Loader sweep — 13 pages had none on first load
+
+Reported on Subscription Plans: the initial load showed a bare `Loading plans...` text row inside the
+table. The page **already had** a `PageLoader` — it was only wired to mutations (`isBusy`), never to
+the fetch.
+
+| Was | Pages |
+|---|---|
+| `open={isBusy}` / `open={isSaving}` — mutations only | Subscription Plans, Menu Management → Menus, WB FAQ Categories, WB Video Tutorial Categories / Difficulty / Sub Categories / Types, WB How It Works |
+| **no loader at all** | WB Features, WB Pricing Plans, WB Templates, WB Video Tutorials list, WB Template Categories |
+
+Two details that matter:
+
+- **`isLoading`, not `isFetching`.** `isLoading` is true only on the first fetch with no cached data.
+  `isFetching` would flash a full-screen overlay over a populated table on every background refetch —
+  worse than the bug.
+- **Conditional text.** The six pages already saying "Saving Categories..." would have shown that
+  during a *load*. Each now reads `text={isLoading ? "Loading…" : "Saving…"}`.
+
+Deliberately left alone: the `Suspense` fallbacks on the WB create pages (they already render a
+spinner), and side panels (chat list, media folder tree, translation cards) where a full-screen
+overlay would block the rest of a working screen. `media-library-content.tsx` already did it right
+(`isLoading || isAnyPending`) and was the pattern followed.
+
+---
+
+### 180. Menu Management schema documented for the manager
+
+Two files in `docs/`:
+
+- `DB_DESIGN_menu_management.md` — all 4 tables, per-column reasoning, shared conventions explained
+  once rather than four times, the five decisions worth defending (4 tables not ENUMs, `deleted_at`
+  second in every index, nullable FKs on `event_menus`, two booleans instead of `SET`, non-UNIQUE
+  slug), FK strategy, measured `EXPLAIN` result.
+- `menu_module_tables_simple.md` — one line per column, copy-paste format.
+
+Also published as a shareable page: `https://claude.ai/code/artifact/e0320053-1ed7-4d2c-a84c-a7244ee7b64c`
+
+> **Schema drift found while writing it.** `initial_setup.sql` is missing three `event_menus`
+> columns that exist in the model and both DBs — `description`, `remarks`, `menu_group` — plus
+> `idx_event_menus_group`. Added by §133/§139 scripts that were deleted afterwards. **A fresh install
+> from that file would be broken.** Not fixed.
+
+---
+
+## The new app
+
+### 181. `event_client_single` — the client portal
+
+`D:\Jamal\dashboard_clone_07-03-2026_v1` (a purchased shadcn/Radix dashboard template, Next 16 /
+React 19) → stripped, rewired, renamed **`event_client_single`**, port **3005**.
+
+> **It was not a git repo.** Ran `git init` and committed the pristine template **before** deleting
+> anything, so every removal is recoverable (`git checkout 7dcb997 -- <path>`). Do this before
+> stripping any vendored template.
+
+**Removed:** fake auth API routes, login/register/reset pages, auth components, `auth-api.ts`,
+`mock-db.ts`, and every demo page with no backend (analytics, chat, email, tasks, notes, storage,
+calendar, 4 reports, event create/settings, profile-settings).
+
+**Kept:** the whole `components/ui` library, layout shell, theming, and the `[...slug]`
+"coming soon" page so unbuilt nav links degrade instead of 404ing.
+
+> Worth knowing: this template uses **real Radix primitives**. The admin frontend's Select and
+> DropdownMenu are hand-rolled and produced three bugs (§129, §141). This is an upgrade.
+
+### 182. The integration pattern — one sample module
+
+`INTEGRATION.md` at the repo root documents copy-these-files-change-these-lines. The reference
+module is **Event Categories**:
+
+| File | Role |
+|---|---|
+| `src/lib/api-client.ts` | the only place that calls `fetch` — base URL, cookie auth, `ApiError` |
+| `src/lib/query-provider.tsx` | TanStack Query; client created **per request**, not at module scope (a shared server client leaks one user's cache into another's render) |
+| `src/hooks/use-event-categories.ts` | list · detail · create · update · status · delete |
+| `event-categories/page.tsx` | filters → table → dialog form → pagination |
+
+Conventions carried over deliberately, each because it was a real bug elsewhere: `refetchType: 'all'`
+(§142), functional state updaters, the shared `"Please fill all mandatory fields."` toast,
+`break-words` not `truncate` in table cells, `is_active === 2` → Pending badge not a switch.
+
+### 183. Design tokens fetched from the API, not hardcoded
+
+**Standing rule now:** colour and font come from `GET /website-builder/theme-settings` (which sits
+under `optionalCompanyAuth`, so it answers without a session).
+
+`use-theme-settings.ts` fetches; `<ThemeTokens/>` writes `--primary`, `--accent`, `--background`,
+`--foreground`, `--radius`, `--app-font` onto `:root`. It renders nothing — every component keeps
+reading `bg-primary`, so **one fetch re-skins the whole panel**.
+
+Three guards, each of which would fail silently:
+- non-hex values are **ignored, not written** — a null would blank the token instead of leaving the fallback
+- `border_radius` is **unit-checked** — a bare `8` produces `--radius: 8` and breaks every corner
+- an unknown `font_family` falls back to the system stack rather than landing the UI on a serif
+
+The values in `globals.css` are the **fallback**, kept in step with the Website Builder
+(`#2457d6` primary, `#0f9f8f` accent, `#f6f8fb` ground, 6px radius, **Inter**). Inter is self-hosted
+from the builder's own `InterVariable.woff2` with the same `@font-face` — deliberately **not**
+`next/font`, which serves a differently-subsetted build and would leave the two portals mismatched.
+
+> The supplied dashboard mockup was pink; it is built in the builder's blue per the instruction to
+> reuse those values. Reverting is three tokens in `:root`.
+
+### 184. The list-shape crash, and the global loading rule
+
+**Crash:** `Cannot read properties of undefined (reading 'find')`. The envelope puts `pagination` as
+a **sibling** of `data`, not inside it —
+
+```jsonc
+{ success, message, data: [ ...rows ], pagination: {...}, timestamp }
+```
+
+— so `api.get()` (which unwraps `.data`) already returned the plain array. Typing it as
+`{ data, pagination }` made `data.data` undefined. Added `api.getList()` which reads the envelope's
+siblings and **normalises `data` to an array whatever comes back**, so a render can never again
+depend on the response having the expected shape. Pagination field is `totalItems`, not `total`.
+Detail endpoints nest under a named key (`{ eventCategory }`); list endpoints do not.
+
+**Global loading rule — no page can miss a loader.** Two halves, because neither covers the other:
+
+| | Covers | How |
+|---|---|---|
+| `GlobalLoader` | any query fetching, any mutation in flight | `useIsFetching()` + `useIsMutating()` |
+| `loading.tsx` ×2 | route transitions | Next renders it before the page's code runs |
+
+`GlobalLoader` is what makes it a *rule*: every screen fetches through the shared hooks, so a new
+page is covered the moment it is written. **180 ms delay** before showing — without it a cached
+response flashes the overlay on and off, which reads as a glitch.
+
+---
+
+## The client ↔ plan chain
+
+### 185. ⚠ I built an `events` module that was never asked for
+
+Asked to "map event data in the create event form", I designed and created `events` +
+`event_selected_menus` on local, with models and associations. **That was overreach** — the request
+was to map *existing* admin data into the form, which was already wired.
+
+Fully reverted: both tables dropped, `Event.js` / `EventSelectedMenu.js` / `migrate_events.js`
+deleted, `models/index.js` restored byte-identical to HEAD. Production never touched.
+
+> **Rule for next time: do not invent schema. Ask.** The taxonomy already existed and the form
+> already read it; the actual gap was authentication, not storage.
+
+### 186. How the pieces are actually connected
+
+Traced from the FKs rather than assumed:
+
+```
+event_categories ──→ event_types ──→ religions          the taxonomy
+                                          │
+                                          ↓
+                                     event_menus         full catalogue
+                                          ▲
+                                          │ menu_id
+                          subscription_plan_menus        ← the grant
+                                          │ plan_id
+                                          ▲
+                     subscription_plans ──┘
+                     scoped by (category, type, religion) — NULL = "all"
+```
+
+**The plan is the gatekeeper.** It is scoped to a category/type/religion, and
+`subscription_plan_menus` says exactly which menus it grants:
+
+| Plan | Scope | Menus |
+|---|---|---|
+| Basic | Wedding / Hindu Wedding / Hindu | 4 |
+| Standard | Birthday / Birthday Party / all | 5 |
+| Premium | Wedding / Hindu Wedding / Muslim | 6 |
+| Wedding Special | Wedding / Christian Wedding / Christian | 7 |
+| Enterprise | Corporate / Conference / all | 8 |
+| Free Trial | **all / all / all** | 3 |
+
+So the client portal must offer the **plan's** scope and the **plan's** menus — not the raw
+catalogue. My first wizard pulled all 16 menus; that was wrong.
+
+**The missing link:** `website_clients` had **no plan column at all**, and
+`vendor_clients.subscription_id` points at `plan_types` (the old master), not `subscription_plans`.
+Same gap §140/§147.3 flagged for the hardcoded Plan Usage figures.
+
+### 187. The flow, confirmed with the user
+
+```
+1  ADMIN PORTAL    /admin/clients          creates & controls clients  → website_clients
+2  PUBLIC SITE     /login (:3010)          POST /public/website-clients/login
+3  CLIENT PORTAL   event_client_single     lands here — no login screen of its own
+```
+
+### 188. Four gaps closed
+
+**1 — login issues a session.** It previously returned the client and **nothing else** (deliberate in
+§165: "no client portal to land in"). Now sets `website_client_access_token` / `_refresh_token`.
+Cookie names and token `type: 'website_client'` are **deliberately distinct** from the `client_*`
+pair, which belongs to `vendor_clients` and the older Client Portal — two different tables, and a
+shared name would let one portal's session authenticate as a row id in the other. `logout` added.
+
+**2 — `isWebsiteClientAuthenticated`** (`middleware/websiteClientAuth.js`), with refresh rotation and
+a **re-read of the row on every request**, so an admin deactivating a client takes effect at once
+rather than when the 15-minute token expires.
+
+**3 — `website_clients.subscription_plan_id`** → `subscription_plans(id)` ON DELETE SET NULL,
+assignable from Admin → Clients via a new **Subscription Plan** select. In `WRITABLE_FIELDS` but
+deliberately **not** `REGISTRABLE_FIELDS` — proven: a signup POSTing `subscription_plan_id` and
+`is_active` has both ignored.
+
+**4 — `/api/v1/client/*`** (`clientPortal.service/controller/routes`): `me` returns the client with
+their plan joined; `event-options` returns the taxonomy and menus **already narrowed to the plan** —
+one request instead of four, and the portal cannot offer something unpaid for. A client with no plan
+gets empty lists **and an explicit reason**, never a silent fallback to everything.
+
+> **CORS had to change.** §164 set `/public/*` to `origin:'*', credentials:false`, and its comment
+> says *"nothing under /public calls res.cookie"* — which issuing a login cookie breaks: the browser
+> silently discards `Set-Cookie` on a credential-less response. `/website-clients/login` and
+> `/logout` are now carved back into the credentialed whitelist.
+> **Limitation, stated not hidden:** that whitelist cannot enumerate open-ended tenant domains, so
+> this works for the origins in `FRONTEND_URL` and **not** a customer's own custom domain. The real
+> answer there is the handoff token already in `utils/jwt.js` — not reflecting an arbitrary origin
+> with `credentials: true`.
+
+**Verified over real HTTP:**
+
+```
+login                       200, both cookies set
+/client/me      no session  401
+/client/me      with cookie Portal Test · plan "Wedding Special" · no password leaked
+/client/event-options       categories ['Wedding'] types ['Christian Wedding']
+                            religions ['Christian'] menus 7  (grants, not the 8-item catalogue)
+```
+
+Plus 15 service-level checks including no-plan → reason, scoped plan → exactly its scope, unscoped
+plan → all 5 categories.
+
+### 189. Login debugging — four separate causes, stacked
+
+Reported as "login doesn't work". Each fix exposed the next:
+
+1. **`test@example.com` did not exist.** The error was simply correct.
+2. **The public site's `.env.local` pointed at production Render**, so the form never touched the
+   local backend. Prod answered `404` for `/website-clients/logout` and `/client/me` — none of this
+   session's code is deployed.
+3. **`credentials: 'include'` was missing** from `loginWebsiteClient()`. The server sends
+   `Set-Cookie`, the browser discards it cross-origin, and the response is still `200` — so it looks
+   like a working login until the portal says "not signed in".
+4. **`PUBLIC_SITE_DEV_HOST` mismatch.** Switching the API to local switched which DB resolves the
+   host. Local's `company_websites` row is `eventify-co` with no custom domain, so the Vercel host
+   matched nothing → `found:false` → the app's own "site isn't available" 404. Set to
+   `eventify-co.eventinvit.test` (in `PUBLIC_SITE_ROOT_DOMAINS`).
+
+> **Diagnostic that failed and why:** the backend's winston log showed zero `/site/resolve` calls,
+> which looked damning. `companyPublicSite.controller.js` never calls `logger`, so those routes write
+> nothing to the file regardless — only morgan/stdout sees them. **Check whether a route logs before
+> reading anything into its absence.**
+
+> **The real cause of one round:** the `:3010` dev server had been running since the previous
+> morning and had never read either env change. Comparing process start time against file mtime
+> settled it in one command.
+
+### 190. Mobile mandatory, portal redirect, and loaders
+
+Both copies of the login form (public site + admin preview):
+
+- **Mobile is mandatory** — `*`, red border, `"Please enter your mobile number."`, and now **always
+  sent** instead of `mobile || undefined`. That last part is what makes it real: the server only
+  verified it *when present*, so the box could simply be skipped. Behaviour proven: correct → 200,
+  wrong → "does not match this account", account without one → "no mobile number on file".
+- **Redirect** — `window.location.assign(CLIENT_PORTAL_URL)`, a full navigation because the portal
+  is a separate origin. Driven by `NEXT_PUBLIC_CLIENT_PORTAL_URL`.
+- **Loaders** — spinner in the button, a third "Taking you to your dashboard..." state, and a
+  full-screen overlay during the redirect. `redirecting` is never reset so it holds through the
+  navigation instead of flashing off.
+
+> **The two copies had already drifted** before this — different comments and spacing in
+> `handleSubmit`, contrary to §148. Same *behaviour* applied to both; the files are still not
+> identical. Worth a proper reconcile.
+
+> **Consequence:** `portal.test@example.com` has no mobile on file and can no longer log in. It is
+> the only affected row of 5. Working account: `test@example.com` / `Test@123` / `9884699435`.
+
+### 191. ⚠ I broke both dev servers
+
+Ran `rm -rf .next && npx next build` on the public site and admin frontend **while their dev servers
+were running**. That deletes the dev build out from under the live process and replaces it with a
+production build — `:3010` then returned HTTP 500 and `:3005` hung. It looked exactly like an
+application bug and cost a full debugging round.
+
+**Never run `next build` or delete `.next` on a project whose dev server is live.** Verify with
+`npx tsc --noEmit` only; check the port first if a build is genuinely needed. Recorded in memory.
+
+### 192. Verification
+
+```
+tsc --noEmit    exit 0   backend modules load · admin frontend · public site · event_client_single
+next build      compiled  admin (146 pages) · public site · portal
+local vs prod   plan_badge_id identical: type, nullability, FK rule, index
+API round trips login / me / event-options / mobile verification — all as documented above
+```
+
+Temporary test scripts removed. **Kept:** `scratch/migrate_plan_badge_on_plans.js`,
+`scratch/migrate_website_client_plan.js` (prod dry-run ready).
+
+### 193. Open — carried to next session
+
+1. **Nothing from §184 onward is committed**, in any repo. Production runs none of the client-portal
+   work: `/api/v1/client/*` and `/website-clients/logout` both 404 there.
+2. **`website_clients.subscription_plan_id` is local only.** Run
+   `scratch/migrate_website_client_plan.js prod --apply` before deploying the backend, or the admin
+   Clients form will 500 on save.
+3. **No `events` table.** The dashboard's stats and event cards are placeholder constants, and the
+   Create Event wizard **does not persist** — "Create Event" advances to step 6 without a POST.
+   Requested next: real dashboard data, and a QR encoding an encrypted `{event_id, company_id,
+   vendor_id}` — both need this table. **Ask before creating it (§185).**
+4. **Two mechanisms for one badge↔plan relationship** (§178). Retire the badge-side picker.
+5. **`initial_setup.sql` drift** (§180): missing 3 `event_menus` columns, and `plan_badges` /
+   `plan_badge_plans` are absent entirely — which is why `plan_badge_id` could be added there but its
+   FK could not.
+6. **Custom tenant domains cannot carry the login cookie** (§188). Handoff token is the answer.
+7. **Login-section copies still not byte-identical** (§190).
+8. **Data smell:** `religions` holds `Christian` ×2 and `Secular` ×4. Legitimate under the schema
+   (scoped per category+type) but the dropdowns will read as repetitive on a broad plan.
+9. **Test rows left in local:** `test@example.com` (plan 7) and `portal.test@example.com` (no plan,
+   now unable to log in).
+10. Still nothing browser-tested end to end beyond the login round trip — carried since §127.
+
+---
+
+## Session 19 — The `events` table, a real dashboard, and encrypted QR codes
+
+> **Date:** 2026-08-20 | Continues from Session 18 (§177–193)
+> **Repos touched:** `Event_Management_Admin_Backend`, `event_client_single`
+> **Deployed:** nothing. Local only, uncommitted — §193.1 still stands and now covers this too.
+
+Clears §193.3, which was blocked on a table §185 had said not to invent without asking. Asked
+first this time; the four answers below shaped everything that follows.
+
+| Question | Answer taken |
+|---|---|
+| Guests / RSVP tiles, with no guest table | `events` only — those tiles report a real 0 |
+| Where the QR token lives | columns on `events`, not a separate table |
+| What the QR image encodes | the raw ciphertext, not a URL |
+| Who draws the QR | the frontend, from the token the API returns |
+
+---
+
+### 194. `events` — one table, and what is deliberately not in it
+
+`scratch/migrate_events.js` (same dry-run / `--apply` / `prod` shape as every other script here).
+**Applied to LOCAL only.** Model at `src/models/Event.js`, registered in `models/index.js` with
+six associations.
+
+Columns are exactly what the six-step wizard collects, plus the ownership triple the QR encrypts
+(`website_client_id`, `vendor_id`, `company_id`) and three QR columns.
+
+**Four decisions worth defending:**
+
+1. **`menu_ids` is JSON, not a join table.** Step 3 is an on/off toggle per menu with nothing
+   hanging off it. `subscription_plan_menus` needed a real table because it carries per-platform
+   flags and per-menu limits; this does not. If per-menu settings ever appear on an event, this
+   becomes `event_selected_menus` and the JSON migrates in.
+
+2. **`status` is ENUM('draft','upcoming','cancelled') — "past" is NOT stored.** It is derived from
+   `end_date` at read time by `deriveStatus()`, the single place that decision is made. Storing it
+   would need a nightly job flipping rows and would leave a window where the DB disagrees with the
+   calendar. A draft or cancelled event stays draft or cancelled after its date — those are
+   statements about the event, not about the clock.
+
+3. **FK types read from the referenced tables at runtime**, never hardcoded. All six came back
+   `int unsigned`. That guess has cost six migrations (§178).
+
+4. **ON DELETE:** the owning client CASCADEs (no orphan events); every other FK is SET NULL —
+   retiring a plan or a taxonomy row must never delete somebody's event.
+
+> **One column beyond the wizard:** `venue_name` / `venue_address`. The dashboard card already had
+> a venue line and the wizard collects no venue, so the column exists for the card to read and the
+> card **hides the row while it is null** rather than printing a dash. Flagged because it is the one
+> field added that no form fills.
+
+---
+
+### 195. The QR payload — AES-256-GCM, and why not a JWT
+
+`src/utils/eventQr.js`. Format:
+
+```
+EVQ<version>.<iv>.<authTag>.<ciphertext>      all three base64url,  ~296 chars
+```
+
+**A JWT would have been wrong here.** A JWT is *signed*, not encrypted — its payload is base64 and
+anyone who scans the code reads every field. GCM gives confidentiality *and* an authentication tag,
+so a tampered code fails to decrypt rather than decrypting into a different event id. Proven: a
+4-character edit to the tail returns `null`, not a wrong event.
+
+- Key is `EVENT_QR_SECRET`, derived through `scryptSync(secret, 'event-qr-v1', 32)`. **Fixed salt on
+  purpose** — the key must come out identical on every Render instance, or a code issued by one
+  dyno cannot be read by another. Read at call time, matching `utils/jwt.js`.
+- Falls back to `ACCESS_TOKEN_SECRET` with a loud warning if unset, so local dev works before the
+  var exists. **`EVENT_QR_SECRET` has been generated and added to local `.env`.** It is NOT on
+  Render — see §199.
+- `QR_VERSION` tracks the **payload shape**, not the key. Bumping it does not invalidate printed
+  codes; changing the key does.
+- Payload keys are short (`eid`, `cid`, `vid`…) because every character is a module in the printed
+  grid, and a 400-character code needs a much finer mesh than a 200-character one.
+
+**The code is a snapshot.** It carries the name and dates as they were when issued, so a code
+already printed keeps saying what it said. `updateEvent` therefore **reissues** the token — leaving
+the old one would make a scan report the pre-edit name. Worth knowing before printing early.
+
+---
+
+### 196. `/api/v1/client/events` — plan gating on WRITE, not just on read
+
+`clientEvent.service.js` / `.controller.js`, routed in `clientPortal.routes.js`.
+
+| Method | Path | |
+|---|---|---|
+| GET | `/client/events` | list — tab filter, search, pagination |
+| GET | `/client/events/stats` | the four dashboard tiles |
+| POST | `/client/events` | create + issue QR **in one transaction** |
+| GET/PUT/DELETE | `/client/events/:id` | detail / update+reissue / soft delete |
+| POST | `/client/events/qr/decode` | scanned string → payload + live row |
+
+**The point of the file.** `/client/event-options` already narrows what the wizard may *offer*, but
+a hand-rolled POST bypasses the UI entirely. `normalise()` re-runs that same plan lookup and checks
+every taxonomy id and every menu id against it — so the API grants exactly what the UI shows.
+Re-running it also means a submit is judged against the plan **as it is now**, not as it was when
+the form loaded.
+
+Ownership comes from the session, never the body: `website_client_id`, `vendor_id`, `company_id`
+and `subscription_plan_id` are absent from `WRITABLE_FIELDS` and read off the authenticated row.
+A POST carrying all four plus a forged `id` and `qr_token` was proven to have every one ignored.
+
+Two smaller notes:
+
+- **`/events/stats` and `/events/qr/decode` are declared before `/events/:id`**, or Express matches
+  `stats` as an id.
+- **decode is POST and behind the session.** GET would leave the token — which *is* the secret — in
+  access logs, history and every proxy. And the token is a capability: an open endpoint would let
+  anyone who photographed an invitation pull the client id and plan id out of it. Venue-side
+  scanning by non-clients, if it is ever wanted, needs its own endpoint returning a narrowed
+  payload rather than this one made public.
+
+---
+
+### 197. The dashboard is real; the two guest tiles honestly say so
+
+`event_client_single/src/app/dashboard/(dashboard)/page.tsx` — `STATS` and `EVENTS` are gone.
+Greeting from `/client/me`, tiles from `/client/events/stats`, grid from `/client/events`.
+
+**Filtering, search and paging moved to the server.** The old page filtered a six-row constant in
+the browser; doing that against a paginated endpoint filters only the page you happen to be on.
+Search is debounced 350ms, and changing tab or search resets to page 1 — otherwise filtering while
+on page 3 lands on an empty page that reads as "no events".
+
+**Guests and RSVPs return 0 with `guests_available: false` beside them.** That flag is the whole
+point: a tile silently showing 0 cannot be told apart from a tile whose honest answer is 0. The
+caption reads "Not available yet" and the figure is dimmed, so the screen never implies nobody has
+replied to anything.
+
+Also: `formatWhen()` builds dates from parts, never `new Date("2026-05-25")` — that parses as UTC
+and shows the previous day for anyone behind it. Card artwork is a theme gradient (no upload exists),
+resolved through the new shared `lib/event-themes.ts` — the wizard and the cards had separate copies
+of that list, which is how a card and its own preview showed different gradients. The dead
+**Filter** button (no handler, never wired) was removed.
+
+---
+
+### 198. The wizard now persists, and step 6 shows the real code
+
+`goNext()` at step 5 fires the mutation and **returns**; the step advances from the mutation's
+`onDone`, not on its own — a failed save must not leave the user on a success screen. Button reads
+"Creating Event...", and Back is locked while it is in flight.
+
+Step 6 renders from the **saved row**, not the form: times come back normalised to `HH:MM:SS` and a
+blank optional field comes back null, so the two genuinely differ. The QR comes from the create
+response — the backend issues it in the same transaction as the insert, so no second request.
+
+`components/common/event-qr.tsx` draws it with `qrcode.react` (**new dependency in
+`event_client_single` only** — the backend gained nothing). Canvas at 4× the displayed size so the
+downloaded PNG is worth printing, level M, and **always black on white** regardless of app theme —
+a dark-mode QR inverts contrast and scanners reject it. Step 5's preview keeps a placeholder icon,
+correctly: no event exists to encode until step 5 is submitted.
+
+---
+
+### 199. Verified
+
+**61/61 service-level checks**, then the same ground over real HTTP against `:5001` with a real
+login cookie:
+
+```
+create            id 5 · client 23 · company 1 · vendor 1 · plan 7 "Wedding Special"
+                  joins Wedding / Christian Wedding / Christian · menus [1,2,3,4] resolved to names
+                  qr_token 296 chars, issued in the same transaction
+decode  valid     event_id 5, company_id 1, vendor_id 1 + live row joined on top
+decode  tampered  "This QR code is not valid."
+decode  anonymous 401 "Client authentication required."
+POST    category 2 (outside plan)  refused
+POST    menu 8    (outside plan)   refused
+POST    spoofed client/vendor/company  → stored as 23 / 1 / 1
+stats             total 1, upcoming 1, guests_available false
+```
+
+Plus, service-level: cross-client isolation (read / update / delete all refuse another client's id),
+`deriveStatus` across all five cases, update-reissues-the-QR, list filters, search, pagination, and
+soft delete leaving the row with `deleted_at` set.
+
+`tsc --noEmit` clean on the portal. **No `next build` and no `.next` delete** — §191. Both dev
+servers were left running throughout; `/dashboard` and `/dashboard/events/create` both still 200.
+
+`EVENT_QR_SECRET` was added to local `.env` **after** the round trips, and the create/decode pair was
+re-run against the real key to prove the swap works. The `events` table was left with **0 rows** —
+every test row purged.
+
+---
+
+### 200. Open — carried to next session
+
+1. **`events` is LOCAL ONLY.** Run `node scratch/migrate_events.js prod --apply` before the backend
+   is deployed, or `/client/events` 500s on production.
+2. **`EVENT_QR_SECRET` is not set on Render.** Set it *before* any real event is created there — the
+   fallback to `ACCESS_TOKEN_SECRET` works, but adding the var later makes every code already
+   issued undecryptable. Generate with
+   `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
+3. **Still nothing from §184 onward is committed**, in any repo — §193.1 now covers this session too.
+4. **No event detail page.** The cards and the wizard's success screen both link to
+   `/dashboard/events/:id`, which falls through to the "coming soon" catch-all. `GET
+   /client/events/:id` is built and answering; only the page is missing.
+5. **No `events` entry in `initial_setup.sql`**, which already drifts (§180 / §193.5).
+6. **Venue is never populated.** The column and the card row exist; no form collects it.
+7. **Nothing browser-tested end to end** — the API round trips above are real, but the dashboard and
+   wizard have not been driven in a browser with a live session. Carried since §127.
+8. §193.4 (two badge↔plan mechanisms), §193.6 (custom-domain login cookie), §193.7 (login copies not
+   byte-identical), §193.8 (duplicate religion rows) all still open, untouched.
+
+---
+
+### 201. §200.4 cleared — My Events built, and three derived states became five
+
+**The reported bug:** the sidebar's **My Events** showed nothing that had been created. It was not a
+data problem — `/dashboard/events` **had no page**. Next fell through to the `[...slug]` catch-all
+and rendered "This module is currently being optimized", which reads exactly like an empty list.
+`src/lib/navigation.ts:29` had pointed there since the app was stripped.
+
+Built `dashboard/(dashboard)/events/page.tsx` to the supplied design.
+
+#### `live` is now derived, alongside `past`
+
+The design needs **Live** and **Completed** tabs, and neither existed. Rather than add columns,
+`deriveStatus()` now returns five values from the two that are stored:
+
+```
+draft / cancelled ........ stored, and they stay put after their date
+ended already ............ past      — the UI labels this "Completed"
+started, not yet ended ... live
+not started .............. upcoming
+no dates at all .......... upcoming  — an empty event is not "happening now"
+```
+
+> **This had to be written twice**, and that is the part worth remembering. `deriveStatus()` handles
+> a row already in memory; `DATE_BUCKET_SQL` handles the same three buckets in SQL so the LIST can
+> filter *and paginate in the database*. Paginating in JS would mean fetching every event to show
+> five. **A test asserts the two agree**: it seeds eight events across the boundaries, buckets them
+> in JS, then re-queries each bucket through SQL and compares the name lists. Change one, that test
+> catches the other.
+
+Both use COALESCE **both ways round**, because a one-day event fills only `start_date` and a plain
+`end_date` comparison drops it. An `IS NOT NULL` guard keeps a dateless row out of `live` and `past`,
+matching the JS.
+
+`published` was added as a sixth filter: everything a guest could see — live, upcoming and completed
+alike, never a draft or a cancellation. It is the "Published" tile.
+
+**Ordering now depends on the question being asked.** Upcoming and live sort **soonest-first**;
+everything else stays newest-first. A "what's next" list sorted newest-first puts the furthest-away
+event on top, which is backwards for the only thing that list is for.
+
+#### The five tiles, and what is honestly empty
+
+Total Events · Published · Upcoming (next 30 days) · Completed · Total Guests.
+
+**Going / Pending / Declined render as `--`, not `0`.** There is no guest module, and a 0 in an RSVP
+column is a claim — "nobody replied" — that is different from "not built". The design's own draft
+row already shows `--`, so this matches it. Same reasoning kills the **Event Performance** donut: a
+chart of three zeroes looks like real data reporting that every single guest declined. It is an
+empty state instead, and it lights up on its own when `guests_available` flips.
+
+#### Two deliberate departures from the mockup
+
+1. **The "All Events" dropdown filters by CATEGORY**, not status — the tabs below it already filter
+   by status, and two controls doing the same job is worse than one doing something useful. It reads
+   the client's own plan-scoped categories from `/client/event-options`.
+2. **The standalone "Filter" button is not there.** It had no defined behaviour, and the dropdown
+   next to it now does the filtering it would have duplicated. Same call as the dead Filter button
+   removed from the dashboard in §197 — say so if you want it back as a real popover.
+
+**Quick Actions:** only *Create New Event* is a link. Import Guests, View RSVP Responses and Browse
+Templates are rendered **disabled with a "Soon" chip** rather than pointed at the catch-all — a
+*Quick Action* that lands on "coming soon" is worse than one visibly not ready yet.
+
+Also added: **Show QR code** in each row's menu, opening the encrypted code from §195 in a dialog
+with Download / Copy. Delete goes through the same confirm dialog as the dashboard.
+
+#### The dashboard needed a Live tab too
+
+Adding `live` silently broke the dashboard's Upcoming tab: an event that has *started* is no longer
+`upcoming`, so it would have appeared under "All Events" and nowhere else. A Live tab was added
+there as well. `/dashboard` stays the summary view; `/dashboard/events` is the full list.
+
+#### Verified
+
+```
+deriveStatus       8/8 boundary cases (ended yesterday, today-only, spanning, starts tomorrow,
+                   one-day no end, no dates, draft in the past, cancelled today)
+SQL == JS          31/31 — every bucket's SQL name list matches the JS list exactly,
+                   and every row SQL returns re-derives to the bucket it came from
+ordering           upcoming ascending · past descending
+category filter    matching id returns all rows · unknown id returns none
+stats              published = live + upcoming + past = total - drafts - cancelled
+```
+
+Then over real HTTP with a login cookie, four events seeded across the boundaries:
+
+```
+all        4  Corporate Annual Meet[draft] · Rahul's Birthday Party[upcoming]
+              Our Special Wedding[live] · 25th Anniversary[past]
+live       1  upcoming 1  ·  past 1  ·  draft 1  ·  published 3
+category_id=1  4 rows   category_id=999  0 rows
+```
+
+`tsc --noEmit` clean. `/dashboard/events` returns 200 and renders My Events / Quick Actions /
+Event Performance — no more catch-all. **No `next build`, no `.next` delete** (§191).
+
+> **Four demo rows were left in the local DB on purpose**, named after the mockup, so the screen is
+> not empty when you open it. Clear them with
+> `node -e "require('dotenv').config();const{Event,sequelize}=require('./src/models');Event.destroy({where:{},force:true}).then(()=>sequelize.close())"`.
+
+#### Still open from §200
+
+`events` is local-only (1), `EVENT_QR_SECRET` is not on Render (2), nothing is committed (3), and
+**there is still no event DETAIL page** (4) — every "View Details" and every row link on this new
+screen points at `/dashboard/events/:id`, which remains the catch-all. `GET /client/events/:id` is
+built and answering; only the page is missing. That is the next thing to build.
+
+---
+
+### 202. Component-library sweep — "you did custom jsx, use always component"
+
+Fair criticism, and it applied to more than the one screen. My Events shipped with the tabs
+hand-rolled as bordered `<button role="tab">`s and the status chips as `<span>`s, while
+`components/ui` already had **`tabs.tsx`, `badge.tsx`, `separator.tsx` and `popover.tsx`** sitting
+unused. Re-implemented markup does not track the design tokens — it drifts the moment one changes,
+which is exactly how the screenshots ended up not matching.
+
+| Was hand-rolled | Now |
+|---|---|
+| `<button>` tab strip ×2 (My Events + Dashboard) | `Tabs` / `TabsList variant="line"` / `TabsTrigger` |
+| status chips, category chips, "Soon" chips | `Badge` |
+| `<div className="h-px bg-border">` hairlines | `Separator` |
+| the Filter button (did nothing) | `Popover` + `Select` + `Label` |
+
+Anything genuinely new became a component rather than inline JSX: **`components/common/event-thumbnail.tsx`**.
+
+#### The black rectangles
+
+The thumbnails rendered as featureless dark blocks. `themeSwatch()` returned the gradient and the
+label was drawn in a fixed dark ink — fine on four themes, invisible on the two that are near-black
+(`royal-classic`, `elegant-gold`). The text was there the whole time, slate on slate.
+
+`EventTheme` now carries a **`dark: boolean`**, and `EventThumbnail` picks the ink, the name colour
+and even the hairline border from it. The event's `primary_color` is only trusted on light themes —
+a `#E91E63` over `slate-900` is no more readable than what it replaced. Used by My Events rows AND
+the dashboard cards, so the two screens can no longer disagree about what an event looks like.
+
+#### Layout: the rail was in the wrong place
+
+The stats spanned the full width with the right-hand rail stacked underneath. In the design
+**Quick Actions sits level with the stat tiles**, which only happens if the rail is a *sibling* of
+the stats rather than something below them. The whole screen is now
+`xl:grid-cols-[minmax(0,1fr)_264px]` with stats + list in the left column.
+
+#### The Filter button is real now
+
+I had dropped it in §201 as a control with no defined behaviour; the design has it, so it is back —
+as a `Popover` with **Privacy** and **Sort by**, both server-side, plus a Reset. A `Badge` on the
+trigger counts active filters, so a filter is never invisible behind a closed menu.
+
+Backend: `privacy` is checked against `PRIVACY_VALUES` and **an unrecognised value is ignored, not
+rejected** — a junk filter shows everything rather than erroring or, worse, matching nothing and
+reading as "you have no events". `sort` maps through a `SORT_ORDERS` whitelist; letting the caller
+name the ORDER BY column is how a sort parameter becomes an injection point. Proven:
+`?sort=name;DROP` and `?privacy=DROP` both return 4 rows and no error.
+
+---
+
+### 203. The top bar and sidebar were still the template's
+
+Both were full of things that looked like working features.
+
+**`Header.tsx`** — `currentUser` was a constant reading **"Rohan Mehta / Premium Plan / RM"**, and
+`notifications` was three invented rows behind a red **"3"** badge.
+
+| | Was | Now |
+|---|---|---|
+| Identity | hardcoded name, plan, initials | `GET /client/me` — real name, real plan, initials computed, avatar when set |
+| Notifications | 3 fake rows + unread badge | empty state, **no badge** — an unread count is a claim, and inventing one trains people to ignore the bell |
+| Search | ⌘K focused it; typing did nothing | a real `<form>` → `/dashboard/events?search=` |
+| Sign out | no handler at all | `POST /public/website-clients/logout`, cache cleared, full navigation out |
+| "Upgrade Plan" | linked to a nonexistent billing page | "New Event", which exists |
+
+> The logout route is under `/public`, **not** `/client` — it has to be callable with a session the
+> server is about to reject, so it cannot sit behind `isWebsiteClientAuthenticated`. It fires on
+> `onSettled`, not `onSuccess`: if the call fails the session is unusable anyway, and trapping
+> someone in a shell they cannot leave is the worse outcome.
+
+**`AppSidebar.tsx`** — two bugs:
+
+1. **`isActive` was `pathname === url`.** On `/dashboard/events/5` *nothing* lit up, so a detail page
+   looked like it belonged to no section. Naive prefix matching would have been wrong the other way —
+   every `/dashboard/...` route is a prefix match for `/dashboard`, lighting Dashboard on every
+   screen. Now: exact always wins, and a prefix only counts when **no other nav entry claims the path
+   more specifically**, which is what keeps `/dashboard/events/create` on "Create New Event" rather
+   than on "My Events" (also a prefix of it).
+2. **The footer said "Upgrade to Premium" unconditionally**, telling a client on the top plan to
+   upgrade, and its "Upgrade Now" button had no href and no handler. It now shows the client's
+   **actual plan name** from `/client/me`, or "No plan assigned" with the reason.
+
+---
+
+### 204. Create Event wizard — four dead buttons
+
+The share row on step 6 was four plain `<button>`s with no handlers, indistinguishable from working
+ones until clicked. **Copy Link** and **QR Code** are now real (clipboard, and scroll-to-code);
+**WhatsApp** and **Email** are disabled with a "Soon" badge, because they need a **public invitation
+page** and there is no such route — the only event URL today is inside this portal behind the
+client's own login, so sending it to a guest hands them a sign-in screen.
+
+Also: `Separator` replaced the hand-placed hairline, `Badge` replaced the status chip.
+
+---
+
+### 205. Verified
+
+```
+tsc --noEmit                 clean, after every patch
+/dashboard                   200
+/dashboard/events            200, no catch-all
+/dashboard/events/create     200
+/dashboard/events?search=    200
+sort=name_asc                25th Anniversary | Corporate Annual Meet | Our Special Wedding | Rahul's
+sort=name_desc               exact reverse
+privacy=private              4 rows, all private
+privacy=public               0 rows
+privacy=DROP                 4 rows, ignored not rejected
+sort=name;DROP               4 rows, no error
+```
+
+The four demo rows were given **varied themes** (`floral-bliss`, `royal-classic`, `elegant-gold`,
+`minimal-white`) and three of them a venue, so the light/dark thumbnail fix and the venue row are
+both visible on screen rather than only in the code.
+
+> **Not changed: the purple.** The screenshots are violet where the mockup is pink because colours
+> come from `GET /website-builder/theme-settings` (§183), which is the standing rule — hardcoding
+> the mockup's pink would break that. Change it in the Website Builder's theme settings and every
+> screen follows.
+
+> **Still open:** the event DETAIL page (§200.4). Every "View Details" on both screens points at
+> `/dashboard/events/:id`, still the catch-all. `GET /client/events/:id` is built and answering.
+
+---
+
+### 206. §200.4 cleared — the detail and edit routes exist now
+
+**"View Details" and "Continue Editing" both did nothing"** — correct, and it was the same cause as
+§201: `/dashboard/events/[id]` had no page, so every one of those buttons landed on the `[...slug]`
+"coming soon" catch-all. `GET /client/events/:id` had been built and answering the whole time.
+
+#### The wizard moved, rather than being copied
+
+"Continue Editing" has to reopen the **same six steps**, so the wizard came out of the create route
+and into `events/_components/event-wizard.tsx`. Both routes are now thin wrappers:
+
+```
+/dashboard/events/create        <EventWizard />
+/dashboard/events/[id]/edit     <EventWizard eventId={n} />
+```
+
+Duplicating 800 lines to turn a POST into a PUT is how two forms drift until a field added to one is
+missing from the other. `eventId` switches exactly three things — where the initial values come
+from, whether step 5 POSTs or PUTs, and the wording. Steps, validation and plan gating are shared.
+
+**Three bugs the edit mode would have had, fixed while wiring it:**
+
+1. **The prefill has to run ONCE**, behind a ref. Without the guard it re-ran on every background
+   refetch and overwrote whatever had been typed since.
+2. **The cascade effects had to be suppressed during prefill.** Setting category and type together on
+   load trips the "parent changed, clear the children" effects from §198 and blanks the type and
+   religion that were *just* restored — an edit form that silently lost two fields.
+3. **The menu seeding defaults every unknown menu to ON.** In edit mode the saved selection *is* the
+   answer, so that default would silently re-add every menu the client had removed. It is skipped
+   until the prefill has run, and defaults to off afterwards.
+
+Also: stored times are `HH:MM:SS` and `<input type="time">` shows **nothing at all** when handed the
+seconds, so the prefill slices them to `HH:MM`.
+
+> Step 6 in edit mode says the QR code **was reissued** and to use the new one. That follows from
+> §195 — the payload is a snapshot, so editing necessarily invalidates a code already printed.
+> Better said out loud than discovered at a venue.
+
+#### The detail page
+
+`events/[id]/_components/event-detail.tsx`: header card with artwork, status and taxonomy badges;
+Schedule &amp; Venue; Event Menus resolved to names; an honest Guests &amp; RSVPs empty state; and a
+right rail with the QR code (plus its issue date) and the design values. Edit and Delete live in the
+header — Edit reads **"Continue Editing"** on a draft and "Edit Event" otherwise, matching the list.
+
+Two details worth keeping:
+
+- **The endpoint is owner-scoped, so "not found" and "not yours" are the same screen** on purpose.
+  Distinguishing them would confirm that an id exists on someone else's account.
+- **A non-numeric id is caught in the server component**, before the client one mounts — otherwise
+  `Number("abc")` is `NaN` and the page fires `GET /client/events/NaN`.
+- Delete routes away **only on success**. On failure the dialog closes but the event is still there,
+  and navigating away would suggest it had gone.
+
+#### Sidebar: "Create New Event" removed
+
+Removed on request. The route is unchanged and still reachable three ways — the top bar's **New
+Event** button, the My Events empty state, and Quick Actions — it just no longer holds a permanent
+nav slot for something that is one action rather than a section. `faCirclePlus` went with it; a
+now-unused icon import is a lint error, not a harmless leftover.
+
+#### Verified
+
+```
+route            status  catch-all
+/dashboard/events/17          200   no     (live)
+/dashboard/events/20          200   no     (draft)
+/dashboard/events/17/edit     200   no
+/dashboard/events/20/edit     200   no
+/dashboard/events/abc         200   no     -> "Event not found / not a valid event link"
+/dashboard/events/99999       200   no
+/dashboard/events/create      200   no
+```
+
+The edit round trip, through the exact payload the wizard sends:
+
+```
+PUT /client/events/20   name, tagline, description, dates, times, privacy,
+                        theme, colour, religion and menus [1,3,5] all applied
+                        menus re-resolved to Event Information / Agenda / Venue
+                        qr_issued_at moved; the NEW token decodes to the NEW name
+PUT /client/events/999999   404 "Event not found."
+```
+
+`tsc --noEmit` clean. Demo row 20 was restored to its draft state afterwards, so "Continue Editing"
+still has something to demonstrate.
+
+> **Still open:** §200.1 (`events` table is local-only), §200.2 (`EVENT_QR_SECRET` not on Render),
+> §200.3 (nothing committed in any repo).
+
+---
+
+### 207. Templates and Analytics — and the honest half of each
+
+Two more sidebar entries that landed on the catch-all. Both designs were supplied; both are backed
+mostly by data that does not exist, so the first job was working out what is actually real.
+
+| Design element | What backs it |
+|---|---|
+| Template cards, categories, styles, colours | `lib/event-themes.ts` — the **real** catalogue |
+| Template usage counts | `/client/events/analytics` → `by_theme` |
+| Analytics: events, status mix, activity, categories, menus | **real**, aggregated over `events` |
+| Analytics: Total Guests, Total RSVPs, Messages Sent, Open Rate, Response Rate, Click Rate | **nothing** |
+| Analytics: RSVP donut, RSVP trend, Messages by Channel, Engagement by Source | **nothing** |
+
+Checked before assuming: there are **no** guest or RSVP tables of any kind. `company_templates` and
+`company_template_categories` exist but belong to the **Website Builder** — a tenant's website
+theme, not a client's invitation — and the `mail*` tables are the vendor portal's. Wiring either
+into this portal would tie a client's event to somebody else's domain.
+
+---
+
+#### Templates — backed by the catalogue that already existed
+
+`lib/event-themes.ts` **is** the template catalogue: it is what the wizard's step 4 offers and what
+an event stores in `theme_id`. So every card is a template that genuinely works. "Use Template"
+opens `/dashboard/events/create?theme=<id>` with it preselected, which is the whole point of the
+screen.
+
+The list grew from 6 to **11** to cover the design's variety (Pink Balloons, Navy &amp; Gold,
+Watercolor Blue, Lavender Bloom, Fun &amp; Colorful). Safe: the backend validates `theme_id` by
+SHAPE, not membership, so this needs no migration and no API deploy.
+
+> **⚠ Written at the top of the file: NEVER RENAME AN `id`.** Events store it. A rename silently
+> orphans every event using that template — `eventTheme()` falls back to the default and their
+> invitation quietly changes design, with no error anywhere.
+
+Each template gained `categories`, `style`, `layout`, `accent` and `badge`. **That metadata is
+curation, not data** — editorial choices made so the filter panel can filter on something real.
+Nothing reads it back off an event.
+
+Which means the filter rail is genuine: **Colour, Event Type, Style and Layout all work.**
+**"Free templates only" does not** — there is no pricing model, every template is free — so it is
+shown on and *disabled* with the reason under it, rather than as a control that appears to do
+nothing. Favourites are **localStorage**, said plainly: there is no column for it and a heart icon
+is not worth a migration.
+
+Two small traps handled: the sort runs on a **copy**, because `EVENT_THEMES` is module state shared
+with the wizard and sorting in place would silently reorder its theme picker; and localStorage is
+read in an effect, not during render, which would differ between the server and client passes and
+trip hydration.
+
+`?theme=` is validated against the catalogue rather than trusted — a stale id would otherwise leave
+step 4 highlighting nothing. A banner confirms the pick carried across, because otherwise the choice
+is invisible until step 4 and the button reads as broken. `?theme=bogus` correctly shows **no**
+banner.
+
+---
+
+#### Analytics — split in two, and it says which half is which
+
+**`GET /client/events/analytics`** returns real aggregates: totals, status mix, a month timeline,
+by-category, by-template, top menus, recent events. Computed in JS over one SELECT rather than five
+GROUP BYs — three of the groupings key off `deriveStatus`, which is a date comparison the DB would
+have to re-express, and at ~374ms per round trip to production (§103) five queries is the difference
+between instant and noticeable.
+
+Three details worth keeping:
+
+- **The month axis is built from the calendar, not from the rows.** Deriving it from the data drops
+  empty months and draws a trend line that skips March to June as though they were adjacent.
+- **`completion_rate` is guarded against divide-by-zero.** A client with nothing published would
+  otherwise get `NaN`, which renders as a *blank tile* rather than a 0.
+- `months` is clamped to [3, 24]. Proven: `1 → 3`, `200 → 24`, `abc → 6`.
+
+The page renders the real half with **recharts through `components/ui/chart.tsx`** — donut, line
+chart, horizontal bars, `Progress` bars — and the rest as **locked cards naming exactly what is
+missing**.
+
+> **Why locked rather than zeroed.** A 0% open rate and "no data yet" look identical on a dashboard
+> and mean opposite things. Every decision taken from an invented 68.7% open rate would be wrong.
+> The cards read `guests_available` / `messaging_available` off the API, so they **unlock on their
+> own** the day those modules land — nobody has to remember to edit this file.
+
+Zero-count slices are filtered out of the donut: recharts draws them as an invisible wedge that
+still takes a legend row and a tooltip target. The centre label is DOM rather than an SVG `<text>`,
+so it inherits the app font.
+
+---
+
+#### Verified
+
+```
+route                                   status  catch-all
+/dashboard/templates                      200     no    renders all 11 cards, filter rail, Pro Tip
+/dashboard/analytics                      200     no    clean SSR shell (8 skeletons, no error)
+/dashboard/events/create?theme=navy-gold  200     no    "Starting from Navy & Gold" + Change template
+/dashboard/events/create?theme=bogus      200     no    NO banner — invalid id rejected
+
+GET /client/events/analytics
+  totals        4 events · 3 published · 1 live · 1 upcoming · 1 past · 1 draft · 33.3% complete
+  by_category   Wedding ×4     by_theme  4 templates ×1
+  top_menus     Event Information ×4, Gallery ×4
+  timeline      Mar:0/0 Apr:0/0 May:0/0 Jun:0/0 Jul:0/1 Aug:4/2   (dense, empty months present)
+  months=12     12 buckets, Sep→Aug
+  no session    401
+```
+
+`tsc --noEmit` clean. No `next build`, no `.next` delete (§191).
+
+> **The decision I did not take on your behalf:** guests/RSVPs and invitation messaging are two new
+> modules, not two new columns — tables, endpoints, import flows and a delivery integration. §185
+> says ask before inventing schema, so I have not. Say the word and that is the next build; until
+> then those cards state their own absence.
+
+---
+
+### 208. Analytics design pass — five things that were actually broken
+
+Side-by-side against the mockup, these were not stylistic quibbles.
+
+#### 1. The donut legend was truncating its own labels
+
+`Upco…` · `Compl…` · `Cancel…`. The legend sat in a fixed **320px** card with `truncate` on the
+label, so the one thing a legend exists to do — name the colours — was the thing it failed at.
+
+Card widened to 380px, `truncate` → `break-words`, and the count and percent pinned right at **fixed
+widths** (`w-[26px]`, `w-[46px]`) so they stay in column while the label wraps. Fixed widths rather
+than `justify-between`, which lets the numbers wander as the label length changes.
+
+#### 2. Most Used Menus was an unreadable bar chart
+
+A recharts horizontal `BarChart` at one-third page width: the category axis wrapped "Event
+Information" over two lines, the two bars floated apart with a huge void between them, and there was
+no scale to read either against.
+
+Replaced with a labelled `Progress` list — same information, a third of the height, matching the
+Category card beside it, and every row gets a "4 of 4" count. **Bars scale against the most-used
+menu, not the event total**, or every bar is short and they cannot be compared to each other.
+
+#### 3. "Events by Category" was a tall empty void
+
+The three cards in that row stretch to a common height, and with one category the first was mostly
+whitespace. Filled with a **second real breakdown — By Privacy** — rather than padding. Content, not
+a spacer.
+
+#### 4. Four tiles where the design has six
+
+Added **Live Now** and **Drafts**, both real, and restructured each tile to the design's shape:
+icon and label on one line, the figure below, the delta line under that.
+
+**Only "Total Events" carries a delta**, and that is a deliberate limit. Creation over a period is a
+real trend; *Completed* and *Upcoming* are point-in-time counts, and comparing two snapshots taken
+at different moments is not a trend — putting a green arrow on one would be inventing a claim.
+New in the API: `created_this_period` / `created_previous_period` / `created_change_pct`, comparing
+the selected window against the window immediately before it.
+
+> `created_change_pct` is **null when the previous period was zero**. Growth from nothing is not
+> "infinity percent" and not "100%" — the tile falls back to "N created this period".
+
+#### 5. Recent Events statuses read as disabled text
+
+`Badge variant="ghost"` with only an inline `style` colour rendered as bare coloured text on the far
+right. Now the same tinted `bg-*/15 text-*` pairs the rest of the app uses.
+
+---
+
+#### Two things from the design that were missing entirely
+
+**Export Report** — now real. Builds a CSV from the payload already on screen, so what exports is
+exactly what is being looked at, rather than a second request that could disagree. Every field is
+quoted and inner quotes doubled: an event named `Ravi's "Big Day", Delhi` would otherwise shift
+every later column by one. A `Blob` + object URL, not a `data:` URI, which would blow the URL length
+limit at a few hundred events.
+
+**Insights strip** — four cards, every line derived from the data on screen: busiest scheduled month,
+most-used template, most-included menu, and completion split. **A client with one event gets fewer
+cards, not four hedged ones** — each is pushed only if the data supports it, and the strip hides
+itself entirely when none do.
+
+Also: the activity chart's Y axis now floors at 4 (`domain={[0, max => Math.max(4, ...)]}`), so a
+single event no longer stretches to fill the whole panel and imply a spike.
+
+---
+
+#### Verified
+
+```
+GET /client/events/analytics
+  period      months 6 · created_this_period 4 · previous 0 · change null (correctly, not ∞)
+              busiest_month Aug 2026 ×2
+  by_privacy  private 2 · public 1 · unlisted 1     (the new breakdown, real)
+  by_status   live 1 · upcoming 1 · past 1 · draft 1 · cancelled 0
+  top_menus   Event Information 4 | Gallery 4
+  by_theme    4 templates      recent 4 rows
+
+/dashboard/analytics   200, clean SSR shell, no error boundary
+tsc --noEmit           clean
+```
+
+Demo rows 17 and 19 were switched to `public` / `unlisted` so the new privacy breakdown has
+something to show rather than a single 100% bar.
+
+> **Unchanged, and deliberately:** the guest and message half stays locked. Those six tiles in the
+> mockup — Total Guests, Total RSVPs, Messages Sent, Open Rate, Response Rate, Click Rate — still
+> have no table behind them, and §185 says ask before inventing schema.
+
+---
+
+### 209. Built the Analytics design properly — two new tables, and localStorage removed
+
+Two corrections, both fair.
+
+**I argued instead of building.** §207 and §208 kept the guest and message half "locked" on the
+grounds that no table backed it, and said so three times while the design sat unbuilt. The third
+option was never taken: **create the tables.** Done now.
+
+**And I used my own wording.** The design says *Total RSVPs*, *RSVP Status Overview*, *RSVP Trend*,
+*Response Rate*. I had written "Guest & Message Analytics", "Guests not available yet". Those are
+not synonyms — see the label note below.
+
+---
+
+#### The two tables
+
+`scratch/migrate_event_guests.js` — applied to **LOCAL only**.
+
+| | |
+|---|---|
+| `event_guests` | name, contact, `party_size`, `rsvp_status`, `invite_source`, `invited_at`, `responded_at` |
+| `event_messages` | `channel`, `kind`, `status`, `sent_at`, `delivered_at`, `opened_at`, `clicked_at` |
+
+**Two tables, not one.** A guest is a person with an RSVP; a message is one delivery attempt down
+one channel. A guest can be messaged repeatedly — a reminder, a re-send after a bounce — so
+delivery counts cannot be columns on the guest row without losing the history or double-counting
+the person.
+
+Four more decisions worth defending:
+
+- **`rsvp_status` carries `no_response` as a real value, not NULL.** NULL means "unknown"; a guest
+  who was invited and has not replied is a KNOWN state — it is 5.4% of the donut in the design.
+  NULL would drop them out of every GROUP BY.
+- **`invite_source` on the GUEST, `channel` on the MESSAGE.** They look like the same column and are
+  not: source is how this person first came in (what "Guest Engagement by Source" groups on),
+  channel is how one specific message went out. A guest invited by WhatsApp can later be emailed.
+- **Timestamps, not booleans**, for delivered/opened/clicked. A boolean answers "did they open it";
+  a timestamp also answers "when", and the RSVP Trend is a time series.
+- **`status` includes `queued`** so a send that never left is distinguishable from a delivery.
+  Without it a failed provider call inflates every rate on the dashboard.
+
+#### The denominators — the easy place to ship a plausible lie
+
+Named once in `clientAnalytics.service.js` and used nowhere else:
+
+```
+Open rate      opened  / DELIVERED   not / sent. A bounced message was never
+                                     openable; counting it as a missed open
+                                     punishes the sender for the bounce.
+Click rate     clicked / DELIVERED   same reasoning.
+Response rate  responded / INVITED   a guest never invited cannot respond.
+RSVP rate      attending / INVITED   per event.
+```
+
+> **SMS open and click come back `null`, always.** There is no pixel and no link wrapper, so an open
+> is *unknowable*, not absent. The design prints an em dash on that row and so does this. A 0% would
+> claim nobody opened it — a different statement, and a wrong one.
+
+Same rule on the deltas: a previous period of zero gives **null**, rendered as "No prior period to
+compare", not ∞ and not a 100% jump from nothing.
+
+#### Labels: RSVP and guest are different counts
+
+`party_size` means one guest ROW can be four people. So **Total Guests (heads) > Total RSVPs
+(invitations)** — 192 vs 122 on the seeded data. They are not interchangeable, which is exactly why
+using one word for the other was wrong. Written into the file header so it does not drift back.
+
+#### The page
+
+Rebuilt to the design's layout and its wording: six tiles with delta lines → RSVP Status Overview
+donut / RSVP Trend / Messages by Channel → Top Performing Events / Message Performance / Guest
+Engagement by Source → Insights. All six "View … Report" links present. Date-range trigger shows the
+resolved dates ("24 Apr – 24 May 2025"), as the design does.
+
+The trend X axis shows every ~7th label: 31 labels at that width overlap or rotate, and a rotated
+axis is unreadable at 10px.
+
+---
+
+#### localStorage removed
+
+The Templates hearts were `localStorage`. That was wrong and the objection was right: they vanished
+on another browser, were invisible to anything server-side, and **silently did nothing in private
+mode**, where writes are refused.
+
+Now `website_clients.favourite_templates` (JSON) via `PUT /client/favourite-templates`.
+JSON rather than a join table because template ids are frontend slugs, not rows — there is nothing
+to foreign-key against.
+
+- **The whole list goes up, not a toggle.** A toggle endpoint races itself when two hearts are
+  clicked quickly: both requests read the same starting list and the second overwrites the first.
+- **Optimistic with rollback**, so the heart still responds instantly without pretending a failed
+  save succeeded.
+- Ids are validated for SHAPE only — the catalogue is a frontend file, so checking membership would
+  mean a backend deploy per template. Capped at 100 so the field cannot be stuffed.
+- The dead **"Free Templates Only"** switch became **"Favourites Only"**, which now filters
+  something real.
+
+`grep -rn localStorage src/` returns only the comment recording its removal.
+
+---
+
+#### Verified
+
+```
+POST /client/favourite-templates
+  ["navy-gold","floral-bliss","navy-gold","BAD id!","x"]
+    -> ["navy-gold","floral-bliss","x"]   deduped, malformed dropped
+  read back on /client/me                  identical
+  []                                       clears
+  no session                               401
+
+GET /client/events/analytics   (122 guests, 117 messages seeded across 3 events)
+  totals    guests 192 · rsvps 122 · sent 117 · open 58.4% · response 94.3% · click 19.5%
+  rsvp      attending 76 (62.3%) · not_attending 34 (27.9%) · maybe 8 (6.6%) · no_response 4 (3.3%)
+  channels  whatsapp 69/65 open 64.6 click 20 | email 33/33 open 72.7 click 27.3
+            sms 15/15 open NULL click NULL          ← em dash, not 0%
+  sources   whatsapp 56.6% · email 27% · sms 12.3% · manual 4.1%
+  top       25th Anniversary g73 rsvp 63.6 resp 95.5 | Rahul's g61 | Our Special Wedding g58
+  trend     31 dense days
+
+all 21 design labels present · tsc --noEmit clean · all four routes 200
+```
+
+The seeder skips DRAFT events — a draft was never sent to anyone, so it has no guests and no
+messages. That is what keeps the draft row on My Events showing dashes.
+
+> **Open:** three migrations are now LOCAL-only — `migrate_events.js`, `migrate_event_guests.js`,
+> `migrate_favourite_templates.js`. All three must run before the backend deploys. And the guest
+> data is seeded: there is still **no Guests screen** to add a real one, which is the next build.
+
+---
+
+### 210. Every card was paying for its padding twice
+
+Reported as "Analytics cards, too much space top and bottom". It was not spacing taste — it was a
+double.
+
+`components/ui/card.tsx` gives the **Card root** its own `py-6`:
+
+```
+"bg-card text-card-foreground flex flex-col gap-6 rounded-xl border py-6 shadow-sm"
+```
+
+Every card on these screens then sets padding again on `CardContent` (`p-5`, `p-4`). Tailwind does
+not merge those — they are different elements — so each card carried **24px from the root plus
+16–20px from the content, top and bottom**. A tile meant to have 16px of breathing room had 40px,
+and the taller cards had 44px.
+
+`py-0` on the root hands vertical padding to the content, which is what these pages already assumed.
+**30 Card roots** across six files:
+
+| File | Cards |
+|---|---|
+| `analytics/page.tsx` | 10 |
+| `events/[id]/_components/event-detail.tsx` | 7 |
+| `events/page.tsx` | 5 |
+| `templates/page.tsx` | 3 |
+| `(dashboard)/page.tsx` | 3 |
+| `events/_components/event-wizard.tsx` | 2 |
+
+> **Skipped, deliberately:** any Card already carrying `p-0` or a `py-*` of its own — those were
+> already controlling their own padding, and blanket-adding `py-0` would have been a second bug on
+> top of the first. The list card on My Events is one of them: it sets `p-0` because its tab strip
+> has to sit flush against the border.
+
+**Checked before shipping:** every `CardContent` in those six files sets its own padding class, so
+none of them went flush against the border as a result. `<CardContent>` with no className would have.
+
+The shared `Card` component was NOT changed. Its `py-6` is the correct default for a card whose
+content does not set padding, and the template's own screens rely on it — editing the primitive to
+fix six of my files would have silently reflowed everything else.
+
+```
+tsc --noEmit                clean
+/dashboard/analytics        200, no error boundary
+/dashboard/templates        200
+/dashboard/events           200
+/dashboard                  200
+```
+
+---
+
+## Session 20 — Guest module: schema first
+
+> **Date:** 2026-08-20 | Continues from §210
+> **Source of truth:** the ten `05_*` screens in `20260819_Client Module/` plus
+> `05_4_Import_Guests sample.csv`. **Local only, uncommitted.**
+
+### 211. What the CSV said that the screens did not
+
+The screens were read first and produced a schema. Then the sample CSV was read, and it contradicted
+it in one important way — which is why the import file is the better contract: **an import that
+cannot round-trip its own sample is not an import.**
+
+**`RSVP Status` and `Response Type` are TWO fields.** The sample carries a row that is `Invited` with
+a **blank** Response, and `Invited` appears nowhere in the list UI's tabs. So:
+
+```
+rsvp_status    not_responded -> invited -> pending -> accepted | declined    (where the invite got to)
+response_type  none | yes | maybe | no                                       (what the guest said)
+```
+
+The old `rsvp_status` ENUM('attending','not_attending','maybe','no_response') collapsed the two and
+had no room for `invited` at all.
+
+> **The rewrite had to be done in four steps, not one.** Widen to VARCHAR, derive `response_type`
+> from the old value, map `rsvp_status` to the new vocabulary, then narrow to the new ENUM. Going
+> straight to the new ENUM would have **silently blanked every existing row** — MySQL does not error
+> on an unmatched ENUM value outside strict mode, it writes `''`. All **122** rows mapped:
+> accepted/yes 76 · declined/no 34 · pending/maybe 8 · not_responded/none 4.
+
+Other things the CSV settled:
+
+- **Phone and WhatsApp are separate columns.** They genuinely differ for plenty of people.
+- **`Plus One Allowed` and `Plus One Count` are separate.** "Allowed but nobody named yet" is not
+  "not allowed", and one boolean cannot say both.
+- **First/Last are separate**, and the merge-field dialog needs `{first_name}`, `{last_name}` AND
+  `{full_name}` — so `name` is KEPT as the display name rather than replaced. One column cannot
+  serve all three without guessing where to split "Ravi Kumar Menon".
+- `{table_number}` is a merge field, so seating is a guest column.
+
+### 212. Schema
+
+`scratch/migrate_guest_module.js` — 10 steps, applied to **LOCAL**.
+
+| | |
+|---|---|
+| `event_guest_groups` NEW | name, description, colour, `visibility` private/public, `is_default` |
+| `event_message_campaigns` NEW | subject, body, channel, audience, group/guest id snapshots, status, schedule + delivery window |
+| `event_guests` +19 cols | first/last/title, `group_id`, whatsapp, company, `table_number`, full address, dietary, special requirements, plus-one pair, `custom_answers`, `response_type` |
+| `event_messages` +1 col | `campaign_id` |
+
+**Groups are a table, not a string.** The Manage Groups screen gives a group a description, colour,
+visibility, member count and a default flag.
+
+**Campaigns are separate from deliveries.** The Messages LIST is one row per campaign (subject,
+recipients, status); `event_messages` stays one row per recipient so open and click rates keep
+working per person. Collapsing them loses the tracking or repeats the body once per guest.
+
+**`group_id` is ON DELETE SET NULL**, unlike every other FK in this module — deleting a group must
+UNGROUP its guests, never delete them.
+
+`is_default` is enforced in the service, not by an index: MySQL has no partial unique index, so a
+UNIQUE would also forbid a second group with `is_default = 0`.
+
+### 213. The rewrite broke Analytics, silently
+
+`clientAnalytics.service.js` grouped on `'attending' | 'not_attending' | 'maybe' | 'no_response'`.
+Those values no longer exist, so it would have produced **four empty buckets — a donut of zeroes
+rather than an error.** Caught and fixed in the same pass.
+
+The donut keeps its four slices, now derived through an explicit `sliceFor()`:
+
+```
+Attending      accepted
+Not Attending  declined
+Maybe          pending
+No Response    not_responded + invited   <- invited belongs here: the invitation
+                                            went out and nothing came back
+```
+
+Also: `invited` is now inferred as `invited_at IS NOT NULL **OR** status past not_responded`, because
+an imported row arrives with a status already set and no `invited_at` stamp — without that the
+response-rate denominator would have been too small and every rate inflated.
+
+**Proven unchanged after the migration:** guests 192 · rsvps 122 · sent 117 · open 58.4% · response
+94.3% · click 19.5%, and the donut still reads 76 / 34 / 8 / 4. Identical to the pre-migration
+figures, which is the point.
+
+`first_name` / `last_name` backfilled from `name` for all 122 rows; 0 left null.
+
+
+### 215. Guest, group and import services — and why the CSV is the real spec
+
+Decisions confirmed with the user: **sending is logged only** (no provider, matching the
+§Newsletter precedent), and a CSV row whose event name does not match is **reported, never
+auto-created**.
+
+#### How a row finds its event — the standard answer
+
+Asked what is commonly done when a CSV references another record by NAME. It is not a choice
+between name and id; it is **both**:
+
+```
+1. `Event ID` column, if present and it belongs to this client   <- wins
+2. exact, case-insensitive match on `Event Name`
+3. the event chosen on the upload step
+4. otherwise the row is REPORTED
+```
+
+The EXPORT includes `Event ID` so a re-import round-trips exactly; a hand-made file omits it and is
+matched by name. That is the Mailchimp/HubSpot pattern, and it is why the name column stays —
+nobody can hand-type ids.
+
+**Two events sharing a name is reported as ambiguous**, not resolved arbitrarily. And a non-matching
+name never creates an event: one typo would otherwise spawn a junk event that then appears in My
+Events, the dashboard and Analytics.
+
+#### The eight things that actually break CSV imports
+
+All handled, all tested against the real sample file:
+
+| | |
+|---|---|
+| **BOM** | Excel writes UTF-8 with a BOM, so header one arrives as `﻿First Name*` and never matches |
+| **delimiter** | some locales export `;` — detected from the header line, not assumed |
+| **quoted commas** | `"Chennai, Tamil Nadu"`, and `""` as a literal quote |
+| **newlines inside quotes** | a Notes field with a line break would otherwise become two broken rows |
+| **phone mangling** | Excel turns `+919876543210` into `9.19877E+11`, which is **lossy** — detected and reported, never imported as a wrong number |
+| **header drift** | `First Name*` / `first_name` / `FIRST NAME` all mean one thing |
+| **blank rows** | Excel appends empties; they are nothing, not errors |
+| **in-file duplicates** | two rows with the same email, before the DB is consulted at all |
+
+> **Partial success is the point.** A file of 500 with three bad rows imports 497. Rolling all of it
+> back because of row 7 is the behaviour people hate most about importers.
+
+The commit **re-analyses the file** rather than trusting rows echoed back from the browser — the
+preview is a display, and accepting rows straight from the client would let a crafted request file
+guests against another account's event. Inserts are chunked at 500: 5000 individual inserts at
+~374ms each (§103) is half an hour.
+
+#### Services
+
+| File | |
+|---|---|
+| `clientGuestGroup.service.js` | groups CRUD, member/event counts, the four Manage Groups tiles |
+| `clientGuest.service.js` | list + six tabs, five tiles, CRUD, bulk group/status/delete |
+| `clientGuestImport.service.js` | parse/preview/commit |
+
+Three things worth keeping:
+
+- **`applyResponse()` is the single place status and response move together.** A guest must never
+  read `Declined` beside a `Yes` — the list renders both side by side and a reader would rightly
+  stop trusting the screen. An EXPLICIT status always wins, so an imported `Invited`/blank stays
+  `Invited`.
+- **Group counts are two grouped queries, not a subquery per row.** 28 groups would otherwise be 56
+  round trips. `COUNT(DISTINCT event_id)`, not `COUNT` — a group with 400 guests at one wedding is
+  used in **one** event, not 400.
+- **Deleting a group ungroups its guests explicitly**, not via the FK: these rows are soft-deleted,
+  and `ON DELETE SET NULL` only fires on a HARD delete. The affected count is returned so the UI can
+  say how many were touched.
+
+`Total Guests` counts **heads** (`party_size`), not rows — one invitation covering a family of four
+is four people at the venue. The `not_responded` TILE groups `invited` with it, so the tile and the
+tab agree.
+
+#### Verified — 40/40, against the supplied sample
+
+`scratch/test_guest_import.js`, kept as a regression test.
+
+```
+22 of 22 headers mapped, 0 unmapped
+Accepted/Yes -> accepted/yes   Invited/blank -> invited/none   Declined/No -> declined/no
+Plus One Yes,1 kept · Plus One No forces count to 0 · address + diet parsed
++919876543210 survived intact
+BOM · CRLF · quoted comma · doubled quote · blank trailing row · semicolon delimiter
+unknown event    -> "No event called \"Sangeet Night\"." and NO event created
+mangled phone    -> "...converted to a number by a spreadsheet..."
+missing column   -> refused, naming it
+in-file dupe     -> skipped
+commit           -> 3 imported, 1 skipped, 2 groups created, invited_at/responded_at stamped
+re-import        -> 0 imported, 4 skipped   (idempotent)
+```
+
+> **The one "failure" that was the code being right:** the demo seeder builds emails from the same
+> name pool, so the sample's `rahul.verma@example.com` already existed on that event. The import
+> correctly skipped him as a duplicate; the ASSERTION was wrong, not the parser. Test corrected to
+> assert `valid + skipped === rows` and that every skip has a duplicate reason.
+
+### 216. Still to build
+
+`clientMessage.service.js` (campaigns, recipient resolution, logged-only send, message list +
+tiles), the controllers and routes, then the ten screens: Guests list, Add Guest, Add More Details,
+Manage Groups, Add Group, Import (4-step), Send Message + Schedule and Merge Field dialogs, and the
+Messages list.
+
+### 217. Sidebar mapped to the guest module — and a real bug in it
+
+The nav had a flat `Guests` and a `Messages` pointing nowhere near the module. Every guest screen
+breadcrumbs from **Guests** in the designs (`Guests > Add Guest`, `> Manage Groups`,
+`> Import Guests`, `> Send Message`, `> Messages`), so the routes nest that way and the sidebar now
+mirrors it:
+
+```
+Guests    /dashboard/guests          All Guests · Add Guest · Guest Groups · Import Guests
+Messages  /dashboard/messages        All Messages · Send Message
+```
+
+Messages keeps a top-level entry as well as being a breadcrumb parent, because the Analytics cards
+link straight to `/dashboard/messages` and `/dashboard/rsvps`.
+
+> **The bug:** `openMenu` starts `null` and nothing ever set it from the route, so landing on
+> `/dashboard/guests/groups` left **Guests collapsed with nothing highlighted** — the nav did not
+> reflect where you were at all. Now an effect keyed on `pathname` opens whichever group owns the
+> current route, and closes the one you came from (two open groups on a ten-item sidebar means
+> scrolling to find anything).
+
+Also removed a dead wrapper: the collapsible branch put its icon in its own `flex gap-2.5` div with
+a single child, so icon and label sat in different flex parents from the flat rows and did not line
+up with them.
+
+**Proven for all 15 routes** without a browser — every path highlights something, and every guest and
+message sub-route opens its parent. `/dashboard/events/create` still resolves to My Events rather
+than being stolen by a shorter prefix.
+
+### 218. The CSV name problem, fixed the recommended way
+
+Not name *or* id — **both**, with the id winning. `clientGuestExport.service.js`:
+
+```
+export  writes Event ID AND Event Name
+import  prefers Event ID, falls back to the name, reports what it cannot resolve
+```
+
+A file that came out of here goes back in exactly; a hand-made file still works on names alone.
+Column order is identical in both directions, which is what makes "export → edit in Excel →
+re-import" safe.
+
+Two details that decide whether that round trip actually survives Excel:
+
+- **A BOM on the way out.** Without it Excel opens a UTF-8 CSV in the local codepage and mangles
+  every non-ASCII name. The import strips it — which is why it had to handle a BOM in the first place.
+- **A leading tab on anything starting `+`, `=`, `-` or `@`.** Excel reads `+919876543210` as a
+  number and rewrites it to `9.19877E+11`, losing the digits permanently. This is also CSV-injection
+  hardening: a cell beginning `=` is a formula in Excel, and exporting user-typed text unguarded is
+  how a spreadsheet ends up executing it.
+
+**Every** field is quoted, not only the ones that look risky — deciding case by case is exactly how
+an unquoted `Chennai, Tamil Nadu` shifts every later column.
+
+The **Download Sample CSV** link is built from the client's OWN first event, so the example row is
+immediately importable rather than naming an event they do not have. That teaches the
+Event ID / Event Name pairing without a manual.
+
+**Round trip proven:** exported 122 real guests → re-imported → **0 valid, 122 skipped as already
+present, 0 errors**. The sample template re-imports as 2 valid, 0 errors, 23/23 headers mapped.
+
+### 219. Schema report — what exists, and what production is missing
+
+`scratch/report_client_schema.js` prints columns, indexes, foreign keys and index GAPS for every
+client-portal table, against either database.
+
+**LOCAL: 5/5 tables, 113 columns.**
+
+| Table | Cols | Rows | Index coverage |
+|---|---|---|---|
+| `events` | 29 | 4 | 3/3 |
+| `event_guest_groups` | 11 | 0 | 2/2 |
+| `event_guests` | 36 | 122 | 6/6 |
+| `event_message_campaigns` | 21 | 0 | 4/4 |
+| `event_messages` | 16 | 117 | 5/5 |
+
+Plus `website_clients.subscription_plan_id` and `.favourite_templates`.
+
+> **The checker found one gap, and the checker was wrong.** It flagged
+> `event_guest_groups.is_default` because it only looked at LEADING index columns. The query is
+> `WHERE website_client_id = ? AND is_default = 1` and the index is
+> `(website_client_id, is_default, deleted_at)` — a textbook composite for exactly that. An index
+> serves a query only from its LEFT edge, so the rule is: a single expected column needs an index
+> whose FIRST column matches; a column always filtered beside another needs a composite whose first
+> N match in order. The checker understands both now.
+
+Every FK behaves as intended: `website_client_id` and `event_id` CASCADE, `group_id` **SET NULL**
+(deleting a group ungroups its guests), taxonomy and plan FKs SET NULL.
+
+**PRODUCTION: 0/5 tables. Nothing from this portal has shipped at all** — not the events table, not
+guests, not messages, and neither `website_clients` column.
+
+`scratch/migrate_website_client_plan.js` had to be **recreated**: §193 recorded it as "prod dry-run
+ready" and it was deleted afterwards, while the column it adds is still missing on production. Its
+absence is not cosmetic — without it the admin Clients form 500s on save and `/client/event-options`
+cannot resolve a plan, which is the gatekeeper for everything a client may create.
+
+**Run order for production** (each is idempotent and dry-runs by default):
+
+```
+1  node scratch/migrate_website_client_plan.js   prod --apply
+2  node scratch/migrate_events.js                prod --apply
+3  node scratch/migrate_event_guests.js          prod --apply
+4  node scratch/migrate_guest_module.js          prod --apply
+5  node scratch/migrate_favourite_templates.js   prod --apply
+   node scratch/report_client_schema.js          prod          <- verify 5/5
+```
+
+3 must follow 2 (guests FK events) and 4 must follow 3 (campaigns/columns extend them).
+**`EVENT_QR_SECRET` still has to be set on Render before any real event is created there** (§200.2).
+
+### 220. The Guests page exists now, and the sidebar stopped lying
+
+`/dashboard/guests` was still the catch-all: §217 mapped the nav but the PAGE had not been built, so
+the entry pointed at nothing. Backend wired and the list screen built.
+
+**Endpoints** — `clientGuest.controller.js`, 18 handlers on `/api/v1/client/guests`:
+list · stats · CRUD · bulk · groups CRUD + stats · import preview/commit · export · sample CSV.
+
+> Literal paths are declared **before** `/guests/:id`, or Express matches `stats`, `groups`,
+> `import` and `export` as an id and the handler goes looking for guest number NaN. Same trap as
+> §196.
+
+**The list screen** — five tiles, six tabs, event/group/search filters, a checkbox column with bulk
+status/group/delete, and the Quick Actions / Guest Groups / Pro Tip rail.
+
+Four things worth keeping:
+
+- **Two columns because they are two fields.** STATUS is where the invitation got to (`Invited` has
+  no tab but is a real value); RESPONSE is what the guest said, rendered as a tick, a dash, a cross
+  or an em dash.
+- **Heads vs rows.** The Total Guests tile sums `party_size` — what a caterer means — while every
+  percentage is of ROWS, because rows are what was invited.
+- **Select-all covers the CURRENT PAGE only.** A header checkbox that silently selects 1,248 rows
+  across 156 pages is how somebody deletes their guest list by accident.
+- **Changing a filter clears the selection.** Keeping it means bulk-deleting rows that are no longer
+  on screen.
+
+Pagination is windowed (`1 … 4 5 6 … 156`). Rendering every page is fine at 3 and absurd at 156 —
+which is exactly the count the design's own mock shows.
+
+**Downloads go through fetch, not `<a href>`.** The export endpoints need the session cookie, and a
+plain link cannot send one cross-origin; the response is turned into a Blob and handed to the
+browser with the server's own filename.
+
+#### The sub-menu design
+
+From the screenshot: children stacked flush with no breathing room, the indent guide invisible, and
+the active pill running nearly the full sidebar width — the group read as one dense block rather
+than a list nested under a parent.
+
+- guide moved to `ml-3.5` so it descends from the **centre** of the parent's icon rather than past it
+- `gap-0.5` + `py-1.5` + `pl-2` so the rows are a list, and labels clear the guide
+- active child gets a tinted pill **and** a 2px marker over the guide — colour alone was too weak to
+  find at a glance among four
+- **a parent whose CHILD is active no longer takes the filled background**, only the label weight.
+  Both being filled meant the header and the selected child looked equally selected, and the eye
+  could not tell which one it was on.
+
+#### And the honest part
+
+`/dashboard/guests/groups`, `/add`, `/import`, `/dashboard/messages` and `/messages/send` are **not
+built**, and pointing the nav at them just moves the "coming soon" one click further in.
+
+Sub-items now carry **`ready`**. `false` renders disabled with a Soon chip instead of as a link, and
+such an item can neither claim the highlight nor auto-open its group. Flip the flag as each page
+lands; nothing else changes.
+
+> A nav item that navigates to a dead end is worse than one that says it is not ready. The first
+> looks broken; the second is true.
+
+**Verified:** `/dashboard/guests` returns 200 with no catch-all and renders its tiles, tabs, rail and
+Pro Tip. `GET /client/guests` returns 122 rows with event and group joined; `/guests/stats` returns
+192 heads over 122 rows (76 accepted / 8 pending / 34 declined / 4 not responded). `tsc --noEmit`
+clean.
+
+**Still to build:** Add Guest, Add More Details, Manage Groups, Add Group, Import (4-step), Send
+Message + its two dialogs, Messages list — plus `clientMessage.service.js` behind the last two.
+
+### 221. Five more guest screens
+
+§220 shipped one page out of ten. Built the rest of the guest half.
+
+| Route | Screen |
+|---|---|
+| `/guests/add` · `/guests/[id]` | Add / Edit Guest |
+| `/guests/groups` | Manage Groups |
+| `/guests/groups/add` · `/groups/[id]` | Add / Edit Group |
+| `/guests/import` | Import Guests, 4 steps |
+
+**Add More Details is a collapsible, not a second route.** The design shows it both ways — inline on
+Add Guest, and as its own breadcrumbed step — but the fields are identical, and two pages editing one
+record is how a field added to one goes missing from the other. It auto-opens on edit when it
+actually holds something, so an edit never hides half the record behind a collapsed header.
+
+**Status and response move together in the form**, mirroring `applyResponse()` on the server. Pick
+`Yes` and the status becomes Accepted; pick Declined and the response becomes No. The same decision
+is deliberately made twice so the UI can never show a state the API would reject. Proven:
+`response_type: "yes"` came back `accepted / yes`.
+
+**"Send Invitation" marks the guest `invited` rather than claiming a delivery.** No provider is
+wired, so the toggle records the INTENT — which is exactly what the response-rate denominator reads.
+Saying "nothing is sent" under the switch beats a toggle that quietly lies.
+
+#### Manage Groups
+
+The two counts are not the same thing and are easy to conflate: `members_count` is guests in the
+group; `events_count` is `COUNT(DISTINCT event_id)`, because a group with 400 guests at one wedding
+is used in **one** event, not 400.
+
+The delete dialog says what actually happens — *"Its 12 guest(s) will be kept and simply
+ungrouped"* — because "Delete" beside a member count reads as though the guests go too.
+
+Add Group carries a **live preview**: colour and visibility are choices with no visible consequence
+until you see the chip they produce, which is how the group appears in every picker and on every
+guest row.
+
+#### Import
+
+Four steps, and **nothing is written until step 4**. Steps 2–3 call `/import/preview`, which parses
+and validates and writes nothing; step 4 re-parses **on the server** rather than posting the preview
+back — the preview is a display, and accepting rows straight from the browser would let a crafted
+request file guests against another account's event.
+
+The Review step shows three counts (ready / skipped / errors), every column with what it mapped to,
+unrecognised columns struck through, and a per-row error list — with *"The other 497 row(s) will
+still be imported"* stated plainly, because partial success is the point.
+
+Two details: the file is read with `FileReader` as **explicit UTF-8** (the default guesses from the
+OS locale, which is how an imported name arrives as mojibake), and the file input is reset after
+each pick so choosing the SAME file again still fires `change`.
+
+#### Verified over HTTP
+
+```
+create group          Family, is_default 1
+duplicate name        "You already have a group called \"Family\"."   (case-insensitive)
+create guest          Amit Sharma | accepted / yes | group Family | party 2 | plus1 1/1
+                      ^ response "yes" auto-set the status
+duplicate email       "Amit Sharma is already on the guest list for this event."
+group stats           1 group · 1 member · 1 in use · 1 private
+routes                /guests · /add · /groups · /groups/add · /import   all 200, no catch-all
+tsc --noEmit          clean
+```
+
+Nav `ready` flipped to true for the three that now exist.
+
+**Remaining:** Send Message (+ Schedule and Merge Field dialogs) and the Messages list, plus
+`clientMessage.service.js` behind them. Those two nav entries stay `ready: false`.
+
+### 222. ⚠ MESSAGING MODULE PUT ON HOLD — by decision
+
+**Decision taken 2026-08-20 by the user: pause the Send Message / Messages module.** Not dropped,
+not forgotten — parked. Written here so nobody later reads the gap as an oversight and rebuilds the
+groundwork.
+
+**What is already DONE and must not be rebuilt:**
+
+| | |
+|---|---|
+| `event_message_campaigns` table | 21 columns — subject, body, channel, `audience`, group/guest id snapshots, `status`, `scheduled_at`, delivery window, timezone |
+| `event_messages` table | 16 columns — one row per recipient, `campaign_id` FK, sent/delivered/opened/clicked timestamps |
+| Models + associations | `EventMessageCampaign`, `EventMessage`, `campaign.deliveries` |
+| The READ path | `clientAnalytics.service.js` already computes delivery / open / click rates and Messages-by-Channel from these tables |
+| Seeded demo data | 117 delivery rows, which is what the Analytics screen currently renders |
+
+**What is NOT written:** `clientMessage.service.js` — the WRITE path. Specifically:
+
+1. **Recipient resolution** — turning All Guests / Selected Groups / Selected Guests into a concrete
+   list, scoped to one event, deduped, excluding guests with no email on an email send. The live
+   count in the Message Summary must equal what actually gets written; a summary saying 816 that
+   writes 794 is worse than no summary.
+2. **Merge fields** — body stored with `{first_name}` UN-substituted so a campaign stays re-sendable,
+   substituted per recipient at send. Open question: what `{table_number}` renders as for a guest
+   who has no table.
+3. **Scheduling** — the columns exist, but **nothing fires them.** There is no worker or cron in this
+   backend, so a scheduled campaign would sit at `status: scheduled` forever. Shipping that button
+   without a runner would be a control that looks like it works and does not.
+4. **The Messages list** — six tiles and a campaign table, aggregating deliveries per campaign.
+
+> **The decision that still needs making when this resumes.** Sending is LOGGED ONLY (§215) — no
+> provider. So what does a send stamp on its delivery rows?
+>
+> - Stamp `delivered_at` / `opened_at` → Analytics keeps showing full numbers, but every rate on that
+>   screen becomes fiction.
+> - Stamp only `sent_at` → honest, but a real send reads 0% delivered / 0% opened beside seeded demo
+>   data showing 58%.
+>
+> **Recommended: `status: 'sent'` + `sent_at` only.** It is true, and the day a provider is wired its
+> webhooks fill in the rest with no migration and no backfill.
+
+**Also parked:** the nav entries stay `ready: false` (rendered with a Soon chip, not linked), the
+event detail page's Messages tab says "Paused" rather than "coming soon", and its Send Message quick
+link is disabled with the same wording. A paused module should read as paused, not as broken.
+
+---
+
+### 223. View Event rebuilt to the supplied design
+
+`events/[id]/_components/event-detail.tsx`, rebuilt against `View Event`.
+
+**Hero:** large invitation artwork, status pill with a dot, the event name, the event code, and three
+fact boxes — date/time, venue, event type.
+
+> **The event code `#EVT20250525-001` is DERIVED, not stored.** Built from the start date and the id:
+> no column, no migration, and it cannot drift from the row it describes. Both inputs are stable —
+> an id never changes, and changing the date changes the code, which is correct because the code
+> encodes when the event is.
+
+**Eight tabs, and what is actually behind each:**
+
+| Tab | Backed by |
+|---|---|
+| Overview | Basic Information, Date & Time, Event Status, **real RSVP donut**, Quick Links |
+| Event Information | the event row + its menus |
+| Schedule | the date/time pair; a multi-session programme would need its own table, and says so |
+| Venue | the venue columns — empty for every event, because the wizard does not collect one yet |
+| Gallery | nothing. No upload exists; the artwork is the chosen template |
+| RSVPs | **real** — four tiles plus the first 8 guests on this event |
+| Messages | **Paused** (§222) |
+| Activity Log | only what the row itself can prove: created, updated, QR issued |
+
+The **RSVP Summary donut is real now** — `/client/guests/stats?event_id=` already existed from the
+guest module, so the design's `256 Total · 64% / 24% / 12%` is a live query rather than a mock.
+With no guests it shows an empty state and a link to add one, instead of a donut of zeroes.
+
+**"Download Invitation" opens the QR.** It is the only artefact of an event that exists as a file, so
+pointing that button anywhere else would have meant inventing one.
+
+Two fixes while building: `faRingsWedding` is a **Pro-only** Font Awesome icon and does not exist in
+the free set this project ships (`faHeart` used instead), and `ClientEvent` has no `city` field — the
+venue address is the only location the row carries.
+
+**Verified:** `/dashboard/events/17` and `/20` both 200, no catch-all, `tsc --noEmit` clean.
+
+---
+
+## Session 21 — Templates module (super admin), six-step wizard
+
+> **Date:** 2026-08-21 | **Backend:** `Event_Management_Admin_Backend` | **Frontend:** `Event_Management_Admin_Frontend`
+> Built from the seven supplied screens: the Templates list plus Create Template steps 1–6.
+> **Local only, uncommitted. Production has none of it.**
+
+### 224. What this module is, and what it is NOT
+
+Three different things in this codebase are called "templates". Confusing them is the same trap §113
+and the file header at the top of this document already cost time over:
+
+| | |
+|---|---|
+| `company_templates` | **Website Builder.** A tenant's WEBSITE theme. Not this. |
+| `lib/event-themes.ts` | **Client portal.** A HARDCODED invitation catalogue (§207) — 11 entries in a TS file, which an event stores in `events.theme_id`. |
+| `event_templates` **NEW** | **This.** The admin-authored invitation template catalogue. The real version of the row above. |
+
+§207 was explicit that the client portal's Templates screen reads a hardcoded list because nobody
+could author one. This is the table that fixes that.
+
+> **Not yet wired to `events.theme_id`.** The catalogue exists and is fully manageable; the client
+> portal still reads `lib/event-themes.ts`. Switching it over is a separate job, and it needs a
+> migration decision — the existing `theme_id` values are STRING ids from the TS file, not integers,
+> and §207's own warning ("NEVER RENAME AN `id`") applies to the cutover too.
+
+### 225. Two changes to the supplied design, both instructed
+
+1. **Template Pricing removed.** Step 5's mockup carried a three-way radio (Included in Plan /
+   Premium Template / Free Template). It is gone from the form, and there is **no column for it** —
+   not `pricing_type`, not `price`. A column no screen can set is a column something eventually
+   reads. If it returns it is an ALTER, not a rewrite.
+
+2. **Component Order is drag-and-drop.** The mockup showed a static numbered strip under the caption
+   "Arrange the order in which components will appear" — which a read-only list cannot do. Built on
+   `@dnd-kit` (already a dependency; **`@dnd-kit/modifiers` is NOT installed**, so no
+   `restrictToParentElement`).
+
+### 226. Schema — `event_templates`, 41 columns
+
+`scratch/migrate_event_templates.js`, applied to **LOCAL**. Taxonomy FKs all SET NULL — deleting a
+category must never delete somebody's template.
+
+**Two pairs that look redundant and are not:**
+
+```
+components       { event_title: 1, venue: 0, … }    WHETHER a part appears
+component_order  ['venue', 'date_time', … ]         WHERE it appears
+```
+
+> One ordered array cannot express "off, but remembered at position 5". Kept apart so switching a
+> component off and back on does **not** send it to the bottom of the invitation.
+
+```
+status     draft | published     step 6, Save as Draft vs Save & Publish
+is_active  0 | 1                 step 5, Active vs Inactive
+```
+
+> A published template can be deactivated without becoming a draft again, and a draft is invisible to
+> clients whatever `is_active` says. The list's Status filter offers all four values for that reason.
+
+`code` is unique per company but **deliberately not a UNIQUE index** — rows are soft-deleted, and a
+deleted row holding `FWE-001` hostage forever is the trap `event_menus.slug` already avoids. The
+service appends `-2`, `-3`… **Proven: a soft-deleted code is reusable.**
+
+### 227. The JSON columns are normalised on write, not trusted
+
+A JSON column accepts literally anything, so if the shape is not enforced at the boundary it is not
+enforced at all — and the renderer that eventually reads these has no way to complain about a key it
+does not know. `pickWritable` therefore:
+
+- writes **every** known key into `components` / `permissions`, present or not. A half-filled map
+  makes the reader guess, and "missing" reads as OFF in one place and ON in another;
+- completes `component_order` into a full permutation — unknown keys dropped, omitted keys appended;
+- expands the **"Both"** audience checkbox into `['individual','company']` rather than storing a
+  third value nothing else handles;
+- rejects a non-hex colour to `null`, because an unvalidated colour ends up inline in a style
+  attribute on whatever renders the invitation;
+- falls back **Selected Plans + nothing selected → All Plans**. Storing that restriction verbatim
+  hides the template from everyone while the screen claims it is merely restricted.
+
+`COMPONENT_KEYS` is duplicated in `use-event-templates.ts` and must stay identical — the backend
+drops any key it does not recognise, so a key that exists only on the frontend is discarded on save
+**with no error anywhere**.
+
+### 228. Files
+
+| Backend | |
+|---|---|
+| `scratch/migrate_event_templates.js` | the table |
+| `scratch/seed_event_template_permissions.js` | module + 4 permissions |
+| `src/models/EventTemplate.js` | + registered and associated in `models/index.js` |
+| `src/services/eventTemplate.service.js` | whitelist, normalisers, stats, CRUD, duplicate, reorder |
+| `src/controllers/eventTemplate.controller.js` · `src/routes/eventTemplate.routes.js` | mounted at `/api/v1/event-templates` |
+
+`stats` and `reorder` are declared **before** `/:id`, or Express matches them as an id and the
+handler goes looking for template number NaN. Same trap as §196 and §220.
+
+| Frontend | |
+|---|---|
+| `src/hooks/use-event-templates.ts` | types, vocabulary, labels, hooks |
+| `src/app/admin/templates/page.tsx` | list — 4 tiles, 5 filters, 9 columns, 8-item action menu |
+| `src/app/admin/templates/create/` | the six-step wizard (`?id=` switches it to edit) |
+| `src/app/admin/templates/create/_components/component-order-list.tsx` | the drag-and-drop strip |
+| `src/app/admin/templates/_components/template-preview.tsx` | the live preview, shared with the detail page |
+| `src/app/admin/templates/[id]/page.tsx` | View Details |
+
+**Sidebar:** one new main menu, `Templates`, with `All Templates` and `Create Template` under it.
+
+### 229. Why the permissions were seeded even though a super admin bypasses them
+
+`hasPermission` short-circuits for `super_admin` and `developer`, so the module worked the moment the
+routes existed. But the **Roles screen builds its checkbox tree from the `modules` / `permissions`
+tables** — without those rows the module is invisible there and no other role could ever be granted
+it. Nothing errors; the permission simply cannot be assigned. Local now has module id 70 and
+permissions 256–259.
+
+### 230. Details worth keeping
+
+- **The four tiles count the whole catalogue, not the filtered page.** A "Total Templates" that
+  changes when you type in the search box is not a total. Counted in ONE grouped query, not four
+  COUNTs — at ~374ms per production round trip (§103) four is a visible pause on a screen with no
+  rows yet. `featured` overlaps the other three and is summed separately, because a featured template
+  is also active or inactive; it is a fourth fact, not a fourth slice.
+- **Renaming a template does NOT re-point its code**, unlike a menu slug. Clients' events reference a
+  template by code, and a silent change orphans them. The code only changes when explicitly sent.
+- **A duplicate always lands as a DRAFT and unfeatured**, whatever the source was. Copying a
+  published template and publishing the copy under a near-identical name is not a one-click decision.
+- **The preview renders the components in `component_order`**, so the drag-and-drop has a visible
+  consequence. Without that the control reads as decorative.
+- **Components switched off stay in the order strip, dimmed and struck through** — removing them
+  would lose the position the two-column design exists to preserve.
+- Table cells use `break-all` + a `max-w` wrapper, never `truncate`: the table is auto-layout.
+- Share copies the link through `navigator.clipboard` with a **fallback that shows the URL** —
+  clipboard is undefined outside a secure context, which is exactly how this is tested over LAN HTTP.
+- The wizard populates from `existing` **once per id**; re-running on every reference would wipe
+  whatever is being typed the moment a background refetch resolves.
+- File inputs are reset after each pick, or choosing the SAME file again fires no `change` event.
+
+### 231. Verified
+
+Smoke test against the live local API, **39/39**:
+
+```
+create            code slugified · tags de-duped · bad hex -> null · overlay 250 -> 100
+                  components map complete (12) · permissions complete (15)
+                  order = full permutation, sent prefix honoured, bogus key dropped
+                  "both" -> ["individual","company"] · selected+empty -> all
+                  pricing_type / price sent and NOT stored
+duplicate code    fwe-001 -> fwe-001-2
+validation        name required · category required · type must belong to category
+reads             list · stats (not matched as an id) · get by id · 4 filters · search
+update            rename does NOT change the code · partial component map keeps the others on
+patch             status · featured
+duplicate         "(Copy)", status draft, not featured
+reorder           updated 2
+delete            404 after · and the freed code is reusable
+```
+
+Routes, authenticated: `/admin/templates`, `/admin/templates/create`, `/admin/templates/1` all
+**200**, and `/admin/nonexistent-xyz` **404** — so none of them is a catch-all. `tsc --noEmit` clean.
+No `next build`, no `.next` delete (§191).
+
+> **Two different `graphify` binaries are installed, and only one works.** The one on PATH
+> (`AppData/Roaming/npm/graphify`) takes `update <graph.json> <file...>` and fails internally
+> with `The "paths[2]" property must be of type string, got array` whatever you pass it. The
+> one that works is the Python build, which is NOT on PATH — the full path is recorded in the
+> Graphify Setup memory:
+> `C:\Users\LK MEDIA\AppData\Roaming\Python\Python314\Scripts\graphify.exe update .`
+> Both graphs rebuilt with it — backend 1,318 nodes / 2,694 edges, admin frontend 2,007 / 2,013.
+
+### 232. Open
+
+1. **Production has nothing.** Run, in order:
+   `node scratch/migrate_event_templates.js prod --apply` then
+   `node scratch/seed_event_template_permissions.js prod --apply`. Both are idempotent and dry-run
+   by default.
+2. **Not wired to the client portal.** `lib/event-themes.ts` is still what a client picks from —
+   see the warning in §224.
+3. **`background_type: 'custom'`** stores `custom_css` and nothing renders it. The preview says so
+   in the field's own hint rather than pretending.
+4. **The wizard has no Success step**, unlike the Subscription plan wizard — Save & Publish goes
+   straight to the new template's detail page, which shows the same information.
+
+---
+
+### 233. Templates wired into the client portal, and production finally migrated
+
+> Same day as §224. Four instructed changes, then the migration backlog cleared.
+
+#### The two small ones
+
+- **Create/Update now return to the LIST**, not the detail page. The wizard is a task; the list is
+  where you see the thing you just made sitting among the others.
+- **The sidebar entry is FLAT** — `Templates` → `/admin/templates`, no children. "Create Template" is
+  already the button at the top of the list, so a child entry duplicating it was a second route to
+  the same place, and a one-child group is a disclosure triangle that reveals nothing.
+
+> Note the name collision that now exists: Website Builder has its own **Event Templates** at
+> `/admin/website-builder/templates`. Different domain (website themes), same words. §224's table
+> is the one to read before touching either.
+
+#### The mapping — and why it needed NO migration
+
+`events.theme_id` is `VARCHAR(64)` validated by SHAPE, not membership (§194) — the catalogue was a
+frontend constant, so the backend deliberately never hardcoded the list. That decision paid off
+today: **an admin template's `code` is also a slug, so it goes straight into the same column.**
+
+```
+events.theme_id   'floral-bliss'   <- built-in, from lib/event-themes.ts
+                  'fwe-001'        <- admin template code, event_templates.code
+```
+
+Nothing in the row says which kind it is, so `resolveArtwork()` (new,
+`event_client_single/src/lib/event-templates.ts`) tries the admin list first and falls back:
+
+- an event created before this keeps **exactly** the artwork it had;
+- an event created after it renders the admin's design;
+- an id matching NEITHER — a deleted template — falls back to the default rather than rendering blank.
+
+> ⚠ The §207 warning now applies to the ADMIN panel too: **changing a template's CODE orphans every
+> event using it.** This is why `eventTemplate.service.js` does not re-derive the code when a
+> template is renamed. That was written for this reason before the client side existed.
+
+#### Backend — templates come down with the wizard's other options
+
+Added to `GET /client/event-options` rather than a new endpoint: it is the same plan lookup, and the
+wizard needs all of it at once. `templatesForPlan()` in `clientPortal.service.js`.
+
+**A bug worth recording, because it would not have failed loudly.** The filter reads
+`available_for`, `plan_availability` and `plan_ids` — and the first version did not SELECT them.
+Sequelize returns `undefined` for an unselected column, so every gate passed and every template was
+offered to everyone. A gate present in the code and absent at runtime. They are now selected via
+`TEMPLATE_GATE_ATTRS` and **deleted from each row before it is returned** — which plans a template is
+restricted to is the admin's business, not a browsable list for the client.
+
+**Two gates that cannot be fully enforced yet, stated rather than faked:**
+
+| Gate | Why not | What happens instead |
+|---|---|---|
+| `available_for` individual vs company | `website_clients` has **no account-type column** — nothing to compare against | A template naming either audience is offered. The honest half IS enforced: `available_for: []` means the admin said nobody, so nobody gets it |
+| `plan_availability: 'trial'` | No `trial_ends_at` on `website_clients`, so "is this client in their trial right now" is unanswerable | Evaluated at PLAN level — offered when the plan grants a trial at all. Excluding it outright would make the admin's third radio do nothing |
+
+Guessing at either would silently hide templates on a rule nobody set.
+
+#### Frontend — three places, because picking a template that vanishes is worse than not having one
+
+1. **Step 4** renders the admin catalogue when there is one and the built-in list when there is not.
+   Never an empty grid: a fresh install with nothing authored must still be able to create an event.
+2. **Step 5's preview** resolves through the same helper. Without this an admin template silently
+   fell back to the default gradient one step later.
+3. **`EventThumbnail`** (My Events, dashboard) likewise — it shares the `event-options` cache the
+   wizard already fills rather than adding a request per tile.
+
+Details: templates narrow **client-side** by the category/type picked in step 1, so changing the
+category does not cost a round trip mid-wizard; a NULL scope column on a template means "any", so a
+general template stays on offer; if the selected template stops being offered the wizard **snaps to
+the first that is**, honouring a `?theme=` deep link first; and `dark` is **computed from the actual
+background colour** for an admin template rather than curated, so a recoloured template stays legible
+with nobody remembering to flip a flag.
+
+#### PRODUCTION MIGRATED — §219 and §232.1 are cleared
+
+`scratch/audit_prod_schema.js` (new, read-only) compares local and production and names every gap.
+It confirmed §219 exactly:
+
+```
+BEFORE   local 132 tables · production 127
+         MISSING TABLES   events · event_guests · event_guest_groups ·
+                          event_messages · event_message_campaigns · event_templates
+         MISSING COLUMNS  website_clients.subscription_plan_id, .favourite_templates
+
+AFTER    MISSING TABLES: none · MISSING COLUMNS: none
+         report_client_schema.js prod -> 5/5 tables, 113 columns
+```
+
+Applied in dependency order; the dependent scripts correctly refused to run early on the dry run.
+
+#### The migration scripts were then DELETED — and what that nearly broke
+
+Instructed, and done **after** production was verified, not before. But deleting them exposed a
+problem that had nothing to do with this session:
+
+> **`initial_setup.sql` was 48 tables behind production**, and `website_clients` was never in it at
+> all. The client portal has been live in production while a fresh install could not build it.
+
+So the block appended to `initial_setup.sql` had to include `website_clients` and
+`client_refresh_tokens`, or the `ALTER TABLE website_clients` guards would have failed on a fresh
+database — which is exactly what the first replay attempt did.
+
+The DDL is dumped from **production** with `SHOW CREATE TABLE`, not hand-written: what ships must be
+what is actually running. Two things that had to be handled:
+
+- **Production runs in ANSI mode**, so `SHOW CREATE TABLE` emits `"double quoted"` identifiers —
+  a STRING literal on a default MySQL, so the dump would not have run anywhere else. Stripping the
+  `ANSI_QUOTES` token is NOT enough: `ANSI` implies it. The session mode is cleared outright.
+- **Replayed into a throwaway database, TWICE**, with only `modules`/`permissions` stubbed. Once
+  proves it applies standalone; twice proves it is idempotent (1 module row, 4 permission rows, not
+  2 and 8) — `initial_setup.sql` gets re-run against live databases.
+
+```
+8 tables built from the dump alone · idempotent
+website_clients 25 · client_refresh_tokens 9 · events 29 · event_guest_groups 11
+event_guests 36 · event_message_campaigns 21 · event_messages 16 · event_templates 42
+```
+
+**Deleted:** `migrate_website_client_plan.js`, `migrate_events.js`, `migrate_event_guests.js`,
+`migrate_guest_module.js`, `migrate_favourite_templates.js`, `migrate_event_templates.js`,
+`seed_event_template_permissions.js`, `migrate_website_client_oauth.js` (verified applied first —
+`provider_id`, `avatar_url`, `source` and `idx_website_clients_provider` all present on production).
+
+**Kept:** `audit_prod_schema.js`, `report_client_schema.js`, `test_event_templates_api.js`,
+`test_guest_import.js` — checkers and regression tests, not migrations.
+
+#### Verified
+
+```
+prod audit                MISSING TABLES: none · MISSING COLUMNS: none
+report_client_schema prod 5/5 tables, 113 columns
+event-options gating      16/16 — draft hidden · inactive hidden · available_for [] hidden
+                          other plan's template hidden · this plan's offered
+                          gate columns NOT leaked · event saved with the code as theme_id
+templates API             39/39, unchanged
+tsc --noEmit              admin frontend clean · client portal clean
+routes                    /admin/templates, /create, /13 -> 200
+                          client portal :3005 /dashboard/events/create -> 200
+```
+
+#### Open
+
+1. **`initial_setup.sql` is still ~46 tables behind production** — the whole Website Builder set,
+   `plan_badges`, `departments` and more. Pre-existing, NOT caused by this session, and not fixed
+   because regenerating 48 tables in FK order is a real job with its own decisions. A fresh install
+   from this file still does not produce a working system.
+2. **`available_for` and trial gating need columns** — an account type and a `trial_ends_at` on
+   `website_clients`. Until then both are partial, as described above.
+3. **The client portal's `/dashboard/templates` screen still lists the hardcoded catalogue.** Only
+   event CREATION was wired, which is what was asked. Its favourites and filters are keyed to the
+   old string ids, so moving it is its own piece of work.
+4. **`EVENT_QR_SECRET` still has to be set on Render** before any real event is created there
+   (§200.2) — now urgent, because the `events` table exists in production as of today.
+
+---
+
+### 234. The uploader bug, sample data, and the end of `scratch/`
+
+#### The uploader was never broken — the preview was ignoring the file
+
+Reported as "template img uploader not showing". S3 was checked first and is fine:
+
+```
+POST /media/upload -> driver s3 · CloudFront URL · 200 image/png · listed back from the bucket
+```
+
+The real fault was in the row already in the database:
+
+```
+john-wedding   background_image  https://…cloudfront.net/templates/images-…jpg   <- uploaded fine
+               thumbnail         https://…cloudfront.net/templates/chatgpt-…png  <- uploaded fine
+               background_type   'color'                                          <- so neither is used
+```
+
+`TemplatePreview` only paints `background_image` when `background_type === 'image'`. So the upload
+succeeded, the file reached S3, and **nothing changed on screen** — the picture sat in the row,
+paid for and unused, and the uploader read as broken.
+
+Two fixes:
+
+1. **Uploading a background image now switches Background Type to Image**, and the toast says so.
+   Nobody uploads a background in order not to use it; the type control is directly above and still
+   flips back freely, so this is a default, not a decision taken away.
+2. **Existing rows get an amber banner** naming the mismatch with a one-click *Use the image*, since
+   a row saved before this fix cannot repair itself.
+
+> The general shape of this bug: **two columns that must agree, and a UI that lets them disagree
+> silently.** Same family as `components` / `component_order` in §226 — except that pair is
+> deliberately independent, and this pair is not.
+
+#### Sample data — 10 templates, real photography, re-hosted in S3
+
+`src/database/seeders/event-templates.seeder.js`. Covers Hindu and Christian weddings, sangeet,
+garden reception, birthday, anniversary, conference and seminar.
+
+- **Taxonomy resolved by NAME at runtime**, never by hardcoded id — ids differ between local and
+  production, and an id-based seeder writes a wedding template onto the Corporate category. Religion
+  is matched on all three of (name, category, type), because that is what the API's own validation
+  demands.
+- **Photos are downloaded and re-uploaded through `media.service`**, not hotlinked. A seeded row
+  pointing at `images.unsplash.com` breaks the day that URL changes, on a screen the client sees.
+  Going through the real service also means the seeder exercises the uploader's exact path — a
+  broken S3 config fails loudly here rather than quietly later.
+- **Every photo id was probed before being used.** One of twelve 404'd. A seeder that silently
+  writes a dead image URL is worse than one that refuses to run, so each row also carries a fallback
+  id and only gives up after both fail.
+- **Not every switch is on.** A conference has no couple and no decorations; a birthday has no
+  organiser; `minimal-greenery` locks two permissions. A template with every toggle on is not a
+  template, it is a default — and the client portal's gating has nothing to demonstrate.
+- Idempotent: re-running skips by `code`, `--force` rewrites.
+
+```
+10 written · 0 skipped · 0 failed   ·   all 10 verified 200 image/jpeg with background_type = image
+re-run -> 0 written · 10 skipped
+```
+
+The one row that still reads `type=color` is `john-wedding`, the hand-made one — now flagged in the
+UI rather than edited from under the user.
+
+#### Proven through the client portal
+
+```
+plan 7 "Wedding Special"  scoped to event_type 2 (Christian Wedding)
+offered to the client     john-wedding · chapel-christian-wedding · minimal-greenery · garden-reception
+withheld                  the Hindu, birthday, anniversary, conference and seminar templates
+```
+
+Exactly the four type-2 rows, which is the §233 plan gating doing its job on real data rather than
+on fixtures.
+
+#### `scratch/` is gone
+
+The question was "why is this in scratch". It should not have been: scratch is for scripts that get
+thrown away, and half of what was in there is re-run for the life of the project. Everything went to
+a real home or was deleted.
+
+| Was | Now |
+|---|---|
+| `audit_prod_schema.js` | `src/database/tools/schema-audit.js` |
+| `report_client_schema.js` | `src/database/tools/client-schema-report.js` |
+| `set_site_domain.js` | `src/database/tools/set-site-domain.js` |
+| `seed_event_guests_demo.js` | `src/database/seeders/event-guests-demo.seeder.js` |
+| `test_guest_import.js` | `tests/guest-import.test.js` |
+| `test_event_templates_api.js` | `tests/event-templates-api.test.js` |
+| `live-prod-backend-smoke.js` | `tests/prod-backend-smoke.js` |
+
+**Deleted** — one-offs whose change is applied everywhere: `add_public_site_indexes.js`,
+`apply-builder-header-schema.js`, `apply-vendor-subscribers-table.js`,
+`sync-builder-schema-to-prod.js`, `check_db.js`.
+
+Two relative paths broke on the move and were fixed: `schema-audit.js` reads `.env.production`
+through `__dirname` and needed three levels instead of one, and the demo seeder's
+`require('../src/models')` became `../../models`. `tests/` sits at depth 1, so those files needed no
+change at all — which is part of why they went there.
+
+CLAUDE.md now records the layout and says plainly not to start another `scratch/`.
+
+#### Verified
+
+```
+S3                     upload -> s3 · CloudFront URL fetchable · image/* · listed back
+seeder                 10 written, 0 failed · re-run 10 skipped · 10/10 URLs live
+client portal          4 of 11 offered, matching plan 7's scope exactly
+tests/event-templates  39/39
+tests/guest-import     40/40
+schema-audit (moved)   MISSING TABLES: none · MISSING COLUMNS: none
+client-schema-report   LOCAL 5/5 tables, 113 columns
+tsc --noEmit           admin frontend clean
+routes                 /admin/templates · /create · /create?id=40 · /40  -> 200
+```
+
+#### Open
+
+Unchanged from §233, plus: the seeder reuses the same photo for `background_image` and `thumbnail`.
+A 600x400 crop would be better for the gallery card, and there is no cropper on this path.

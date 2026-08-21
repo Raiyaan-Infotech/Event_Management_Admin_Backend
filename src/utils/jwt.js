@@ -118,6 +118,31 @@ const generateClientRefreshToken = (client) => {
   );
 };
 
+/**
+ * Website-client tokens — the people who sign up on a tenant public site
+ * (`website_clients`) and land in the client portal.
+ *
+ * DELIBERATELY a different `type` and different cookie names from the
+ * `client` tokens above, which belong to `vendor_clients` and the older Client
+ * Portal. They are two different tables; sharing a type would let a session
+ * from one portal authenticate as a row id in the other.
+ */
+const generateWebsiteClientAccessToken = (client) => {
+  return jwt.sign(
+    { id: client.id, email: client.email, vendorId: client.vendor_id, companyId: client.company_id || null, type: 'website_client' },
+    getAccessSecret(),
+    { expiresIn: '15m' }
+  );
+};
+
+const generateWebsiteClientRefreshToken = (client) => {
+  return jwt.sign(
+    { id: client.id, type: 'website_client', jti: uuidv4() },
+    getRefreshSecret(),
+    { expiresIn: '7d' }
+  );
+};
+
 // Vendor handoff — short-lived token to carry a vendor session across domains
 // (e.g. vendor portal → website builder, which lives on a different origin).
 const generateVendorHandoffToken = (vendor) => {
@@ -160,6 +185,8 @@ module.exports = {
   generateStaffRefreshToken,
   generateClientAccessToken,
   generateClientRefreshToken,
+  generateWebsiteClientAccessToken,
+  generateWebsiteClientRefreshToken,
   generateVendorHandoffToken,
   verifyVendorHandoffToken,
   generateClientHandoffToken,

@@ -44,6 +44,27 @@ module.exports = (sequelize) => {
                 allowNull: false,
                 defaultValue: 'website',
             },
+            /**
+             * The plan the admin assigned this client.
+             *
+             * Drives what the client may create in the portal: the plan is
+             * scoped to an event category/type/religion and grants a specific
+             * set of menus via subscription_plan_menus. NULL = no plan yet.
+             */
+            subscription_plan_id: {
+                type: DataTypes.INTEGER.UNSIGNED,
+                allowNull: true,
+            },
+
+            /**
+             * Template slugs the client hearted on the Templates screen.
+             *
+             * JSON rather than a join table: template ids are frontend slugs,
+             * not rows, so there is nothing to foreign-key against, and the
+             * whole list is read and written in one go. Was localStorage, which
+             * did not survive a different browser or private mode.
+             */
+            favourite_templates: { type: DataTypes.JSON, allowNull: true },
 
             // The provider's own user id (Google `sub`, Facebook id). This, not
             // the email, is what identifies a social account: Facebook does not

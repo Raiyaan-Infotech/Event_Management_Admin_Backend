@@ -31,7 +31,26 @@ const ALLOWED_ORIGINS = (process.env.FRONTEND_URL || 'http://localhost:3000,http
 // Everything else keeps the strict credentialed whitelist — that is what
 // carries the admin, vendor and staff JWT cookies, and `credentials: true`
 // with a reflected origin is only safe against a closed list.
-const isPublicSiteRoute = (req) => req.path.startsWith('/api/v1/public/');
+// EXCEPTION to the above: the website-client auth endpoints DO set cookies —
+// they issue the client-portal session. A credential-less, wildcard-origin
+// response makes the browser discard Set-Cookie silently, so these few paths
+// must go through the credentialed whitelist instead.
+//
+// LIMITATION, stated rather than hidden: that whitelist cannot enumerate
+// open-ended tenant domains, so this works for the origins in FRONTEND_URL
+// (the public site and the portal on localhost today) and NOT for a customer's
+// own custom domain. When tenant domains need it, the answer is the handoff
+// token already in utils/jwt.js — log in on the tenant origin, redirect to the
+// portal's own origin, exchange it for a session there — not reflecting an
+// arbitrary origin with credentials: true, which is what that combination
+// makes unsafe.
+const COOKIE_BEARING_PUBLIC_PATHS = [
+  '/api/v1/public/website-clients/login',
+  '/api/v1/public/website-clients/logout',
+];
+
+const isPublicSiteRoute = (req) =>
+  req.path.startsWith('/api/v1/public/') && !COOKIE_BEARING_PUBLIC_PATHS.includes(req.path);
 
 app.use(cors((req, cb) => {
   if (isPublicSiteRoute(req)) {
@@ -82,12 +101,16 @@ app.use('/api/v1/event-categories', require('./routes/eventCategory.routes'));
 app.use('/api/v1/event-types', require('./routes/eventType.routes'));
 app.use('/api/v1/religions', require('./routes/religion.routes'));
 app.use('/api/v1/event-menus', require('./routes/eventMenu.routes'));
+// Invitation templates — the super admin's Create Template wizard
+app.use('/api/v1/event-templates', require('./routes/eventTemplate.routes'));
 app.use('/api/v1/plan-types', require('./routes/planType.routes'));
 app.use('/api/v1/subscription-plans', require('./routes/subscriptionPlan.routes'));
 app.use('/api/v1/plan-badges', require('./routes/planBadge.routes'));
 // People who signed up on a tenant's public website. The public signup
 // endpoint lives under /api/v1/public — everything here is admin-only.
 app.use('/api/v1/website-clients', require('./routes/websiteClient.routes'));
+// Client portal — requires a signed-in website client (see websiteClientAuth).
+app.use('/api/v1/client', require('./routes/clientPortal.routes'));
 app.use('/api/v1/payments', require('./routes/payment.routes'));
 app.use('/api/v1/setup', require('./routes/setup.routes'));
 app.use('/api/v1/timezones', require('./routes/timezone.routes'));

@@ -3,6 +3,8 @@ const oauthService = require('../services/websiteClientOAuth.service');
 const ApiResponse = require('../utils/apiResponse');
 const logger = require('../utils/logger');
 const { asyncHandler } = require('../utils/helpers');
+const { generateWebsiteClientAccessToken, generateWebsiteClientRefreshToken } = require('../utils/jwt');
+const { setWebsiteClientCookies, clearWebsiteClientCookies } = require('../middleware/websiteClientAuth');
 
 // ── Public: signup from the tenant website ───────────────────────────────────
 
@@ -25,8 +27,28 @@ const register = asyncHandler(async (req, res) => {
 const login = asyncHandler(async (req, res) => {
     const vendorId = req.body.vendor_id || req.query.vendor_id || req.companyId || undefined;
     const client = await websiteClientService.login(req.body, vendorId);
+
+    // Issues the portal session. This used to hand back nothing at all —
+    // deliberately, because there was no client portal to land in. There is one
+    // now, so a successful login has to leave the browser holding something the
+    // portal's requests can present.
+    //
+    // Cookie names and token `type` are website-client specific, NOT the
+    // `client_*` pair used by vendor_clients and the older Client Portal:
+    // two different tables, and a shared name would let one portal's session
+    // authenticate as a row id in the other.
+    const accessToken = generateWebsiteClientAccessToken(client);
+    const refreshToken = generateWebsiteClientRefreshToken(client);
+    setWebsiteClientCookies(res, accessToken, refreshToken);
+
     logger.logRequest(req, `Website login: ${client.email}`);
     return ApiResponse.success(res, { client }, 'Login successful');
+});
+
+/** Ends the portal session. Safe to call when not signed in. */
+const logout = asyncHandler(async (req, res) => {
+    clearWebsiteClientCookies(res);
+    return ApiResponse.success(res, null, 'Logged out successfully');
 });
 
 // ── Public: social sign-in ───────────────────────────────────────────────────
@@ -236,6 +258,7 @@ const deleteById = asyncHandler(async (req, res) => {
 module.exports = {
     register,
     login,
+    logout,
     oauthStart,
     oauthCallback,
     oauthProviders,

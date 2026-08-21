@@ -3105,3 +3105,334 @@ ON DUPLICATE KEY UPDATE `default_value` = VALUES(`default_value`), `group` = VAL
 INSERT IGNORE INTO `translations` (`translation_key_id`, `language_id`, `company_id`, `value`, `status`, `is_active`)
 SELECT tk.id, 1, 1, tk.default_value, 'reviewed', 1 FROM `translation_keys` tk
 WHERE tk.`key` IN ('nav.subscription_management', 'nav.subscription_plans', 'nav.plan_types');
+
+-- ============================================================================
+-- Client portal + invitation templates
+-- ============================================================================
+-- Dumped from PRODUCTION on 2026-08-21 with SHOW CREATE TABLE, after the
+-- migrations were applied and verified — so this is the schema that is really
+-- running rather than a transcription of it.
+--
+-- These tables arrived as standalone scripts in scratch/ (migrate_events.js,
+-- migrate_guest_module.js, migrate_event_templates.js, migrate_website_client_
+-- oauth.js and friends). Those scripts were DELETED once production was
+-- verified, so this file is now their only definition.
+--
+-- Order matters and is not alphabetical: every foreign key below points at a
+-- table defined above it. website_clients comes first because everything in
+-- the portal hangs off it.
+--
+-- NOTE: website_clients and client_refresh_tokens had never been in this file
+-- either — the portal was live in production while a fresh install could not
+-- build it. They are included here for that reason.
+-- ============================================================================
+
+-- ---------------------------------------------------------------- website_clients
+CREATE TABLE IF NOT EXISTS `website_clients` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `vendor_id` int unsigned NOT NULL DEFAULT '1',
+  `company_id` int DEFAULT NULL,
+  `name` varchar(200) NOT NULL,
+  `email` varchar(255) NOT NULL,
+  `dial_code` varchar(8) DEFAULT '+91',
+  `mobile` varchar(20) DEFAULT NULL,
+  `password` varchar(255) DEFAULT NULL,
+  `source` enum('website','google','facebook','admin') NOT NULL DEFAULT 'website',
+  `subscription_plan_id` int unsigned DEFAULT NULL COMMENT 'Plan the admin assigned. Drives what the client may create.',
+  `provider_id` varchar(64) DEFAULT NULL COMMENT 'Provider-side user id (Google sub / Facebook id)',
+  `avatar_url` varchar(500) DEFAULT NULL,
+  `email_verified` tinyint NOT NULL DEFAULT '0',
+  `mobile_verified` tinyint NOT NULL DEFAULT '0',
+  `otp_hash` varchar(255) DEFAULT NULL,
+  `otp_expires_at` datetime DEFAULT NULL,
+  `otp_attempts` tinyint NOT NULL DEFAULT '0',
+  `is_active` tinyint NOT NULL DEFAULT '1',
+  `last_login_at` datetime DEFAULT NULL,
+  `created_by` int DEFAULT NULL,
+  `updated_by` int DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL,
+  `favourite_templates` json DEFAULT NULL COMMENT 'Template slugs the client hearted on the Templates screen',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_website_client_email` (`vendor_id`,`email`),
+  KEY `idx_website_clients_listing` (`company_id`,`deleted_at`,`is_active`,`created_at`),
+  KEY `idx_website_clients_vendor` (`vendor_id`,`deleted_at`),
+  KEY `idx_website_clients_source` (`source`,`deleted_at`),
+  KEY `idx_website_clients_provider` (`vendor_id`,`source`,`provider_id`),
+  KEY `fk_website_clients_plan` (`subscription_plan_id`),
+  CONSTRAINT `fk_website_clients_plan` FOREIGN KEY (`subscription_plan_id`) REFERENCES `subscription_plans` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_website_clients_vendor` FOREIGN KEY (`vendor_id`) REFERENCES `vendors` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=11 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- ---------------------------------------------------------------- client_refresh_tokens
+CREATE TABLE IF NOT EXISTS `client_refresh_tokens` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `token` varchar(500) NOT NULL,
+  `client_id` int NOT NULL,
+  `ip_address` varchar(45) DEFAULT NULL,
+  `user_agent` text,
+  `expires_at` datetime NOT NULL,
+  `is_active` tinyint NOT NULL DEFAULT '1',
+  `created_at` datetime NOT NULL,
+  `updated_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `client_refresh_tokens_token_unique` (`token`),
+  KEY `client_refresh_tokens_client_active` (`client_id`,`is_active`),
+  CONSTRAINT `client_refresh_tokens_client_fk` FOREIGN KEY (`client_id`) REFERENCES `vendor_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- ---------------------------------------------------------------- events
+CREATE TABLE IF NOT EXISTS `events` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `website_client_id` int unsigned NOT NULL COMMENT 'Owner - the signed-in portal client',
+  `vendor_id` int unsigned NOT NULL DEFAULT '1' COMMENT 'Tenant whose website the client belongs to',
+  `company_id` int DEFAULT NULL COMMENT 'Same scoping every other admin module uses',
+  `subscription_plan_id` int unsigned DEFAULT NULL,
+  `event_category_id` int unsigned DEFAULT NULL,
+  `event_type_id` int unsigned DEFAULT NULL,
+  `religion_id` int unsigned DEFAULT NULL,
+  `name` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `tagline` varchar(150) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `description` text COLLATE utf8mb4_unicode_ci,
+  `start_date` date DEFAULT NULL,
+  `end_date` date DEFAULT NULL,
+  `start_time` time DEFAULT NULL,
+  `end_time` time DEFAULT NULL,
+  `timezone` varchar(80) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `venue_name` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Not collected by the wizard yet; the dashboard card renders it when present',
+  `venue_address` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `privacy` enum('private','public','unlisted') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'private',
+  `status` enum('draft','upcoming','cancelled') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'upcoming' COMMENT 'Past is derived from end_date at read time, never stored',
+  `menu_ids` json DEFAULT NULL,
+  `theme_id` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `primary_color` varchar(9) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Hex, #RRGGBB or #RRGGBBAA',
+  `qr_token` text COLLATE utf8mb4_unicode_ci,
+  `qr_version` tinyint unsigned NOT NULL DEFAULT '1',
+  `qr_issued_at` datetime DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_events_client` (`website_client_id`,`deleted_at`),
+  KEY `idx_events_company` (`company_id`,`deleted_at`),
+  KEY `idx_events_vendor` (`vendor_id`,`deleted_at`),
+  KEY `idx_events_status` (`status`,`deleted_at`),
+  KEY `idx_events_start` (`start_date`),
+  KEY `fk_events_plan` (`subscription_plan_id`),
+  KEY `fk_events_category` (`event_category_id`),
+  KEY `fk_events_type` (`event_type_id`),
+  KEY `fk_events_religion` (`religion_id`),
+  CONSTRAINT `fk_events_category` FOREIGN KEY (`event_category_id`) REFERENCES `event_categories` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_events_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_events_plan` FOREIGN KEY (`subscription_plan_id`) REFERENCES `subscription_plans` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_events_religion` FOREIGN KEY (`religion_id`) REFERENCES `religions` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_events_type` FOREIGN KEY (`event_type_id`) REFERENCES `event_types` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------- event_guest_groups
+CREATE TABLE IF NOT EXISTS `event_guest_groups` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `website_client_id` int unsigned NOT NULL,
+  `company_id` int DEFAULT NULL,
+  `name` varchar(120) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `description` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `color` varchar(9) COLLATE utf8mb4_unicode_ci DEFAULT '#EC4899',
+  `visibility` enum('private','public') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'private',
+  `is_default` tinyint NOT NULL DEFAULT '0',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_guest_groups_client` (`website_client_id`,`deleted_at`),
+  KEY `idx_guest_groups_default` (`website_client_id`,`is_default`,`deleted_at`),
+  CONSTRAINT `fk_guest_groups_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------- event_guests
+CREATE TABLE IF NOT EXISTS `event_guests` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `event_id` int unsigned NOT NULL,
+  `website_client_id` int unsigned NOT NULL,
+  `company_id` int DEFAULT NULL,
+  `group_id` int unsigned DEFAULT NULL,
+  `name` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `first_name` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `last_name` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `title` varchar(30) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Mr. / Ms. / Mrs.',
+  `email` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `dial_code` varchar(8) COLLATE utf8mb4_unicode_ci DEFAULT '+91',
+  `mobile` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `whatsapp` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Often differs from mobile',
+  `company` varchar(200) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `table_number` varchar(30) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Merge field {table_number}',
+  `party_size` tinyint unsigned NOT NULL DEFAULT '1',
+  `rsvp_status` enum('not_responded','invited','pending','accepted','declined') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'not_responded',
+  `invite_source` enum('whatsapp','email','sms','manual','import') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'manual',
+  `invited_at` datetime DEFAULT NULL COMMENT 'NULL = added but not yet invited',
+  `responded_at` datetime DEFAULT NULL,
+  `notes` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL,
+  `address_line1` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `address_line2` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `city` varchar(120) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `state` varchar(120) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `postal_code` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `country` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT 'India',
+  `dietary_preference` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `special_requirements` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `plus_one` tinyint NOT NULL DEFAULT '0',
+  `plus_one_count` tinyint unsigned NOT NULL DEFAULT '0',
+  `custom_answers` json DEFAULT NULL COMMENT 'Answers to per-event custom questions',
+  `response_type` enum('none','yes','no','maybe') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'none' COMMENT 'What the guest said. Separate from rsvp_status, which is where the invitation has got to',
+  PRIMARY KEY (`id`),
+  KEY `idx_event_guests_event` (`event_id`,`deleted_at`),
+  KEY `idx_event_guests_client` (`website_client_id`,`deleted_at`),
+  KEY `idx_event_guests_status` (`rsvp_status`,`deleted_at`),
+  KEY `idx_event_guests_source` (`invite_source`,`deleted_at`),
+  KEY `idx_event_guests_responded` (`responded_at`),
+  KEY `idx_event_guests_group` (`group_id`,`deleted_at`),
+  CONSTRAINT `fk_event_guests_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_event_guests_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_event_guests_group` FOREIGN KEY (`group_id`) REFERENCES `event_guest_groups` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------- event_message_campaigns
+CREATE TABLE IF NOT EXISTS `event_message_campaigns` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `website_client_id` int unsigned NOT NULL,
+  `event_id` int unsigned NOT NULL,
+  `subject` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `body` mediumtext COLLATE utf8mb4_unicode_ci,
+  `channel` enum('email','sms','whatsapp','push') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'email',
+  `kind` enum('invite','reminder','update','thank_you','custom') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'invite',
+  `audience` enum('all','groups','guests') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'all',
+  `group_ids` json DEFAULT NULL,
+  `guest_ids` json DEFAULT NULL,
+  `recipients_count` int unsigned NOT NULL DEFAULT '0',
+  `status` enum('draft','scheduled','sending','sent','failed') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'draft',
+  `scheduled_at` datetime DEFAULT NULL,
+  `window_start` time DEFAULT NULL,
+  `window_end` time DEFAULT NULL,
+  `timezone` varchar(80) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `sent_at` datetime DEFAULT NULL,
+  `failed_reason` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_campaigns_client` (`website_client_id`,`deleted_at`),
+  KEY `idx_campaigns_event` (`event_id`,`deleted_at`),
+  KEY `idx_campaigns_status` (`status`,`deleted_at`),
+  KEY `idx_campaigns_sent` (`sent_at`),
+  CONSTRAINT `fk_campaigns_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_campaigns_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------- event_messages
+CREATE TABLE IF NOT EXISTS `event_messages` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `event_id` int unsigned NOT NULL,
+  `campaign_id` int unsigned DEFAULT NULL,
+  `guest_id` int unsigned DEFAULT NULL,
+  `website_client_id` int unsigned NOT NULL,
+  `channel` enum('whatsapp','email','sms') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `kind` enum('invite','reminder','update','thank_you') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'invite',
+  `status` enum('queued','sent','delivered','failed') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'sent',
+  `sent_at` datetime DEFAULT NULL,
+  `delivered_at` datetime DEFAULT NULL,
+  `opened_at` datetime DEFAULT NULL,
+  `clicked_at` datetime DEFAULT NULL,
+  `failed_reason` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_event_messages_event` (`event_id`,`deleted_at`),
+  KEY `idx_event_messages_client` (`website_client_id`,`deleted_at`),
+  KEY `idx_event_messages_channel` (`channel`,`deleted_at`),
+  KEY `idx_event_messages_sent` (`sent_at`),
+  KEY `fk_event_messages_guest` (`guest_id`),
+  KEY `idx_event_messages_campaign` (`campaign_id`,`deleted_at`),
+  CONSTRAINT `fk_event_messages_campaign` FOREIGN KEY (`campaign_id`) REFERENCES `event_message_campaigns` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_event_messages_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_event_messages_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_event_messages_guest` FOREIGN KEY (`guest_id`) REFERENCES `event_guests` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------- event_templates
+CREATE TABLE IF NOT EXISTS `event_templates` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `company_id` int DEFAULT NULL COMMENT 'Same scoping every other admin module uses',
+  `name` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `code` varchar(120) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Template code / slug, e.g. FWE-001. Unique per company, enforced in the service so a soft-deleted row cannot hold one hostage',
+  `event_category_id` int unsigned DEFAULT NULL,
+  `event_type_id` int unsigned DEFAULT NULL,
+  `religion_id` int unsigned DEFAULT NULL COMMENT 'Optional - not every event is religious',
+  `style` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'classic' COMMENT 'Template style/theme: classic|floral|royal|minimal|modern|traditional',
+  `tags` json DEFAULT NULL COMMENT 'Free-text tags, for search only',
+  `description` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Visible to clients in the gallery',
+  `layout_style` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'classic' COMMENT 'classic|modern|elegant|minimal|traditional',
+  `background_type` enum('color','image','gradient','custom') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'color',
+  `background_color` varchar(9) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Hex, #RRGGBB or #RRGGBBAA',
+  `secondary_color` varchar(9) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `background_image` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `gradient_from` varchar(9) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `gradient_to` varchar(9) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `custom_css` text COLLATE utf8mb4_unicode_ci COMMENT 'background_type = custom only',
+  `overlay_opacity` tinyint unsigned NOT NULL DEFAULT '0' COMMENT '0-100, darkens the background so text stays readable',
+  `orientation` enum('portrait','landscape') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'portrait',
+  `dimension` varchar(60) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'e.g. 1080x1920',
+  `primary_font` varchar(80) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `secondary_font` varchar(80) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `border_style` varchar(40) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `decorations` json DEFAULT NULL COMMENT 'Array of decoration keys',
+  `components` json DEFAULT NULL COMMENT 'Map of component key -> 0|1. WHETHER it shows',
+  `component_order` json DEFAULT NULL COMMENT 'Ordered array of component keys. WHERE it shows. Kept separate so toggling one off and on again does not send it to the bottom',
+  `permissions` json DEFAULT NULL COMMENT 'Map of component/aspect key -> 0|1. What a client may edit after choosing this template',
+  `status` enum('draft','published') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'draft' COMMENT 'Save as Draft vs Save & Publish. Independent of is_active',
+  `is_active` tinyint NOT NULL DEFAULT '1' COMMENT 'Active/Inactive on the list',
+  `is_featured` tinyint NOT NULL DEFAULT '0',
+  `available_for` json DEFAULT NULL COMMENT 'Subset of ["individual","company"]. Both is both entries, not a third value',
+  `plan_availability` enum('all','selected','trial') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'all',
+  `plan_ids` json DEFAULT NULL COMMENT 'subscription_plans ids, plan_availability = selected only',
+  `sort_order` int NOT NULL DEFAULT '0' COMMENT 'Lower appears first',
+  `show_on_homepage` tinyint NOT NULL DEFAULT '0',
+  `thumbnail` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Gallery card image, 600x400',
+  `created_by` int unsigned DEFAULT NULL,
+  `updated_by` int unsigned DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_event_templates_company` (`company_id`,`deleted_at`),
+  KEY `idx_event_templates_code` (`company_id`,`code`,`deleted_at`),
+  KEY `idx_event_templates_category` (`event_category_id`,`deleted_at`),
+  KEY `idx_event_templates_type` (`event_type_id`,`deleted_at`),
+  KEY `idx_event_templates_religion` (`religion_id`,`deleted_at`),
+  KEY `idx_event_templates_status` (`is_active`,`deleted_at`),
+  KEY `idx_event_templates_featured` (`is_featured`,`deleted_at`),
+  KEY `idx_event_templates_listing` (`company_id`,`sort_order`,`deleted_at`),
+  CONSTRAINT `fk_event_templates_category` FOREIGN KEY (`event_category_id`) REFERENCES `event_categories` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_event_templates_religion` FOREIGN KEY (`religion_id`) REFERENCES `religions` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_event_templates_type` FOREIGN KEY (`event_type_id`) REFERENCES `event_types` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------ event_templates permissions
+-- Without these the module is invisible on the Roles screen and can never be
+-- granted to a non-super-admin, even though its routes work for a super admin
+-- (hasPermission short-circuits for that role).
+INSERT IGNORE INTO `modules` (`name`, `slug`, `description`, `company_id`, `is_active`, `created_at`, `updated_at`)
+VALUES ('Event Templates', 'event_templates', 'Manage invitation templates', 1, 1, NOW(), NOW());
+
+INSERT IGNORE INTO `permissions` (`name`, `slug`, `description`, `module_id`, `module`, `company_id`, `is_active`, `created_at`, `updated_at`)
+SELECT p.name, p.slug, p.description, m.id, 'event_templates', 1, 1, NOW(), NOW()
+  FROM (SELECT id FROM `modules` WHERE slug = 'event_templates' LIMIT 1) m
+  JOIN (
+        SELECT 'View Event Templates'   AS name, 'event_templates.view'   AS slug, 'View invitation templates'          AS description
+  UNION SELECT 'Create Event Templates',      'event_templates.create',      'Create new invitation templates'
+  UNION SELECT 'Edit Event Templates',        'event_templates.edit',        'Edit existing invitation templates'
+  UNION SELECT 'Delete Event Templates',      'event_templates.delete',      'Delete invitation templates'
+  ) p;

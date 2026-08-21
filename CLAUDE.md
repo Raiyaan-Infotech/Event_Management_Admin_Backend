@@ -16,6 +16,9 @@ src/
   middleware/    — auth, permissions, approval, company context
   utils/         — apiResponse, apiError, jwt, helpers, logger
   database/      — seeders, migrations SQL
+    seeders/     — re-runnable sample/demo data (*.seeder.js)
+    tools/       — schema audit + reports, run by hand, read-only
+tests/           — node scripts run against a live local server
 ```
 
 ## Auth Middleware
@@ -50,6 +53,13 @@ src/
 ## DB
 - MySQL on port 3306 locally
 - Migrations run manually — SQL files in `src/database/`
+- `initial_setup.sql` is the ONLY definition of the client-portal and
+  `event_templates` tables; the standalone migrate_*.js scripts were deleted
+  after production was verified. Do not add new one-off scripts in a `scratch/`
+  folder — seeders go in `src/database/seeders/`, diagnostics in
+  `src/database/tools/`, checks in `tests/`.
+- `node src/database/tools/schema-audit.js` compares local against production and
+  names every missing table and column. Run it before assuming they match.
 - `initial_setup.sql` = full schema + seed data
 
 ## Test Credentials

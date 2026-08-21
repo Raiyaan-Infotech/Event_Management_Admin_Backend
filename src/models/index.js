@@ -91,8 +91,19 @@ db.EventType = require('./EventType')(sequelize, Sequelize);
 db.Religion = require('./Religion')(sequelize, Sequelize);
 db.EventMenu = require('./EventMenu')(sequelize, Sequelize);
 
+// Invitation templates — the catalogue the Create Template wizard authors.
+// Distinct from the Website Builder's `company_templates` (a website theme).
+db.EventTemplate = require('./EventTemplate')(sequelize, Sequelize);
+
 // Public website signups — people who registered themselves on a tenant site
 db.WebsiteClient = require('./WebsiteClient')(sequelize, Sequelize);
+
+// Events created by those clients in the client portal
+db.Event = require('./Event')(sequelize, Sequelize);
+db.EventGuest = require('./EventGuest')(sequelize, Sequelize);
+db.EventGuestGroup = require('./EventGuestGroup')(sequelize, Sequelize);
+db.EventMessage = require('./EventMessage')(sequelize, Sequelize);
+db.EventMessageCampaign = require('./EventMessageCampaign')(sequelize, Sequelize);
 
 // Translations
 db.Language = require('./Language')(sequelize, Sequelize);
@@ -293,11 +304,49 @@ db.EventMenu.belongsTo(db.Religion, { foreignKey: 'religion_id', as: 'religion' 
 db.EventMenu.belongsTo(db.User, { foreignKey: 'created_by', as: 'creator' });
 db.EventMenu.belongsTo(db.User, { foreignKey: 'updated_by', as: 'updater' });
 
+db.EventTemplate.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'category' });
+db.EventTemplate.belongsTo(db.EventType, { foreignKey: 'event_type_id', as: 'eventType' });
+db.EventTemplate.belongsTo(db.Religion, { foreignKey: 'religion_id', as: 'religion' });
+db.EventTemplate.belongsTo(db.User, { foreignKey: 'created_by', as: 'creator' });
+db.EventTemplate.belongsTo(db.User, { foreignKey: 'updated_by', as: 'updater' });
+
 // Website clients. `creator`/`updater` are null for a self-signup and only set
 // when an admin touches the row, so both joins are optional.
 db.WebsiteClient.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
 db.WebsiteClient.belongsTo(db.User, { foreignKey: 'created_by', as: 'creator' });
 db.WebsiteClient.belongsTo(db.User, { foreignKey: 'updated_by', as: 'updater' });
+
+// Events. The owning client CASCADEs at the DB level — deleting a client must
+// not leave events with no owner. Everything else is SET NULL: removing a
+// taxonomy row or retiring a plan must never delete somebody's event.
+db.Event.belongsTo(db.WebsiteClient, { foreignKey: 'website_client_id', as: 'client' });
+db.WebsiteClient.hasMany(db.Event, { foreignKey: 'website_client_id', as: 'events' });
+db.Event.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
+db.Event.belongsTo(db.SubscriptionPlan, { foreignKey: 'subscription_plan_id', as: 'plan' });
+db.Event.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'category' });
+db.Event.belongsTo(db.EventType, { foreignKey: 'event_type_id', as: 'eventType' });
+db.Event.belongsTo(db.Religion, { foreignKey: 'religion_id', as: 'religion' });
+
+// Guests and messages. Both CASCADE from the event at the DB level: a guest of
+// a deleted event is not a guest of anything, and a message about one has
+// nothing left to be about.
+db.Event.hasMany(db.EventGuest, { foreignKey: 'event_id', as: 'guests' });
+db.EventGuest.belongsTo(db.Event, { foreignKey: 'event_id', as: 'event' });
+db.Event.hasMany(db.EventMessage, { foreignKey: 'event_id', as: 'messages' });
+db.EventMessage.belongsTo(db.Event, { foreignKey: 'event_id', as: 'event' });
+db.EventGuest.hasMany(db.EventMessage, { foreignKey: 'guest_id', as: 'messages' });
+db.EventMessage.belongsTo(db.EventGuest, { foreignKey: 'guest_id', as: 'guest' });
+
+// Groups. SET NULL at the DB level, unlike the CASCADEs above — deleting a
+// group must UNGROUP its guests, never delete them.
+db.EventGuestGroup.hasMany(db.EventGuest, { foreignKey: 'group_id', as: 'guests' });
+db.EventGuest.belongsTo(db.EventGuestGroup, { foreignKey: 'group_id', as: 'group' });
+
+// Campaigns: one composed message, many per-recipient delivery rows.
+db.EventMessageCampaign.hasMany(db.EventMessage, { foreignKey: 'campaign_id', as: 'deliveries' });
+db.EventMessage.belongsTo(db.EventMessageCampaign, { foreignKey: 'campaign_id', as: 'campaign' });
+db.Event.hasMany(db.EventMessageCampaign, { foreignKey: 'event_id', as: 'campaigns' });
+db.EventMessageCampaign.belongsTo(db.Event, { foreignKey: 'event_id', as: 'event' });
 
 // Subscription Plans
 db.SubscriptionPlan.belongsTo(db.PlanType, { foreignKey: 'plan_type_id', as: 'planType' });

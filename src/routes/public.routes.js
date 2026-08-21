@@ -34,6 +34,7 @@ router.post('/website-clients/register', websiteClientController.register);
 // Verifies credentials only — no token, no cookie. There is no client portal to
 // sign into yet, so the screen just confirms the login was valid.
 router.post('/website-clients/login', websiteClientController.login);
+router.post('/website-clients/logout', websiteClientController.logout);
 
 // ── Social sign-in ──────────────────────────────────────────────────────────
 // `start` and `callback` are top-level browser navigations that answer with a

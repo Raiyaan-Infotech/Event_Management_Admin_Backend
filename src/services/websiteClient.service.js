@@ -12,7 +12,10 @@ const DEFAULT_VENDOR_ID = Number(process.env.WEBSITE_CLIENT_DEFAULT_VENDOR_ID ||
 
 // Whitelist, so a stray body key can never write company_id, an id, or flip
 // `source` / `email_verified` from an admin form.
-const WRITABLE_FIELDS = ['name', 'email', 'dial_code', 'mobile', 'is_active', 'vendor_id'];
+// `subscription_plan_id` is here and deliberately NOT in REGISTRABLE_FIELDS:
+// the plan is a commercial fact the admin decides, never something a
+// visitor can grant themselves by putting it in a signup body.
+const WRITABLE_FIELDS = ['name', 'email', 'dial_code', 'mobile', 'is_active', 'vendor_id', 'subscription_plan_id'];
 
 // What a PUBLIC signup is allowed to set. Narrower than the admin whitelist on
 // purpose: `is_active` and `vendor_id` are decided by the server, never by the
