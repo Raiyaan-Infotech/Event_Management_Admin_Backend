@@ -5696,3 +5696,227 @@ routes                 /admin/templates · /create · /create?id=40 · /40  -> 2
 
 Unchanged from §233, plus: the seeder reuses the same photo for `background_image` and `thumbnail`.
 A 600x400 crop would be better for the gallery card, and there is no cropper on this path.
+
+---
+
+### 235. Client portal pushed to its own repo — and the two things that will break the live deploy
+
+`D:\Jamal\event_client_single` → **https://github.com/Raiyaan-Infotech/Event_Managment_Client**
+
+#### The remote was not empty, and a force push would have destroyed it
+
+The repo had already been created that morning with an `Initial commit`
+(`30f0d0f`) carrying a LICENSE, on `main`. Local was on `master` with five commits and
+**no common ancestor** — `git merge-base` returned nothing.
+
+So `git push --force` would have deleted the LICENSE and the repo's own first commit. Instead:
+
+```
+commit local work on master
+git branch -M main                                     match the remote's default
+git merge origin/main --allow-unrelated-histories      keep the LICENSE
+git push -u origin main                                fast-forward, nothing destroyed
+```
+
+> Checked before pushing, not after. `git ls-remote` costs one second and is the difference between
+> a merge and a restore.
+
+#### `.gitignore` had `.env*`, which silently swallowed `.env.example` too
+
+An example env file nobody can commit is one that does not exist. Negated for that single path
+(`!.env.example`) and **verified with `git add --dry-run`, not with `git check-ignore`** — the latter
+exits 0 for a negated pattern as well, so it says "ignored" for a file that is not.
+
+```
+git add --dry-run .env.example  -> add '.env.example'
+git add --dry-run .env.local    -> "The following paths are ignored"   <- still protected
+```
+
+Confirmed after the push: the only env file on the remote is the template.
+
+#### ⚠ The live deploy will fail on CORS until the backend is changed
+
+This portal calls the backend **directly** — no Next.js proxy of its own, unlike the admin and
+vendor frontends — and sends its session cookie with every request (`credentials: 'include'`).
+`app.js` reflects an origin only when it is named in `FRONTEND_URL`.
+
+**Production `FRONTEND_URL` currently contains no client-portal origin at all:**
+
+```
+https://adminpanelfrontend-nine.vercel.app,
+https://event-management-vendor-frontend.vercel.app,
+https://event-management-admin-frontend.vercel.app
+```
+
+So the moment this is deployed, the login screen will look fine and **every authenticated request
+after it will fail**. That is §164 happening a second time, on a different app.
+
+The deployed Vercel origin must be appended to `FRONTEND_URL` on Render, and the backend redeployed
+so it re-reads the variable. Comma-separated, no spaces, no trailing slash, exact scheme.
+
+Cookies need nothing: the backend already issues `SameSite=None; Secure` under
+`NODE_ENV=production`, which is what a cross-site cookie requires, and both hosts are HTTPS.
+
+#### ⚠ `EVENT_QR_SECRET` is still missing from production — and it fails SILENTLY
+
+`.env` has it. `.env.production` does not, and neither does Render (§200.2, §232).
+
+`eventQr.js` does not throw when it is absent — it **falls back to `ACCESS_TOKEN_SECRET`** and logs a
+warning. So events created on live right now get QR codes encrypted with the JWT key, and the day
+`EVENT_QR_SECRET` is finally set, **every code already printed becomes undecryptable**. There is no
+migration for that; the codes are simply gone.
+
+It has to be set **before the first real event is created in production**, which is now possible
+because §233 created the `events` table there.
+
+#### Env, as deployed
+
+| Variable | Live value |
+|---|---|
+| `NEXT_PUBLIC_API_URL` | `https://event-management-admin-backend.onrender.com/api/v1` |
+| `NEXT_PUBLIC_SITE_URL` | the Vercel origin, no trailing slash |
+
+Both are `NEXT_PUBLIC_`, so they are **inlined at BUILD time** — changing them in Vercel does nothing
+until a redeploy, and neither may ever hold a secret. `NEXT_PUBLIC_API_URL` must carry the `/api/v1`
+suffix or every call 404s with no other symptom. All three facts are now written in `.env.example`
+and the README rather than learned from a 404.
+
+#### The README was still create-next-app boilerplate
+
+Replaced, since this is now a repo the client reads: env table, the CORS requirement above, the
+routes, the template-id contract (`theme_id` holds either an admin `code` or a built-in id, and
+renaming either orphans events), and an explicit note that messaging is **paused by decision**
+rather than missing by accident.
+
+#### Pushed
+
+```
+f0cc7f3  docs: replace the boilerplate README with the real one
+6ab782c  chore: document the environment, and let the template be committed
+fb98ee8  chore: merge repository initial commit (LICENSE)
+669a7e8  feat: client portal — events, guests, templates and analytics
+30f0d0f  Initial commit                                    <- the repo's own, preserved
+```
+
+107 files · local and `origin/main` in sync · working tree clean · `tsc --noEmit` clean before commit.
+
+---
+
+### 236. The client login chain was broken in three independent places
+
+> Symptom as reported: "login successful, but it does not go to the client portal."
+> Three separate faults, each of which alone was enough to break it. Two are fixed in
+> code; one is an env value on Render.
+
+#### ⚠ 1. Social sign-in never issued a session AT ALL
+
+`websiteClient.controller.js` → `oauthCallback` logged
+`OAuth login: <email> via google`, redirected back with `auth=success`, and left the browser
+holding **nothing**. No token was minted and `setWebsiteClientCookies` was never called — the
+password login at line 40 has always done both; this branch never did.
+
+Its own comment admitted it, and nobody read it as a bug:
+
+```js
+// Scoped to this client and this purpose, and short-lived.
+// There is no session to authorise the mobile write with.   <- because there was no session
+link_token: oauthService.signMobileToken(client.id),
+```
+
+**So Google/Facebook sign-in has never produced a working session.** It looked fine from the
+website, because the website only reads the query string; the failure surfaced one app later as:
+
+```
+GET /api/v1/client/me 401 0.330 ms
+```
+
+> **0.3ms is the tell.** That is far too fast for a database lookup — it is the auth middleware
+> rejecting a request that carried no cookie at all. A 401 that takes 200ms means "your token was
+> checked and refused"; a 401 that takes 0.3ms means "there was nothing to check".
+
+Fixed: the callback now mints both tokens and sets the cookies **before** the 302. `Set-Cookie` on a
+redirect is stored by the browser before it follows `Location`, which is what is wanted. Issued even
+when the mobile step is pending — the provider has already proven identity, and collecting a phone
+number is profile completion, not authentication.
+
+#### 2. The OAuth RETURN never redirected to the portal
+
+`useSocialAuthResult` in `auth-shared.tsx` raised `Login successful, <name>` — the exact toast in the
+report — tidied the query string, and stopped. The password path in `handleSubmit` has always
+redirected; only the OAuth return did not, because it is handled in a hook shared with signup and
+nothing in there knew where the portal was.
+
+`CLIENT_PORTAL_URL` / `resolveDestination` moved from `login-section` into `auth-shared`, so both
+entry points use one definition. Signup got the same fix for free.
+
+> Fault 2 was HIDING fault 1: you never got as far as the portal, so the 401 never appeared.
+
+#### ⚠ 3. `FRONTEND_URL` on Render does not contain the public website
+
+Proven by sending the same login request with different `Origin` headers:
+
+| Origin | Result |
+|---|---|
+| *(none)* | 200 |
+| **`event-managment-public-website.vercel.app`** | **500** |
+| `eventmanagmentclient.vercel.app` | 200 |
+| `event-management-admin-frontend.vercel.app` | 200 |
+
+An origin outside the whitelist makes the CORS delegate throw, Express answers **500**, and **no
+`Set-Cookie` is issued** — so a browser password-login on the live site silently creates no session.
+Google sign-in does not hit this (a top-level redirect involves no CORS), which is why it stayed
+hidden.
+
+**Still outstanding — an env change, not code.** Append the website's origin to `FRONTEND_URL` and
+restart.
+
+#### Two things I asserted that were WRONG, corrected here so the log is not misleading
+
+1. **"Login with a mobile number 500s on production."** It does not. The first request after an idle
+   period 500s because of the **Render cold start**, and mobile happened to be in that request. Every
+   later request with the identical body returns 200. A transient failure attributed to the payload
+   that happened to be in flight.
+2. **"It is third-party cookie blocking."** Not established. The login was failing before any cookie
+   was issued, so nothing had got far enough for that to matter. It remains a real exposure for
+   production — the portal reads the cookie cross-site — but it was not this.
+
+> Both were stated with more confidence than the evidence supported. The 401 timing and the
+> per-origin table are what actually settled it; guessing produced two wrong answers first.
+
+#### A hybrid test setup cannot work, and this cost a debugging round
+
+The reported logs showed the browser on `https://event-managment-public-website.vercel.app` while
+the API answering was `localhost` (`ip: "::1"`). Locally the cookie is issued as:
+
+```
+Set-Cookie: website_client_access_token=…; Path=/; HttpOnly; SameSite=Lax
+```
+
+`SameSite=Lax` is **not sent on cross-site requests**, and `vercel.app` → `localhost` is cross-site.
+So the cookie is stored and then withheld, and `/client/me` 401s no matter what the backend does.
+
+Nothing is misconfigured — `sameSite: 'none'` only applies when `NODE_ENV=production`, which locally
+would need HTTPS. The two halves simply cannot be mixed. Test **fully local** (browser, portal and
+API all on `localhost`, so it is same-site) or **fully live** (both HTTPS, so `None; Secure` applies).
+
+#### Verified
+
+```
+prod login, per-origin              200 / 500 / 200 / 200   (table above)
+prod login without mobile           200
+prod login with mobile, repeated    200   <- the earlier 500 was the cold start
+local login                         200 + Set-Cookie ×2, SameSite=Lax
+CORS preflight from the portal      204, allow-origin + allow-credentials present
+backend loads clean · tsc clean on the public site
+```
+
+A disposable production account (`zz.diag@example.com`) was created for these tests and **deleted**.
+
+#### Open
+
+1. `FRONTEND_URL` on Render — fault 3 above. Password login on live stays broken until then.
+2. **Third-party cookies remain a real production exposure.** The portal is the only one of the three
+   frontends without a same-origin proxy, so its session depends on a cross-site cookie. If Google
+   login works locally but 401s on live, that is the cause — and the answer is the `client_handoff`
+   token already sitting unused in `utils/jwt.js`, exactly as the comment in `app.js` describes.
+3. `EVENT_QR_SECRET` still unset on Render (§232.4).
