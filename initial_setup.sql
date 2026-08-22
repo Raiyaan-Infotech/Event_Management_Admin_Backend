@@ -3436,3 +3436,225 @@ SELECT p.name, p.slug, p.description, m.id, 'event_templates', 1, 1, NOW(), NOW(
   UNION SELECT 'Edit Event Templates',        'event_templates.edit',        'Edit existing invitation templates'
   UNION SELECT 'Delete Event Templates',      'event_templates.delete',      'Delete invitation templates'
   ) p;
+
+-- =============================================================================
+-- Template Categories + Frame Styles
+-- -----------------------------------------------------------------------------
+-- `template_categories` is the DESIGN family (Elegant, Floral, Minimal,
+-- Traditional). It is NOT `event_categories`, which is what kind of EVENT
+-- something is — a Floral frame suits a wedding and a birthday alike.
+--
+-- `frame_styles` holds the uploaded border artwork itself, classified by one of
+-- those categories. `event_templates.border_style` remains an enum mapping to a
+-- CSS border; this table is the real artwork, uploaded once and reusable.
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS `template_categories` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `name` varchar(150) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `slug` varchar(150) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Unique per company; enforced in the service, not by an index, because rows are soft-deleted',
+  `sort_order` int NOT NULL DEFAULT '0',
+  `is_active` tinyint NOT NULL DEFAULT '1',
+  `company_id` int DEFAULT NULL,
+  `created_by` int unsigned DEFAULT NULL,
+  `updated_by` int unsigned DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_template_categories_company` (`company_id`,`deleted_at`),
+  KEY `idx_template_categories_slug` (`company_id`,`slug`,`deleted_at`),
+  KEY `idx_template_categories_listing` (`company_id`,`sort_order`,`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `frame_styles` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `name` varchar(150) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `template_category_id` int unsigned DEFAULT NULL,
+  `file_url` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'The uploaded SVG/PNG/JPG — this IS the frame',
+  `file_name` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Original filename, shown on the edit screen',
+  `supported_layouts` json DEFAULT NULL COMMENT 'Subset of portrait|landscape|square',
+  `status` enum('draft','published') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'published' COMMENT 'Save as Draft vs Upload Style',
+  `is_active` tinyint NOT NULL DEFAULT '1' COMMENT 'The form Status toggle — separate from draft/published',
+  `sort_order` int NOT NULL DEFAULT '0',
+  `company_id` int DEFAULT NULL,
+  `created_by` int unsigned DEFAULT NULL,
+  `updated_by` int unsigned DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_frame_styles_company` (`company_id`,`deleted_at`),
+  KEY `idx_frame_styles_category` (`template_category_id`,`deleted_at`),
+  KEY `idx_frame_styles_status` (`is_active`,`deleted_at`),
+  KEY `idx_frame_styles_listing` (`company_id`,`sort_order`,`deleted_at`),
+  CONSTRAINT `fk_frame_styles_category` FOREIGN KEY (`template_category_id`) REFERENCES `template_categories` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------- template_categories / frame_styles perms
+-- Same reason as event_templates above: a super admin bypasses hasPermission, but
+-- the Roles screen builds its checkbox tree from these tables, so without them
+-- the modules can never be granted to any other role.
+INSERT IGNORE INTO `modules` (`name`, `slug`, `description`, `company_id`, `is_active`, `created_at`, `updated_at`)
+VALUES ('Template Categories', 'template_categories', 'Manage template and frame categories', 1, 1, NOW(), NOW()),
+       ('Frame Styles', 'frame_styles', 'Manage invitation border / frame styles', 1, 1, NOW(), NOW());
+
+INSERT IGNORE INTO `permissions` (`name`, `slug`, `description`, `module_id`, `module`, `company_id`, `is_active`, `created_at`, `updated_at`)
+SELECT p.name, p.slug, p.description, m.id, 'template_categories', 1, 1, NOW(), NOW()
+  FROM (SELECT id FROM `modules` WHERE slug = 'template_categories' LIMIT 1) m
+  JOIN (
+        SELECT 'View Template Categories'   AS name, 'template_categories.view'   AS slug, 'View template categories'         AS description
+  UNION SELECT 'Create Template Categories',      'template_categories.create',      'Create new template categories'
+  UNION SELECT 'Edit Template Categories',        'template_categories.edit',        'Edit existing template categories'
+  UNION SELECT 'Delete Template Categories',      'template_categories.delete',      'Delete template categories'
+  ) p;
+
+INSERT IGNORE INTO `permissions` (`name`, `slug`, `description`, `module_id`, `module`, `company_id`, `is_active`, `created_at`, `updated_at`)
+SELECT p.name, p.slug, p.description, m.id, 'frame_styles', 1, 1, NOW(), NOW()
+  FROM (SELECT id FROM `modules` WHERE slug = 'frame_styles' LIMIT 1) m
+  JOIN (
+        SELECT 'View Frame Styles'   AS name, 'frame_styles.view'   AS slug, 'View border / frame styles'         AS description
+  UNION SELECT 'Create Frame Styles',      'frame_styles.create',      'Upload new border / frame styles'
+  UNION SELECT 'Edit Frame Styles',        'frame_styles.edit',        'Edit existing border / frame styles'
+  UNION SELECT 'Delete Frame Styles',      'frame_styles.delete',      'Delete border / frame styles'
+  ) p;
+
+-- =============================================================================
+-- Decorations
+-- -----------------------------------------------------------------------------
+-- Ornament images placed INSIDE an invitation template — floral corners,
+-- dividers, hanging ornaments, top borders.
+--
+-- Distinct from `frame_styles`: a frame is ONE piece of artwork surrounding the
+-- whole invitation, a decoration is a PART and a template can carry several.
+-- That is why `type` here is a PLACEMENT (corner / divider / top) rather than a
+-- design family — `template_categories` answers what it looks like, this
+-- answers where it goes.
+--
+-- `file_format` and `file_size` are stored rather than derived: the list shows
+-- both on every row, and deriving them would mean a HEAD request per row per
+-- page load.
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS `decorations` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `name` varchar(150) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `type` enum('corner','divider','ornament','top','bottom','motif') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'corner' COMMENT 'Placement, not design family',
+  `file_url` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'The uploaded PNG/JPG/WEBP/SVG — this IS the decoration',
+  `file_name` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Original filename, shown on the edit screen',
+  `file_format` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'PNG | SVG | JPG | WEBP, for the list Format column',
+  `file_size` int unsigned DEFAULT NULL COMMENT 'Bytes as stored (post-compression), rendered as 245 KB',
+  `is_active` tinyint NOT NULL DEFAULT '1',
+  `sort_order` int NOT NULL DEFAULT '0',
+  `company_id` int DEFAULT NULL,
+  `created_by` int unsigned DEFAULT NULL,
+  `updated_by` int unsigned DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_decorations_company` (`company_id`,`deleted_at`),
+  KEY `idx_decorations_type` (`type`,`deleted_at`),
+  KEY `idx_decorations_status` (`is_active`,`deleted_at`),
+  KEY `idx_decorations_listing` (`company_id`,`created_at`,`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------ decorations permissions
+INSERT IGNORE INTO `modules` (`name`, `slug`, `description`, `company_id`, `is_active`, `created_at`, `updated_at`)
+VALUES ('Decorations', 'decorations', 'Manage invitation decoration images', 1, 1, NOW(), NOW());
+
+INSERT IGNORE INTO `permissions` (`name`, `slug`, `description`, `module_id`, `module`, `company_id`, `is_active`, `created_at`, `updated_at`)
+SELECT p.name, p.slug, p.description, m.id, 'decorations', 1, 1, NOW(), NOW()
+  FROM (SELECT id FROM `modules` WHERE slug = 'decorations' LIMIT 1) m
+  JOIN (
+        SELECT 'View Decorations'   AS name, 'decorations.view'   AS slug, 'View decoration images'         AS description
+  UNION SELECT 'Create Decorations',      'decorations.create',      'Upload new decoration images'
+  UNION SELECT 'Edit Decorations',        'decorations.edit',        'Edit existing decoration images'
+  UNION SELECT 'Delete Decorations',      'decorations.delete',      'Delete decoration images'
+  ) p;
+
+-- =============================================================================
+-- event_templates -> template_categories / frame_styles / decorations
+-- -----------------------------------------------------------------------------
+-- Step 1's "Template Style" was a hardcoded enum (classic, floral, royal,
+-- minimal, modern, traditional) and step 2's Border Style and Decorations were
+-- two more. None of them referenced anything, so a frame could not be offered
+-- because it suited the style — the link lived in whoever filled the form.
+--
+-- `template_categories` IS that style vocabulary, and a `frame_style` already
+-- belongs to one. These three columns are what joins them up:
+--
+--   template_category_id   step 1 Style — and what narrows step 2's frames
+--   frame_style_id         step 2 Border / Frame Style, the real artwork
+--   decoration_ids         step 2 Decorations, ids into `decorations`
+--
+-- The OLD columns are deliberately kept, not dropped:
+--   `style`        still carries the slug, so anything reading it keeps working
+--   `border_style` is the CSS fallback when no frame artwork is chosen
+--   `decorations`  holds pre-existing rows' string values
+-- =============================================================================
+
+SET @c := (SELECT COUNT(*) FROM information_schema.columns
+           WHERE table_schema = DATABASE() AND table_name = 'event_templates'
+             AND column_name = 'template_category_id');
+SET @s := IF(@c = 0,
+  'ALTER TABLE `event_templates`
+     ADD COLUMN `template_category_id` int unsigned DEFAULT NULL COMMENT "Step 1 Style — replaces the hardcoded enum" AFTER `religion_id`,
+     ADD COLUMN `frame_style_id` int unsigned DEFAULT NULL COMMENT "Step 2 Border / Frame Style — the real artwork" AFTER `border_style`,
+     ADD COLUMN `decoration_ids` json DEFAULT NULL COMMENT "Step 2 Decorations — ids into `decorations`" AFTER `decorations`,
+     ADD KEY `idx_event_templates_tpl_category` (`template_category_id`),
+     ADD KEY `idx_event_templates_frame` (`frame_style_id`),
+     ADD CONSTRAINT `fk_event_templates_tpl_category` FOREIGN KEY (`template_category_id`) REFERENCES `template_categories` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+     ADD CONSTRAINT `fk_event_templates_frame` FOREIGN KEY (`frame_style_id`) REFERENCES `frame_styles` (`id`) ON DELETE SET NULL ON UPDATE CASCADE',
+  'SELECT "event_templates already linked"');
+PREPARE stmt FROM @s; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- The style vocabulary in full. Classic/Royal/Minimal/Elegant/Traditional were
+-- seeded already; Floral and Modern are here so every value the OLD `style`
+-- enum could hold has a category to map onto — without them, backfilling would
+-- silently drop those templates' style.
+INSERT INTO `template_categories` (`name`, `slug`, `sort_order`, `is_active`, `company_id`, `created_at`, `updated_at`)
+SELECT v.name, v.slug, v.sort_order, 1, 1, NOW(), NOW()
+  FROM (
+        SELECT 'Classic'     AS name, 'classic'     AS slug, 0 AS sort_order
+  UNION SELECT 'Royal',            'royal',            1
+  UNION SELECT 'Minimal',          'minimal',          2
+  UNION SELECT 'Elegant',          'elegant',          3
+  UNION SELECT 'Traditional',      'traditional',      4
+  UNION SELECT 'Floral',           'floral',           5
+  UNION SELECT 'Modern',           'modern',           6
+  ) v
+ WHERE NOT EXISTS (
+        SELECT 1 FROM `template_categories` t
+         WHERE t.slug = v.slug AND t.company_id = 1 AND t.deleted_at IS NULL);
+
+-- Backfill: every existing template's `style` slug becomes a real category id.
+UPDATE `event_templates` e
+  JOIN `template_categories` t
+    ON t.slug = e.style AND t.company_id = 1 AND t.deleted_at IS NULL
+   SET e.template_category_id = t.id
+ WHERE e.template_category_id IS NULL;
+
+-- =============================================================================
+-- event_templates — gradient controls + custom background shape
+-- -----------------------------------------------------------------------------
+-- Step 2's Gradient tab only ever stored two colours, and its Custom tab stored
+-- `custom_css` that nothing evaluated. These four columns are what the rest of
+-- those two tabs writes to.
+--
+-- `gradient_direction` defaults to 'bottom' because the preview has always drawn
+-- `linear-gradient(160deg, …)` — near enough straight down. Defaulting to
+-- anything else would silently restyle every gradient template already saved.
+-- =============================================================================
+
+SET @c := (SELECT COUNT(*) FROM information_schema.columns
+           WHERE table_schema = DATABASE() AND table_name = 'event_templates'
+             AND column_name = 'gradient_type');
+SET @s := IF(@c = 0,
+  'ALTER TABLE `event_templates`
+     ADD COLUMN `gradient_type` enum("linear","radial") NOT NULL DEFAULT "linear" AFTER `gradient_to`,
+     ADD COLUMN `gradient_direction` varchar(20) NOT NULL DEFAULT "bottom" COMMENT "top|top-right|right|bottom-right|bottom|bottom-left|left|top-left" AFTER `gradient_type`,
+     ADD COLUMN `image_shape` enum("rectangle","square","circle","heart","arch") NOT NULL DEFAULT "rectangle" COMMENT "Custom background only" AFTER `gradient_direction`,
+     ADD COLUMN `corner_radius` int NOT NULL DEFAULT 0 COMMENT "0-100 percent, Custom background only" AFTER `image_shape`',
+  'SELECT "event_templates gradient/shape columns already present"');
+PREPARE stmt FROM @s; EXECUTE stmt; DEALLOCATE PREPARE stmt;

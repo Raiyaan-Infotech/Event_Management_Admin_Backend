@@ -95,6 +95,17 @@ db.EventMenu = require('./EventMenu')(sequelize, Sequelize);
 // Distinct from the Website Builder's `company_templates` (a website theme).
 db.EventTemplate = require('./EventTemplate')(sequelize, Sequelize);
 
+// The DESIGN family a template or a frame belongs to (Elegant, Floral, …).
+// Not `event_categories`, which is what kind of EVENT it is.
+db.TemplateCategory = require('./TemplateCategory')(sequelize, Sequelize);
+
+// Uploaded border / frame artwork, classified by TemplateCategory.
+db.FrameStyle = require('./FrameStyle')(sequelize, Sequelize);
+
+// Uploaded ornament images placed INSIDE a template — corners, dividers, tops.
+// A frame surrounds the whole invitation; a decoration is one part of it.
+db.Decoration = require('./Decoration')(sequelize, Sequelize);
+
 // Public website signups — people who registered themselves on a tenant site
 db.WebsiteClient = require('./WebsiteClient')(sequelize, Sequelize);
 
@@ -307,8 +318,25 @@ db.EventMenu.belongsTo(db.User, { foreignKey: 'updated_by', as: 'updater' });
 db.EventTemplate.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'category' });
 db.EventTemplate.belongsTo(db.EventType, { foreignKey: 'event_type_id', as: 'eventType' });
 db.EventTemplate.belongsTo(db.Religion, { foreignKey: 'religion_id', as: 'religion' });
+// Step 1's Style, and step 2's Border / Frame Style. Both SET NULL on delete —
+// removing a category or a frame must never destroy somebody's template.
+db.EventTemplate.belongsTo(db.TemplateCategory, { foreignKey: 'template_category_id', as: 'templateCategory' });
+db.EventTemplate.belongsTo(db.FrameStyle, { foreignKey: 'frame_style_id', as: 'frameStyle' });
 db.EventTemplate.belongsTo(db.User, { foreignKey: 'created_by', as: 'creator' });
 db.EventTemplate.belongsTo(db.User, { foreignKey: 'updated_by', as: 'updater' });
+
+db.TemplateCategory.belongsTo(db.User, { foreignKey: 'created_by', as: 'creator' });
+db.TemplateCategory.belongsTo(db.User, { foreignKey: 'updated_by', as: 'updater' });
+
+// The list renders the category as a badge on every row, so it is joined rather
+// than looked up per row.
+db.FrameStyle.belongsTo(db.TemplateCategory, { foreignKey: 'template_category_id', as: 'category' });
+db.TemplateCategory.hasMany(db.FrameStyle, { foreignKey: 'template_category_id', as: 'frameStyles' });
+db.FrameStyle.belongsTo(db.User, { foreignKey: 'created_by', as: 'creator' });
+db.FrameStyle.belongsTo(db.User, { foreignKey: 'updated_by', as: 'updater' });
+
+db.Decoration.belongsTo(db.User, { foreignKey: 'created_by', as: 'creator' });
+db.Decoration.belongsTo(db.User, { foreignKey: 'updated_by', as: 'updater' });
 
 // Website clients. `creator`/`updater` are null for a self-signup and only set
 // when an admin touches the row, so both joins are optional.

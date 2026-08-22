@@ -103,6 +103,13 @@ app.use('/api/v1/religions', require('./routes/religion.routes'));
 app.use('/api/v1/event-menus', require('./routes/eventMenu.routes'));
 // Invitation templates — the super admin's Create Template wizard
 app.use('/api/v1/event-templates', require('./routes/eventTemplate.routes'));
+// The DESIGN family a template or frame belongs to (Elegant, Floral, Minimal).
+// NOT /event-categories, which is what kind of EVENT something is.
+app.use('/api/v1/template-categories', require('./routes/templateCategory.routes'));
+// Uploaded border / frame artwork, classified by a template category.
+app.use('/api/v1/frame-styles', require('./routes/frameStyle.routes'));
+// Ornament images placed inside a template — corners, dividers, tops.
+app.use('/api/v1/decorations', require('./routes/decoration.routes'));
 app.use('/api/v1/plan-types', require('./routes/planType.routes'));
 app.use('/api/v1/subscription-plans', require('./routes/subscriptionPlan.routes'));
 app.use('/api/v1/plan-badges', require('./routes/planBadge.routes'));

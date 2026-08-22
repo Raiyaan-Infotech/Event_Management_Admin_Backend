@@ -1,4 +1,5 @@
-const { Sequelize, User, EventTemplate, EventCategory, EventType, Religion, sequelize } = require('../models');
+const { Sequelize, User, EventTemplate, EventCategory, EventType, Religion,
+    TemplateCategory, FrameStyle, Decoration, sequelize } = require('../models');
 const { Op } = Sequelize;
 const baseService = require('./base.service');
 const ApiError = require('../utils/apiError');
@@ -28,12 +29,16 @@ const MODULE_SLUG = 'event_templates';
 const WRITABLE_FIELDS = [
     // step 1
     'name', 'code', 'event_category_id', 'event_type_id', 'religion_id',
-    'style', 'tags', 'description',
+    // `template_category_id` IS the Style now; `style` is still accepted so an
+    // older client that only knows the slug keeps working.
+    'template_category_id', 'style', 'tags', 'description',
     // step 2
     'layout_style', 'background_type', 'background_color', 'secondary_color',
-    'background_image', 'gradient_from', 'gradient_to', 'custom_css',
+    'background_image', 'gradient_from', 'gradient_to',
+    'gradient_type', 'gradient_direction', 'image_shape', 'corner_radius',
+    'custom_css',
     'overlay_opacity', 'orientation', 'dimension', 'primary_font',
-    'secondary_font', 'border_style', 'decorations',
+    'secondary_font', 'border_style', 'frame_style_id', 'decorations', 'decoration_ids',
     // step 3
     'components', 'component_order',
     // step 4
@@ -78,6 +83,23 @@ const STYLES = ['classic', 'floral', 'royal', 'minimal', 'modern', 'traditional'
 const LAYOUT_STYLES = ['classic', 'modern', 'elegant', 'minimal', 'traditional'];
 const BACKGROUND_TYPES = ['color', 'image', 'gradient', 'custom'];
 const ORIENTATIONS = ['portrait', 'landscape'];
+const GRADIENT_TYPES = ['linear', 'radial'];
+
+/**
+ * Which way a linear gradient runs.
+ *
+ * The supplied design showed five arrows (→ ← ↑ ↗ ↖). The downward three are
+ * here as well, because the preview's existing default runs DOWN — without them
+ * every gradient template already saved would have a direction no control could
+ * represent, and the picker would show nothing selected.
+ */
+const GRADIENT_DIRECTIONS = [
+    'top', 'top-right', 'right', 'bottom-right',
+    'bottom', 'bottom-left', 'left', 'top-left',
+];
+
+const IMAGE_SHAPES = ['rectangle', 'square', 'circle', 'heart', 'arch'];
+
 const PLAN_AVAILABILITY = ['all', 'selected', 'trial'];
 const AUDIENCES = ['individual', 'company'];
 const STATUSES = ['draft', 'published'];
@@ -87,6 +109,15 @@ const TEMPLATE_INCLUDE = [
     { model: EventCategory, as: 'category', attributes: ['id', 'name', 'color'], required: false },
     { model: EventType, as: 'eventType', attributes: ['id', 'name', 'color'], required: false },
     { model: Religion, as: 'religion', attributes: ['id', 'name', 'color'], required: false },
+    // Step 1's Style and step 2's frame artwork. Joined rather than looked up
+    // per row: the list renders the style badge and the preview needs the URL.
+    { model: TemplateCategory, as: 'templateCategory', attributes: ['id', 'name', 'slug'], required: false },
+    {
+        model: FrameStyle,
+        as: 'frameStyle',
+        attributes: ['id', 'name', 'file_url', 'supported_layouts', 'template_category_id'],
+        required: false,
+    },
 ];
 
 /** Detail-only joins, so the View page can show Created By / Updated By. */
@@ -237,7 +268,18 @@ const pickWritable = (data = {}) => {
         }
     }
 
+    if (payload.template_category_id !== undefined) {
+        const n = parseInt(payload.template_category_id, 10);
+        payload.template_category_id = Number.isNaN(n) || n <= 0 ? null : n;
+    }
+
     /* step 2 */
+    if (payload.frame_style_id !== undefined) {
+        const n = parseInt(payload.frame_style_id, 10);
+        payload.frame_style_id = Number.isNaN(n) || n <= 0 ? null : n;
+    }
+    if (payload.decoration_ids !== undefined) payload.decoration_ids = toIdList(payload.decoration_ids);
+
     if (payload.layout_style !== undefined) {
         payload.layout_style = oneOf(payload.layout_style, LAYOUT_STYLES, 'classic');
     }
@@ -249,6 +291,18 @@ const pickWritable = (data = {}) => {
     }
     if (payload.overlay_opacity !== undefined) {
         payload.overlay_opacity = clampInt(payload.overlay_opacity, 0, 100, 0);
+    }
+    if (payload.gradient_type !== undefined) {
+        payload.gradient_type = oneOf(payload.gradient_type, GRADIENT_TYPES, 'linear');
+    }
+    if (payload.gradient_direction !== undefined) {
+        payload.gradient_direction = oneOf(payload.gradient_direction, GRADIENT_DIRECTIONS, 'bottom');
+    }
+    if (payload.image_shape !== undefined) {
+        payload.image_shape = oneOf(payload.image_shape, IMAGE_SHAPES, 'rectangle');
+    }
+    if (payload.corner_radius !== undefined) {
+        payload.corner_radius = clampInt(payload.corner_radius, 0, 100, 0);
     }
     if (payload.orientation !== undefined) {
         payload.orientation = oneOf(payload.orientation, ORIENTATIONS, 'portrait');
@@ -330,11 +384,49 @@ const shape = (row) => {
         ? plain.available_for
         : [...AUDIENCES];
 
+    plain.decoration_ids = Array.isArray(plain.decoration_ids) ? plain.decoration_ids : [];
+
     plain.components = toFlagMap(plain.components ?? {}, COMPONENT_KEYS, 1);
     plain.permissions = toFlagMap(plain.permissions ?? {}, PERMISSION_KEYS, 1);
     plain.component_order = toComponentOrder(plain.component_order ?? []);
 
     return plain;
+};
+
+/**
+ * Resolve `decoration_ids` into the rows the preview needs, for a WHOLE page in
+ * one query.
+ *
+ * Not an `include`: decorations are a JSON id list, not a foreign key, so there
+ * is nothing for Sequelize to join on. Doing it per row would be one query per
+ * template — ten rows, ten round trips, ~374ms each against production.
+ *
+ * Order is taken from the stored array, not from the query, because the array IS
+ * the display order. Ids that no longer resolve simply do not appear.
+ */
+const attachDecorations = async (rows, companyId = undefined) => {
+    const ids = [...new Set(rows.flatMap((r) => r.decoration_ids ?? []))];
+    if (ids.length === 0) {
+        for (const row of rows) row.decorationItems = [];
+        return rows;
+    }
+
+    const where = { id: ids };
+    if (companyId !== undefined && companyId !== null) where.company_id = companyId;
+
+    const found = await Decoration.findAll({
+        where,
+        attributes: ['id', 'name', 'type', 'file_url', 'is_active'],
+        raw: true,
+    });
+    const byId = new Map(found.map((d) => [d.id, d]));
+
+    for (const row of rows) {
+        row.decorationItems = (row.decoration_ids ?? [])
+            .map((id) => byId.get(id))
+            .filter(Boolean);
+    }
+    return rows;
 };
 
 const numericFilter = (raw) => {
@@ -392,7 +484,10 @@ const getAll = async (query = {}, companyId = undefined) => {
         where,
     });
 
-    return { ...result, data: result.data.map(shape) };
+    const shaped = result.data.map(shape);
+    await attachDecorations(shaped, companyId);
+
+    return { ...result, data: shaped };
 };
 
 /**
@@ -435,7 +530,9 @@ const getById = async (id, companyId = undefined) => {
         companyId,
         include: [...TEMPLATE_INCLUDE, ...AUDIT_INCLUDE],
     });
-    return shape(template);
+    const shaped = shape(template);
+    await attachDecorations([shaped], companyId);
+    return shaped;
 };
 
 /* ----------------------------------------------------------------- writes -- */
@@ -509,6 +606,89 @@ const assertReligionMatchesScope = async (categoryId, typeId, religionId, compan
     }
 };
 
+/**
+ * Step 1's Style, resolved to a real category row.
+ *
+ * Accepts EITHER `template_category_id` or the legacy `style` slug, and keeps
+ * the two in step: whichever arrives, both columns end up correct. Without that
+ * the badge on the list and the value the client portal reads could disagree,
+ * and nothing would report it.
+ *
+ * A style that names no category is NOT rejected — rows predate this, and a
+ * save that only flips a switch must not fail because of a value it did not
+ * send. The category is simply left null and `style` keeps whatever it had.
+ */
+const syncStyleAndCategory = async (payload, existing = null, companyId = undefined) => {
+    const scope = (companyId !== undefined && companyId !== null) ? { company_id: companyId } : {};
+
+    if (payload.template_category_id !== undefined && payload.template_category_id !== null) {
+        const category = await TemplateCategory.findByPk(payload.template_category_id, {
+            attributes: ['id', 'slug', 'company_id'],
+        });
+        if (!category) throw ApiError.badRequest('Selected template style does not exist.');
+        if (companyId !== undefined && companyId !== null && category.company_id && category.company_id !== companyId) {
+            throw ApiError.badRequest('Selected template style does not exist.');
+        }
+        // The slug follows the id, never the other way round.
+        payload.style = category.slug;
+        return;
+    }
+
+    // Only a slug was sent (an older client, or the seeder). Look the category up
+    // so the new column is filled rather than left behind.
+    const slug = payload.style ?? (payload.template_category_id === null ? null : undefined);
+    if (slug) {
+        const category = await TemplateCategory.findOne({
+            where: { slug: String(slug).toLowerCase(), ...scope },
+            attributes: ['id'],
+        });
+        if (category) payload.template_category_id = category.id;
+    }
+};
+
+/**
+ * The frame artwork must exist, be usable, and belong to this company.
+ *
+ * A draft or deactivated frame is refused on WRITE rather than silently
+ * accepted: the picker only offers live ones, so a draft id arriving here means
+ * the frame was withdrawn after the form loaded, and saving it would leave the
+ * template pointing at artwork no screen will render.
+ */
+const assertFrameStyle = async (frameStyleId, companyId) => {
+    if (!frameStyleId) return;
+
+    const frame = await FrameStyle.findByPk(frameStyleId, {
+        attributes: ['id', 'company_id', 'status', 'is_active'],
+    });
+    if (!frame) throw ApiError.badRequest('Selected frame style does not exist.');
+    if (companyId !== undefined && companyId !== null && frame.company_id && frame.company_id !== companyId) {
+        throw ApiError.badRequest('Selected frame style does not exist.');
+    }
+    if (frame.status !== 'published' || Number(frame.is_active) !== 1) {
+        throw ApiError.badRequest('That frame style is not available. Publish and activate it first.');
+    }
+};
+
+/**
+ * Drop any decoration id that does not resolve, rather than failing the save.
+ *
+ * A frame is ONE choice and losing it changes the design, so a bad id there is
+ * an error. Decorations are a list, and one withdrawn ornament should not stop
+ * a template being saved — it is dropped and the rest are kept, in the order
+ * they were sent.
+ */
+const filterDecorationIds = async (ids, companyId) => {
+    if (!Array.isArray(ids) || ids.length === 0) return [];
+
+    const where = { id: ids, is_active: 1 };
+    if (companyId !== undefined && companyId !== null) where.company_id = companyId;
+
+    const live = new Set(
+        (await Decoration.findAll({ where, attributes: ['id'], raw: true })).map((r) => r.id)
+    );
+    return ids.filter((id) => live.has(id));
+};
+
 const create = async (data, userId = null, companyId = undefined) => {
     const payload = pickWritable(data);
 
@@ -523,6 +703,12 @@ const create = async (data, userId = null, companyId = undefined) => {
         payload.religion_id,
         companyId
     );
+
+    await syncStyleAndCategory(payload, null, companyId);
+    await assertFrameStyle(payload.frame_style_id, companyId);
+    if (payload.decoration_ids !== undefined) {
+        payload.decoration_ids = await filterDecorationIds(payload.decoration_ids, companyId);
+    }
 
     payload.code = await buildUniqueCode(payload.code || payload.name, companyId);
 
@@ -566,6 +752,16 @@ const update = async (id, data, userId = null, companyId = undefined) => {
             payload.religion_id ?? template.religion_id,
             companyId
         );
+    }
+
+    if (payload.template_category_id !== undefined || payload.style !== undefined) {
+        await syncStyleAndCategory(payload, template, companyId);
+    }
+    if (payload.frame_style_id !== undefined) {
+        await assertFrameStyle(payload.frame_style_id, companyId);
+    }
+    if (payload.decoration_ids !== undefined) {
+        payload.decoration_ids = await filterDecorationIds(payload.decoration_ids, companyId);
     }
 
     // Regenerate only when the code was explicitly sent. Unlike a menu slug,
@@ -674,4 +870,7 @@ module.exports = {
     // same vocabulary rather than each hardcoding its own copy.
     COMPONENT_KEYS,
     PERMISSION_KEYS,
+    GRADIENT_TYPES,
+    GRADIENT_DIRECTIONS,
+    IMAGE_SHAPES,
 };

@@ -48,6 +48,24 @@ module.exports = (sequelize) => {
             type: DataTypes.INTEGER.UNSIGNED,
             allowNull: true,
         },
+        /**
+         * Step 1's "Template Style".
+         *
+         * WAS a hardcoded enum. It is now a real row in `template_categories` —
+         * which is also what a `frame_style` is filed under, so choosing a style
+         * here is what lets step 2 offer the frames that suit it.
+         */
+        template_category_id: {
+            type: DataTypes.INTEGER.UNSIGNED,
+            allowNull: true,
+        },
+        /**
+         * The category's slug, kept in step with `template_category_id`.
+         *
+         * Not dropped and not stale: the service rewrites it whenever the
+         * category changes. Anything already reading `style` — the client
+         * portal, older rows, the list filter — keeps working unchanged.
+         */
         style: {
             type: DataTypes.STRING(40),
             allowNull: false,
@@ -93,6 +111,40 @@ module.exports = (sequelize) => {
             type: DataTypes.STRING(9),
             allowNull: true,
         },
+        /** Linear or radial. Only read when background_type = 'gradient'. */
+        gradient_type: {
+            type: DataTypes.ENUM('linear', 'radial'),
+            allowNull: false,
+            defaultValue: 'linear',
+        },
+        /**
+         * Which way a linear gradient runs.
+         *
+         * Defaults to 'bottom' because the preview has always drawn
+         * `linear-gradient(160deg, …)` — near enough straight down. Any other
+         * default would silently restyle every gradient template already saved.
+         */
+        gradient_direction: {
+            type: DataTypes.STRING(20),
+            allowNull: false,
+            defaultValue: 'bottom',
+        },
+        /** Custom background only — how the uploaded design is masked. */
+        image_shape: {
+            type: DataTypes.ENUM('rectangle', 'square', 'circle', 'heart', 'arch'),
+            allowNull: false,
+            defaultValue: 'rectangle',
+        },
+        /** 0-100 percent. Custom background only, and only for rectangle/square. */
+        corner_radius: {
+            type: DataTypes.INTEGER,
+            allowNull: false,
+            defaultValue: 0,
+        },
+        /**
+         * Superseded by the Custom tab's Upload Design + Image Shape controls.
+         * Kept for rows that already hold CSS; nothing evaluates it.
+         */
         custom_css: {
             type: DataTypes.TEXT,
             allowNull: true,
@@ -120,11 +172,27 @@ module.exports = (sequelize) => {
             type: DataTypes.STRING(80),
             allowNull: true,
         },
+        /**
+         * The CSS fallback — ornate, corners, arch. Kept, and now only used when
+         * no `frame_style_id` is chosen: a double border is better than nothing,
+         * and it is what every row created before frame styles existed has.
+         */
         border_style: {
             type: DataTypes.STRING(40),
             allowNull: true,
         },
+        /** Step 2's Border / Frame Style — real uploaded artwork. */
+        frame_style_id: {
+            type: DataTypes.INTEGER.UNSIGNED,
+            allowNull: true,
+        },
+        /** Legacy string list (roses, gold-leaf…). Superseded by decoration_ids. */
         decorations: {
+            type: DataTypes.JSON,
+            allowNull: true,
+        },
+        /** Step 2's Decorations — ids into `decorations`, in display order. */
+        decoration_ids: {
             type: DataTypes.JSON,
             allowNull: true,
         },
