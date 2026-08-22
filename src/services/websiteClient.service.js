@@ -32,6 +32,30 @@ const VENDOR_INCLUDE = [
     { model: Vendor, as: 'vendor', attributes: ['id', 'company_name'], required: false },
 ];
 
+/**
+ * Every read carries `has_password` — whether this client can sign in at all.
+ *
+ * A row with no password is locked out permanently (see `create`), and until
+ * this existed the admin list showed it as a perfectly normal active client.
+ * The hash itself is NEVER returned: the literal reports only whether one is
+ * set, and `exclude` is restated here rather than left to `defaultScope`,
+ * because passing query-level `attributes` is exactly the case where relying on
+ * a scope to still apply is a bet rather than a guarantee.
+ *
+ * QUALIFIED with the model alias on purpose. `VENDOR_INCLUDE` joins `vendors`,
+ * which has its own `password` column, so a bare `password IS NOT NULL` is
+ * ambiguous SQL and fails at runtime rather than at review.
+ *
+ * MySQL returns 1/0 for the comparison, not a boolean, so read it for
+ * truthiness on the client rather than comparing against `false`.
+ */
+const CLIENT_ATTRIBUTES = {
+    exclude: ['password', 'otp_hash'],
+    include: [
+        [Sequelize.literal('`WebsiteClient`.`password` IS NOT NULL'), 'has_password'],
+    ],
+};
+
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
 const digitsOnly = (value) => String(value ?? '').replace(/\D/g, '');
 
@@ -236,12 +260,17 @@ const getAll = async (query = {}, companyId = undefined) => {
         companyId,
         moduleSlug: MODULE_SLUG,
         include: VENDOR_INCLUDE,
+        attributes: CLIENT_ATTRIBUTES,
         where,
     });
 };
 
 const getById = async (id, companyId = undefined) =>
-    baseService.getById(WebsiteClient, MODEL_NAME, id, { companyId, include: VENDOR_INCLUDE });
+    baseService.getById(WebsiteClient, MODEL_NAME, id, {
+        companyId,
+        include: VENDOR_INCLUDE,
+        attributes: CLIENT_ATTRIBUTES,
+    });
 
 const create = async (data, userId = null, companyId = undefined) => {
     const payload = pick(WRITABLE_FIELDS, data);
@@ -259,12 +288,24 @@ const create = async (data, userId = null, companyId = undefined) => {
 
     await assertEmailFree(payload.email, payload.vendor_id);
 
-    // An admin-created account may be given a password; it is optional, since
-    // these rows are primarily a record of who signed up.
-    if (data.password) {
-        assertPasswordValid(data.password);
-        payload.password = data.password;
+    // REQUIRED, and deliberately so. This table began as a record of who signed
+    // up, when an admin-created row was never expected to sign in. Since the
+    // client portal shipped it IS an account someone signs into, and there is no
+    // forgot-password, set-password or invite endpoint anywhere in the system —
+    // so a row created without one can never obtain a password by any route.
+    // Optional here meant locked out forever, reported as "Invalid email or
+    // password" with nothing on the admin screen to explain it.
+    //
+    // Checked here and not only in the form: a direct POST bypasses the frontend
+    // entirely, which is the same reason assertPasswordValid exists at all.
+    if (!data.password) {
+        throw ApiError.badRequest(
+            'A password is required so the client can sign in to the portal.'
+        );
     }
+    assertPasswordValid(data.password);
+    payload.password = data.password;
+
     payload.source = 'admin';
 
     const created = await baseService.create(WebsiteClient, MODEL_NAME, payload, userId, companyId);
@@ -353,11 +394,26 @@ const getStats = async (companyId = undefined) => {
         return acc;
     }, {});
 
+    // Accounts that cannot sign in at all, because no password was ever set.
+    //
+    // Scoped to the password sources on purpose: a client who signed up through
+    // Google or Facebook has no password by design and signs in through the
+    // provider, so counting them here would report a problem that does not
+    // exist and bury the rows that are genuinely broken.
+    const cannotSignIn = await WebsiteClient.count({
+        where: {
+            ...where,
+            password: null,
+            source: { [Op.in]: ['website', 'admin'] },
+        },
+    });
+
     return {
         total: Object.values(byStatus).reduce((sum, n) => sum + n, 0),
         active: byStatus[1] || 0,
         inactive: byStatus[0] || 0,
         blocked: byStatus[2] || 0,
+        cannot_sign_in: cannotSignIn,
     };
 };
 
