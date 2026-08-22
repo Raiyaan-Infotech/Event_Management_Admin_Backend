@@ -5920,3 +5920,309 @@ A disposable production account (`zz.diag@example.com`) was created for these te
    login works locally but 401s on live, that is the cause — and the answer is the `client_handoff`
    token already sitting unused in `utils/jwt.js`, exactly as the comment in `app.js` describes.
 3. `EVENT_QR_SECRET` still unset on Render (§232.4).
+
+---
+
+## Session 22 — The client lockout, and the design layer stops being adjectives
+
+> **Date:** 2026-08-22 | **Backend:** `Event_Management_Admin_Backend`
+> **Frontend:** `Event_Management_Admin_Frontend` · **Portal:** `event_client_single`
+> Three separate pieces: a permanent client lockout, a plan gate, and the templates
+> design layer rebuilt on real artwork. **Schema applied to production.**
+
+### 237. Admin-created clients could never sign in — and nothing said so
+
+> Reported as "client created without a plan, and we cannot get into the client portal."
+> The plan was not the cause.
+
+`getEventOptions` handles a missing plan deliberately (returns `plan: null` + a `reason`),
+`websiteClientAuth.js` never looks at the plan, and `ClientAuthGate` only checks the session.
+A plan-less client is *meant* to get in.
+
+The real cause was a **blank password**, easy to hit on the same screen where the plan is
+left empty:
+
+```
+1  client-form-dialog.tsx  handleSave() validated ONLY name and email.
+2  Left blank -> ...(form.password ? {password} : {}) omits the key
+                 -> the row is created with password = NULL
+3  websiteClient.service.js:165
+     if (!client || !client.password) throw unauthorized('Invalid email or password.')
+4  public.routes.js has register · login · logout · oauth · mobile-OTP.
+     There is NO forgot-password, NO set-password, NO invite endpoint anywhere.
+5  -> permanent lockout, and the admin list showed a normal active client.
+```
+
+Reproduced before touching anything, then proven fixed:
+
+```
+1. login          401 "Invalid email or password."   <- the reported symptom
+2. list row       source=admin  has_password=0  plan=null
+3. stats          cannot_sign_in=1
+4. after repair   has_password=1
+5. login again    OK, id=27, plan=n/a                <- signs in WITH NO PLAN
+```
+
+Step 5 is the proof the plan was never the blocker.
+
+The comment at `websiteClient.service.js:262` recorded the assumption that caused it —
+*"it is optional, since these rows are primarily a record of who signed up."* True when the
+table was a signup log; false since the portal shipped.
+
+**Fixed:** password mandatory on CREATE (form **and** service — a direct POST bypasses the
+form, which is why the guard is tested through the service, not the UI). Edit still treats
+blank as "leave unchanged". `has_password` added to every read, with a clickable
+**"Cannot sign in — set a password"** badge and a fifth stat tile.
+
+- The literal is qualified as `` `WebsiteClient`.`password` `` — `VENDOR_INCLUDE` joins
+  `vendors`, which has its own `password` column, so unqualified is ambiguous SQL.
+- **OAuth rows are exempt.** Google/Facebook clients have no password by design; counting
+  them would report a problem that does not exist and bury the real rows.
+- Auto-generating a password was rejected: there is no SMTP anywhere in this system, so it
+  could not be delivered — it would only move the lockout somewhere less visible.
+
+**Also found:** the portal sidebar's *View Plan* button pointed at `/dashboard/billing`,
+which does not exist. Removed rather than repointed — the card already shows everything
+that page would have said.
+
+### 238. A plan-less client now gets told, instead of an empty dashboard
+
+`ClientPlanGate` (new), inside `ClientAuthGate` — the plan is read off the signed-in client,
+so there is nothing to check until a session is confirmed.
+
+**Three states, not one**, because they send someone to support with different questions:
+
+```
+1. never assigned       plan_id=null   plan=null            -> NO-PLAN
+2. plan soft-deleted    plan_id=17     plan=null            -> DELETED-PLAN
+3. plan deactivated     plan_id=17     plan=ZZ Diag Plan    -> INACTIVE-PLAN
+4. healthy              plan_id=17     plan=ZZ Diag Plan    -> OK (passes through)
+```
+
+Two things found while testing:
+
+- `website_clients` has an FK to `subscription_plans` with **ON DELETE SET NULL**, so the
+  first attempt to simulate a dangling id failed on the constraint. But `SubscriptionPlan`
+  is `paranoid`, so a delete is an UPDATE and the FK stays satisfied — **state 2 is only
+  reachable through a soft delete.**
+- ⚠ **Do NOT move this check into the middleware.** `isAuthError` is `401 || 403`, and
+  `ClientAuthGate` treats that as "not signed in" and redirects to the website login. A 403
+  for a plan-less client would bounce portal → website → portal forever. The gate reading
+  `plan` off a **200** is what avoids that.
+
+---
+
+## The design layer
+
+### 239. Why the Templates design fields were "not aligned"
+
+Step 2 had four controls. **Three rendered nothing:**
+
+| Field | What actually rendered |
+|---|---|
+| `style` | nothing — in the preview's props type, never read |
+| `layout_style` | nothing — same |
+| `border_style` | a Tailwind class. `ornate` = `border-[3px] border-double` |
+| `decorations` | nothing — not even in the props type; all six drew one `<Sparkles/>` |
+
+And `event-templates.seeder.js` showed the missing link being done **by hand**: both Hindu
+Wedding rows got `border_style: 'ornate'`, both Christian rows `'arch'`. That association
+lived in the seeder author's memory. It is also why "one time traditional, other time
+normal" — the fields never talked to each other.
+
+> The answer: stop storing an adjective. Tag artwork on **two axes** — STYLE (classic,
+> royal, traditional…) and CONTEXT (category → type → religion) — and let a template
+> *resolve* its frame by specificity, the same fallback shape the translation bundle uses.
+
+§240–§243 are that idea built.
+
+### 240. Two new modules — `template_categories`, `frame_styles`
+
+`template_categories` is name + slug only. **Not** `event_categories` (what kind of EVENT)
+and not the Website Builder's template categories (WEBSITE themes). Slug uniqueness is in
+the service, not a UNIQUE index — rows are soft-deleted and an index counts deleted rows,
+so one deleted "floral" would hold that slug forever. **Renaming does not re-point the
+slug**; sending one explicitly does.
+
+`frame_styles` holds the uploaded border artwork, filed under a category, with
+`supported_layouts` and the `status`/`is_active` pair (§226's reasoning, unchanged).
+
+> ⚠ **`ON DELETE SET NULL` almost never fires here, and the test caught me claiming it did.**
+> `TemplateCategory` is paranoid, so deleting a category is an UPDATE and
+> `frame_styles.template_category_id` KEEPS its value. That is *better*: the join reads
+> through the default scope so the row shows "Uncategorised", and **restoring the category
+> re-files every frame automatically.** Blanking the column would make restore lossy.
+
+`tests/frame-styles-api.test.js` — **30/30**.
+
+### 241. Decorations — a PART, not a frame
+
+A frame is one piece of artwork surrounding the whole invitation; a decoration is a part,
+and a template can carry several. So `decorations.type` is a **placement**
+(corner/divider/ornament/top/bottom/motif), not a design family.
+
+`file_format` and `file_size` are **stored, not derived** — the list shows both on every
+row, and deriving would be a HEAD request per row per page load. They come from what
+`media.service` reports it *stored*: it compresses PNG/JPEG/WEBP, so the browser's
+`File.size` would be a number the bucket does not have.
+
+Normalisation proven: `image/jpeg` → `JPG`, `application/octet-stream` → `null` (not printed
+verbatim into the badge), `250880` → `"245 KB"`, and an unknown `type` filter matches
+**nothing** rather than silently returning everything.
+
+### 242. The sample artwork is generated SVG, not Unsplash — and it had to be
+
+Asked for Unsplash images. **It cannot work.** Unsplash is stock photography and has no
+transparent border assets; the preview lays the file over the invitation with `object-fill`,
+so a photo is an opaque rectangle that covers the invitation entirely. All ten frames would
+have looked identically broken.
+
+So: 10 frame styles + 11 decorations, real SVG with transparent grounds, uploaded through
+`media.service` to S3. Decorations are built from two shared primitives (`flower()` taking a
+petal count, `leaf()`), so the marigold, rose and daisy are one routine with different
+numbers rather than eleven unrelated blobs. Each type gets its own canvas shape so previews
+do not lie about proportions.
+
+> **Rendered them to a contact sheet and LOOKED. Five were wrong on the first pass:**
+> - *Elegant Arch* — the quadratic pulled to the top edge, so it read as a pill, and the
+>   bottom flourish was clipped off the canvas.
+> - *Traditional Mandala* — one large arc per corner **is** a rounded rectangle. Nothing
+>   about it said mandala. Now three concentric arcs, seven rays, rose petals.
+> - *Traditional Toran* — scallops hung off the outer edge and were clipped away.
+> - *Green Leaves Corner* — one stem diagonally through the middle: a floating branch that
+>   would have pointed at nothing in a corner slot. Now three stems from one anchor.
+> - *Purple Watercolor Top* — clipped on the left only, so it read as a cut-off shape.
+>   Now overruns BOTH edges, three blur radii, and harder specks — pigment pooling is what
+>   stops a wash looking like a blurred rectangle.
+
+### 243. The three modules wired into the wizard — this is why the categories exist
+
+```
+step 1  Style              -> template_categories   (was 6 hardcoded adjectives)
+step 2  Border/Frame Style -> frame_styles          (was a CSS border class)
+step 2  Decorations        -> decorations           (was 6 values drawing nothing)
+```
+
+And because a frame style is filed under a category, **picking a Style in step 1 sorts the
+matching frames to the front of step 2** — "4 match the style picked in step 1". Suggested,
+not filtered: a minimal gold frame on a Traditional template is a real combination.
+
+**The migration was lossless.** Existing `style` values included `floral` and `modern`,
+which were not among the five seeded categories — both were added, so all 11 templates
+backfilled with nothing dropped:
+
+```
+royal (3) · floral (2) · classic (1) · minimal (2) · modern (2) · traditional (1)
+```
+
+- **Nothing was dropped.** `style` still holds the slug and the service rewrites it from the
+  category — send either, both end up correct, so the client portal keeps working.
+  `border_style` is demoted to the fallback and only appears in the form when no frame is
+  chosen. `decorations` (strings) stays for old rows.
+- **A draft or deactivated frame is refused on WRITE.** The picker only offers live ones, so
+  a draft id arriving means it was withdrawn after the form loaded. Decorations behave
+  differently on purpose — one withdrawn ornament is dropped and the rest kept, because a
+  list should not fail the whole save.
+- `decoration_ids` is a JSON id list, so there is nothing to `include` on. Resolved for a
+  **whole page in one query** (`attachDecorations`), not one per row.
+- The preview draws them: frame over everything with the CSS border suppressed (or you get a
+  double edge), decorations under the content placed by `type`, one corner mirrored into all
+  four.
+
+### 244. The rest of step 2 — gradient controls and custom shape
+
+`gradient_type`, `gradient_direction`, `image_shape`, `corner_radius`.
+
+- **Eight directions, not the five in the design.** The five shown were all upward or
+  sideways, but the preview has always drawn `linear-gradient(160deg, …)` — *downward*. Every
+  gradient template already saved would have had a direction no control could represent, and
+  the picker would show nothing selected. Default `bottom`, so nothing existing changes.
+- **The Custom design would not have shown.** `backgroundStyle` only painted the image for
+  `background_type === 'image'`; the Custom tab writes the same column. The upload would have
+  succeeded, reached S3, and left a flat colour — §234 exactly. Fixed, and the "image but
+  non-image type" banner no longer fires on `custom`.
+- **The heart clip had to be an SVG.** CSS `clip-path: path()` measures in **pixels**, so a
+  heart authored on a 100-unit box is a 100px heart in the corner of a 248px card. Now an
+  `objectBoundingBox` clipPath, which scales.
+- **Square and Circle force the card square**, or the mask is drawn on a 9:16 box and both
+  come out as ovals.
+- Corner Radius is **disabled, not hidden**, for circle/heart, with a line saying why — so
+  the control does not appear and vanish as shapes change.
+
+`custom_css` is kept but no longer offered; the tab is Upload Design + Image Shape now.
+
+### 245. Template Categories rebuilt in the Website Builder's layout
+
+Asked for `/admin/website-builder/templates/categories`' design. `BuilderDataTable` and
+`BuilderCountedInput` are generic over their row type, so they are reused, not copied.
+
+Three deliberate differences from that screen:
+
+1. **No Description field** — this table is name + slug, and a field with no column behind it
+   silently discards what is typed.
+2. **The count column is real.** The builder's version fetches the entire templates list and
+   filters it per row in the browser; `frame_styles_count` comes from one grouped query.
+3. **Reordering SAVES.** The builder's `onReorder` only calls `setLocalCategories`, so its
+   drag survives until the next refetch and no further. Added
+   `PATCH /template-categories/reorder`, transactional, declared before `/:id`.
+
+`RowTranslateButton` was skipped — it registers keys against the WB translation catalogue,
+and `template-categories` is not in that system's `FIELD_CATALOG`.
+
+### 246. PRODUCTION MIGRATED
+
+Applied from `initial_setup.sql` in dependency order.
+
+> ⚠ **Production runs `ANSI,ANSI_QUOTES`**, where `"` is an IDENTIFIER quote — every
+> `COMMENT "..."` in the DDL would have parsed as an identifier and failed. Checked BEFORE
+> applying, and the session mode cleared outright, not stripped: `ANSI` implies
+> `ANSI_QUOTES` (§233's lesson, second outing).
+
+```
+BEFORE   local 135 tables · production 133
+         MISSING TABLES   decorations · frame_styles · template_categories
+         MISSING COLUMNS  event_templates: template_category_id, frame_style_id,
+                          decoration_ids, gradient_type, gradient_direction,
+                          image_shape, corner_radius
+
+AFTER    MISSING TABLES: none · MISSING COLUMNS: none
+         template_categories  classic, royal, minimal, elegant, traditional, floral, modern
+         modules 3 · permissions 12 · event_templates new columns 7/7
+         FKs  fk_frame_styles_category · fk_event_templates_tpl_category
+              fk_event_templates_frame
+
+SECOND FULL RUN   categories 7 · modules 3 · permissions 12   <- idempotent
+```
+
+`event_templates` has 0 rows on production, so the style backfill was a no-op there.
+
+### 247. Verified
+
+```
+frame-styles + categories   30/30
+decorations service         16/16  (incl. a real S3 upload)
+template mapping            10/10
+gradient / shape fields      5/5
+client lockout chain        10/10  (reproduced first, then fixed)
+plan gate                    4/4   (all three blocked states + healthy)
+schema-audit                MISSING TABLES: none · MISSING COLUMNS: none
+prod replay x2              idempotent
+tsc --noEmit                admin frontend clean · client portal clean
+backend                     loads clean
+```
+
+### 248. Open
+
+1. **Nothing consumes the artwork outside the admin yet.** The client portal's wizard still
+   renders its own background-only preview; `resolved_art` is not sent to it. A template with
+   a frame and decorations looks right in the admin and plain in the portal.
+2. **No seeder for the linked columns.** `event-templates.seeder.js` still writes `style` as
+   a slug and `border_style` as an enum. It works — the service backfills the category from
+   the slug — but the seeded templates have no `frame_style_id` or `decoration_ids`.
+3. **`layout_style` still renders nothing.** It was narrowed on paper (content stack only,
+   with `style` owning ornament) but not implemented; it remains the one step-2 control with
+   no visible consequence.
+4. **`initial_setup.sql` is still ~46 tables behind production** (§233.1). Unchanged.
+5. `EVENT_QR_SECRET` still unset on Render (§232.4, §236.3).
+6. `FRONTEND_URL` on Render still lacks the public-website and client-portal origins
+   (§235, §236.3).
