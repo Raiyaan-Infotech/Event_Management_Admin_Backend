@@ -3381,14 +3381,20 @@ CREATE TABLE IF NOT EXISTS `event_templates` (
   `background_image` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `gradient_from` varchar(9) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `gradient_to` varchar(9) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `custom_css` text COLLATE utf8mb4_unicode_ci COMMENT 'background_type = custom only',
+  `gradient_via` varchar(9) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Optional third gradient stop. NULL = two-stop gradient',
+  `image_position` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'center' COMMENT 'Nine-way placement for background_type = image',
+  `image_scale` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'cover' COMMENT 'cover|contain|fill|auto',
+  `background_position` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'center' COMMENT 'Nine-way placement for background_type = custom',
+  `image_size` int NOT NULL DEFAULT '100' COMMENT 'Percent scale of the custom design, 10-400',
+  `overlay_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'Whether the tint is drawn at all. Separate from opacity so toggling off and on restores the chosen percentage',
+  `overlay_color` varchar(9) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Overlay tint. NULL = the black the preview has always used',
+  `artwork_style` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Traditional custom backgrounds only: full-bleed|patterned|illustration|textured',
   `overlay_opacity` tinyint unsigned NOT NULL DEFAULT '0' COMMENT '0-100, darkens the background so text stays readable',
   `orientation` enum('portrait','landscape') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'portrait',
   `dimension` varchar(60) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'e.g. 1080x1920',
   `primary_font` varchar(80) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `secondary_font` varchar(80) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `border_style` varchar(40) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `decorations` json DEFAULT NULL COMMENT 'Array of decoration keys',
   `components` json DEFAULT NULL COMMENT 'Map of component key -> 0|1. WHETHER it shows',
   `component_order` json DEFAULT NULL COMMENT 'Ordered array of component keys. WHERE it shows. Kept separate so toggling one off and on again does not send it to the bottom',
   `permissions` json DEFAULT NULL COMMENT 'Map of component/aspect key -> 0|1. What a client may edit after choosing this template',
@@ -3657,4 +3663,72 @@ SET @s := IF(@c = 0,
      ADD COLUMN `image_shape` enum("rectangle","square","circle","heart","arch") NOT NULL DEFAULT "rectangle" COMMENT "Custom background only" AFTER `gradient_direction`,
      ADD COLUMN `corner_radius` int NOT NULL DEFAULT 0 COMMENT "0-100 percent, Custom background only" AFTER `image_shape`',
   'SELECT "event_templates gradient/shape columns already present"');
+PREPARE stmt FROM @s; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- =============================================================================
+-- event_templates — per-layout-style step 2 fields, and two dead columns dropped
+-- -----------------------------------------------------------------------------
+-- Step 2's Design & Background form is now driven by `layout_style`: Classic,
+-- Elegant, Minimal and Traditional each offer a different set of controls for
+-- the same four background types. These eight columns are what the controls the
+-- earlier form never had now write to.
+--
+-- Every column is nullable or defaults to the value that reproduces the OLD
+-- behaviour, so a template saved before this migration renders identically:
+--   image_position / background_position  'center'  = what CSS already did
+--   image_scale                           'cover'   = what the preview already did
+--   image_size                            100       = unscaled
+--   overlay_enabled                       0         = tint off, opacity untouched
+--   gradient_via / overlay_color          NULL      = two-stop, default black
+--   artwork_style                         NULL      = not chosen
+--
+-- They are added for EVERY row, not only the layout styles whose form shows
+-- them. A template can be switched between layout styles and back, and blanking
+-- a column on switch would throw away work the previous style had saved.
+--
+-- DROPPED, because nothing anywhere read them:
+--   custom_css    superseded by Upload Design + Image Shape. Whitelisted and
+--                 stored, but no renderer ever evaluated it.
+--   decorations   the legacy string list (roses, gold-leaf…). Superseded by
+--                 `decoration_ids`; the preview reads the resolved artwork via
+--                 `decorationItems` and never touched this column.
+--
+-- ⚠ Production runs sql_mode = ANSI,ANSI_QUOTES, where " is an IDENTIFIER quote
+--   and every COMMENT "..." below would fail to parse. Clear the session mode
+--   outright before applying — ANSI implies ANSI_QUOTES, so stripping only
+--   ANSI_QUOTES is not enough:  SET SESSION sql_mode = '';
+-- =============================================================================
+
+SET @c := (SELECT COUNT(*) FROM information_schema.columns
+           WHERE table_schema = DATABASE() AND table_name = 'event_templates'
+             AND column_name = 'image_position');
+SET @s := IF(@c = 0,
+  'ALTER TABLE `event_templates`
+     ADD COLUMN `gradient_via` varchar(9) DEFAULT NULL COMMENT "Optional third gradient stop. NULL = two-stop gradient" AFTER `gradient_to`,
+     ADD COLUMN `image_position` varchar(20) NOT NULL DEFAULT "center" COMMENT "Nine-way placement for background_type = image" AFTER `gradient_via`,
+     ADD COLUMN `image_scale` varchar(20) NOT NULL DEFAULT "cover" COMMENT "cover|contain|fill|auto" AFTER `image_position`,
+     ADD COLUMN `background_position` varchar(20) NOT NULL DEFAULT "center" COMMENT "Nine-way placement for background_type = custom" AFTER `image_scale`,
+     ADD COLUMN `image_size` int NOT NULL DEFAULT 100 COMMENT "Percent scale of the custom design, 10-400" AFTER `background_position`,
+     ADD COLUMN `overlay_enabled` tinyint(1) NOT NULL DEFAULT 0 COMMENT "Whether the tint is drawn at all" AFTER `image_size`,
+     ADD COLUMN `overlay_color` varchar(9) DEFAULT NULL COMMENT "Overlay tint. NULL = the black the preview has always used" AFTER `overlay_enabled`,
+     ADD COLUMN `artwork_style` varchar(20) DEFAULT NULL COMMENT "Traditional custom backgrounds only" AFTER `overlay_color`',
+  'SELECT "event_templates per-layout-style columns already present"');
+PREPARE stmt FROM @s; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- Dropped separately, and each guarded on its own: a database that already ran
+-- the ADD block above must still be able to drop these.
+SET @c := (SELECT COUNT(*) FROM information_schema.columns
+           WHERE table_schema = DATABASE() AND table_name = 'event_templates'
+             AND column_name = 'custom_css');
+SET @s := IF(@c = 1,
+  'ALTER TABLE `event_templates` DROP COLUMN `custom_css`',
+  'SELECT "event_templates.custom_css already dropped"');
+PREPARE stmt FROM @s; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @c := (SELECT COUNT(*) FROM information_schema.columns
+           WHERE table_schema = DATABASE() AND table_name = 'event_templates'
+             AND column_name = 'decorations');
+SET @s := IF(@c = 1,
+  'ALTER TABLE `event_templates` DROP COLUMN `decorations`',
+  'SELECT "event_templates.decorations already dropped"');
 PREPARE stmt FROM @s; EXECUTE stmt; DEALLOCATE PREPARE stmt;

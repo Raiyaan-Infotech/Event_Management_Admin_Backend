@@ -142,13 +142,79 @@ module.exports = (sequelize) => {
             defaultValue: 0,
         },
         /**
-         * Superseded by the Custom tab's Upload Design + Image Shape controls.
-         * Kept for rows that already hold CSS; nothing evaluates it.
+         * ── Step 2 fields introduced with the per-layout-style forms ──
+         *
+         * Which of these a template actually shows is decided by `layout_style`
+         * (see STEP2_FIELDS on the frontend). They are columns on every row
+         * regardless, because a template can be switched from one layout style
+         * to another and back — blanking a column on switch would lose work
+         * that the previous style had legitimately saved.
+         *
+         * All are nullable or carry a default that reproduces the OLD
+         * behaviour, so every template saved before this change renders
+         * identically.
          */
-        custom_css: {
-            type: DataTypes.TEXT,
+
+        /** Image background: which part of the picture stays in frame. */
+        image_position: {
+            type: DataTypes.STRING(20),
+            allowNull: false,
+            defaultValue: 'center',
+        },
+        /** Image background: cover / contain / fill / auto. */
+        image_scale: {
+            type: DataTypes.STRING(20),
+            allowNull: false,
+            defaultValue: 'cover',
+        },
+        /**
+         * Optional THIRD gradient stop. Null means a two-stop gradient — which
+         * is what every existing row is, so the default must stay null rather
+         * than copying gradient_to.
+         */
+        gradient_via: {
+            type: DataTypes.STRING(9),
             allowNull: true,
         },
+        /** Custom background: where the uploaded design sits. */
+        background_position: {
+            type: DataTypes.STRING(20),
+            allowNull: false,
+            defaultValue: 'center',
+        },
+        /** Custom background: percent scale of the uploaded design. */
+        image_size: {
+            type: DataTypes.INTEGER,
+            allowNull: false,
+            defaultValue: 100,
+        },
+        /**
+         * Whether the tinted overlay is drawn at all.
+         *
+         * Separate from `overlay_opacity` because the design gives it its own
+         * switch: turning the overlay off and later back on has to restore the
+         * percentage the user chose, which a single "opacity 0 means off"
+         * field cannot do.
+         */
+        overlay_enabled: {
+            type: DataTypes.BOOLEAN,
+            allowNull: false,
+            defaultValue: false,
+        },
+        /**
+         * Overlay tint. Null = the black the preview has always used, so
+         * existing rows are unchanged.
+         */
+        overlay_color: {
+            type: DataTypes.STRING(9),
+            allowNull: true,
+        },
+        /** Traditional custom backgrounds only: how the artwork is treated. */
+        artwork_style: {
+            type: DataTypes.STRING(20),
+            allowNull: true,
+        },
+
         // 0-100. Darkens the background so the invitation text stays readable.
         overlay_opacity: {
             type: DataTypes.INTEGER,
@@ -184,11 +250,6 @@ module.exports = (sequelize) => {
         /** Step 2's Border / Frame Style — real uploaded artwork. */
         frame_style_id: {
             type: DataTypes.INTEGER.UNSIGNED,
-            allowNull: true,
-        },
-        /** Legacy string list (roses, gold-leaf…). Superseded by decoration_ids. */
-        decorations: {
-            type: DataTypes.JSON,
             allowNull: true,
         },
         /** Step 2's Decorations — ids into `decorations`, in display order. */

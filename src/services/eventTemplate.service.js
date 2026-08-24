@@ -36,9 +36,14 @@ const WRITABLE_FIELDS = [
     'layout_style', 'background_type', 'background_color', 'secondary_color',
     'background_image', 'gradient_from', 'gradient_to',
     'gradient_type', 'gradient_direction', 'image_shape', 'corner_radius',
-    'custom_css',
+    // Per-layout-style step 2 fields. Whitelisted for every layout style, not
+    // only the ones whose form shows them — the form decides what is OFFERED,
+    // the service decides what is LEGAL, and tying the two together would mean
+    // a template silently dropping data the moment its layout style changed.
+    'image_position', 'image_scale', 'gradient_via', 'background_position',
+    'image_size', 'overlay_enabled', 'overlay_color', 'artwork_style',
     'overlay_opacity', 'orientation', 'dimension', 'primary_font',
-    'secondary_font', 'border_style', 'frame_style_id', 'decorations', 'decoration_ids',
+    'secondary_font', 'border_style', 'frame_style_id', 'decoration_ids',
     // step 3
     'components', 'component_order',
     // step 4
@@ -99,6 +104,28 @@ const GRADIENT_DIRECTIONS = [
 ];
 
 const IMAGE_SHAPES = ['rectangle', 'square', 'circle', 'heart', 'arch'];
+
+/**
+ * The nine-way placement grid, shared by `image_position` (Image backgrounds)
+ * and `background_position` (Custom backgrounds).
+ *
+ * One list for both because they mean the same thing and are drawn by the same
+ * control — some layout styles render it as a 3x3 grid of arrows, others as a
+ * dropdown. Two lists would drift.
+ *
+ * MUST stay identical to `POSITIONS` in the frontend constants.
+ */
+const POSITIONS = [
+    'top-left', 'top', 'top-right',
+    'left', 'center', 'right',
+    'bottom-left', 'bottom', 'bottom-right',
+];
+
+/** How the picture fills its box. Maps 1:1 to CSS `object-fit`/`background-size`. */
+const IMAGE_SCALES = ['cover', 'contain', 'fill', 'auto'];
+
+/** Traditional custom backgrounds. */
+const ARTWORK_STYLES = ['full-bleed', 'patterned', 'illustration', 'textured'];
 
 const PLAN_AVAILABILITY = ['all', 'selected', 'trial'];
 const AUDIENCES = ['individual', 'company'];
@@ -304,14 +331,52 @@ const pickWritable = (data = {}) => {
     if (payload.corner_radius !== undefined) {
         payload.corner_radius = clampInt(payload.corner_radius, 0, 100, 0);
     }
+    if (payload.image_position !== undefined) {
+        payload.image_position = oneOf(payload.image_position, POSITIONS, 'center');
+    }
+    if (payload.background_position !== undefined) {
+        payload.background_position = oneOf(payload.background_position, POSITIONS, 'center');
+    }
+    if (payload.image_scale !== undefined) {
+        payload.image_scale = oneOf(payload.image_scale, IMAGE_SCALES, 'cover');
+    }
+    /**
+     * The third gradient stop is genuinely optional, so an empty value has to
+     * survive as NULL. `toHex` on '' would otherwise hand back a default and a
+     * two-stop gradient would silently become three.
+     */
+    if (payload.gradient_via !== undefined) {
+        const via = String(payload.gradient_via ?? '').trim();
+        payload.gradient_via = via ? toHex(via) : null;
+    }
+    if (payload.overlay_color !== undefined) {
+        const tint = String(payload.overlay_color ?? '').trim();
+        payload.overlay_color = tint ? toHex(tint) : null;
+    }
+    if (payload.image_size !== undefined) {
+        // 10-400%. Below 10 the design is invisible and reads as a broken
+        // upload; above 400 a single pixel fills the card.
+        payload.image_size = clampInt(payload.image_size, 10, 400, 100);
+    }
+    if (payload.overlay_enabled !== undefined) {
+        payload.overlay_enabled = toBit(payload.overlay_enabled, 0);
+    }
+    /**
+     * Unlike the others this one stays NULL when unrecognised rather than
+     * falling back to a default. Only Traditional offers it, so a value
+     * arriving from any other layout style means it was not chosen — writing
+     * 'full-bleed' there would invent a decision nobody made.
+     */
+    if (payload.artwork_style !== undefined) {
+        const art = String(payload.artwork_style ?? '').trim().toLowerCase();
+        payload.artwork_style = ARTWORK_STYLES.includes(art) ? art : null;
+    }
     if (payload.orientation !== undefined) {
         payload.orientation = oneOf(payload.orientation, ORIENTATIONS, 'portrait');
     }
-    if (payload.decorations !== undefined) payload.decorations = toStringList(payload.decorations, { max: 24 });
     for (const key of ['background_image', 'thumbnail', 'dimension', 'primary_font', 'secondary_font', 'border_style']) {
         if (payload[key] !== undefined) payload[key] = String(payload[key] ?? '').trim() || null;
     }
-    if (payload.custom_css !== undefined) payload.custom_css = String(payload.custom_css ?? '').trim() || null;
 
     /* step 3 */
     if (payload.components !== undefined) payload.components = toFlagMap(payload.components, COMPONENT_KEYS, 1);
@@ -378,7 +443,6 @@ const shape = (row) => {
     const plain = row && row.toJSON ? row.toJSON() : { ...row };
 
     plain.tags = Array.isArray(plain.tags) ? plain.tags : [];
-    plain.decorations = Array.isArray(plain.decorations) ? plain.decorations : [];
     plain.plan_ids = Array.isArray(plain.plan_ids) ? plain.plan_ids : [];
     plain.available_for = Array.isArray(plain.available_for) && plain.available_for.length
         ? plain.available_for

@@ -67,7 +67,6 @@ const TEMPLATES = [
         background_color: '#FFF7F0', secondary_color: '#8A6A3B',
         overlay_opacity: 30, border_style: 'ornate',
         primary_font: 'Playfair Display', secondary_font: 'Poppins',
-        decorations: ['roses', 'gold-leaf'],
         is_featured: 1, sort_order: 1,
     },
     {
@@ -81,7 +80,6 @@ const TEMPLATES = [
         background_color: '#2B1B3D', secondary_color: '#C9A227',
         overlay_opacity: 45, border_style: 'ornate',
         primary_font: 'Cinzel', secondary_font: 'Lora',
-        decorations: ['mandala', 'gold-leaf'],
         is_featured: 1, sort_order: 2,
     },
     {
@@ -95,7 +93,6 @@ const TEMPLATES = [
         background_color: '#F7F5EF', secondary_color: '#6B7A8F',
         overlay_opacity: 25, border_style: 'arch',
         primary_font: 'Cormorant Garamond', secondary_font: 'Montserrat',
-        decorations: ['greenery'],
         sort_order: 3,
     },
     {
@@ -109,7 +106,6 @@ const TEMPLATES = [
         background_color: '#FBFDFA', secondary_color: '#4E6B52',
         overlay_opacity: 15, border_style: 'corners',
         primary_font: 'Marcellus', secondary_font: 'Inter',
-        decorations: ['greenery'],
         // Deliberately restrictive, so the client portal's permission gating has
         // something real to demonstrate rather than every template allowing all.
         permissionOverrides: { decoration_elements: 0, social_icons: 0 },
@@ -126,7 +122,6 @@ const TEMPLATES = [
         background_color: '#FFF3E6', secondary_color: '#E14B6A',
         overlay_opacity: 20, border_style: 'none',
         primary_font: 'Poppins', secondary_font: 'Inter',
-        decorations: ['sparkle', 'ribbon'],
         // A birthday invitation has no organiser or QR the way a managed event
         // does, so those are off — a template whose every switch is on is not a
         // template, it is a default.
@@ -144,7 +139,6 @@ const TEMPLATES = [
         background_color: '#FFFBF0', secondary_color: '#B8860B',
         overlay_opacity: 25, border_style: 'floral-top',
         primary_font: 'Great Vibes', secondary_font: 'Lora',
-        decorations: ['gold-leaf', 'ribbon'],
         sort_order: 6,
     },
     {
@@ -159,7 +153,6 @@ const TEMPLATES = [
         background_color: '#0F1E3D', secondary_color: '#3B82F6',
         overlay_opacity: 55, border_style: 'none',
         primary_font: 'Montserrat', secondary_font: 'Inter',
-        decorations: [],
         // A conference badge is not a wedding invitation: no couple, no
         // religious decoration, and the QR is the entire point.
         componentOverrides: { host_names: 0, decoration_elements: 0, event_photos: 0 },
@@ -177,7 +170,6 @@ const TEMPLATES = [
         background_color: '#F4F6F8', secondary_color: '#1F2937',
         overlay_opacity: 10, border_style: 'corners',
         primary_font: 'Inter', secondary_font: 'Inter',
-        decorations: [],
         componentOverrides: { host_names: 0, decoration_elements: 0, social_icons: 0 },
         sort_order: 8,
     },
@@ -192,7 +184,6 @@ const TEMPLATES = [
         background_color: '#3B0A45', secondary_color: '#F5A623',
         overlay_opacity: 40, border_style: 'ornate',
         primary_font: 'Cinzel', secondary_font: 'Poppins',
-        decorations: ['mandala', 'sparkle'],
         sort_order: 9,
     },
     {
@@ -206,7 +197,6 @@ const TEMPLATES = [
         background_color: '#F6FBF4', secondary_color: '#5B8C5A',
         overlay_opacity: 20, border_style: 'arch',
         primary_font: 'Dancing Script', secondary_font: 'Montserrat',
-        decorations: ['greenery', 'roses'],
         sort_order: 10,
     },
 ];
@@ -346,7 +336,6 @@ async function uploadToStorage(name, { buffer, mimetype }) {
             primary_font: t.primary_font,
             secondary_font: t.secondary_font,
             border_style: t.border_style,
-            decorations: t.decorations,
 
             components: allOn(COMPONENT_KEYS, t.componentOverrides),
             component_order: [...COMPONENT_KEYS],

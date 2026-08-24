@@ -51,15 +51,25 @@ const COMPANY_ID = 1;
 /* ------------------------------------------------------------ the artwork -- */
 
 /**
- * Every frame is drawn on the same 600x800 canvas with `preserveAspectRatio`
- * left at its default, so `object-fill` in the preview stretches it to whatever
- * card it is laid over — which is what a border has to do.
+ * Every frame is drawn on the same 600x800 canvas.
+ *
+ * ⚠ `preserveAspectRatio="none"` IS LOAD-BEARING. It was previously left at the
+ * default in the belief that `object-fit: fill` on the preview's <img> would
+ * stretch the frame to the card. It does not: `object-fit` stretches the
+ * element's replaced-content BOX, but the SVG's own preserveAspectRatio still
+ * decides how the drawing maps into that box, and the default `xMidYMid meet`
+ * scales it uniformly and centres it.
+ *
+ * The result on a 9:16 card was 55px letterbox bands top and bottom — the frame
+ * sat 3.8% in horizontally but 14.7% in vertically, so the invitation's first
+ * and last lines rendered OUTSIDE the border. `none` makes the drawing stretch
+ * with the box, which is what a frame wrapping an arbitrary card has to do.
  *
  * `fill="none"` on the backdrop is the whole point: the middle must stay
  * transparent or the frame hides the invitation.
  */
 const canvas = (body) =>
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 800" width="600" height="800">` +
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 800" width="600" height="800" preserveAspectRatio="none">` +
     `<rect width="600" height="800" fill="none"/>${body}</svg>`;
 
 const GOLD = '#C9A227';
