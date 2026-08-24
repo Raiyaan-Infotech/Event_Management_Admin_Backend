@@ -75,10 +75,12 @@ const PALETTE = {
 /**
  * Mirrors STEP2_FIELDS in src/hooks/use-event-templates.ts.
  *
- * Modern intentionally repeats Elegant: no Modern mockup was ever supplied, and
- * the frontend matrix says the same thing in the same words.
+ * All five layout styles are now built from supplied screens; none is a stand-in
+ * for another. Keep this table and the frontend one identical — the matrix test
+ * parses both and fails on any difference.
  */
-const IMAGE_FIELDS_MODERN = ['image_upload', 'image_position_menu', 'image_scale', 'image_overlay'];
+/** Elegant and Minimal share this one — both use the dropdown, not the grid. */
+const IMAGE_FIELDS_MENU = ['image_upload', 'image_position_menu', 'image_scale', 'image_overlay'];
 const GRADIENT_FIELDS_3 = ['gradient_type', 'gradient_direction', 'gradient_3', 'gradient_presets', 'overlay'];
 
 const CELLS = {
@@ -89,20 +91,23 @@ const CELLS = {
         custom: ['image_upload', 'shape', 'corner_radius', 'overlay', 'primary_colors'],
     },
     modern: {
-        color: ['bg_colors', 'overlay'],
-        image: IMAGE_FIELDS_MODERN,
+        // Modern's Colour tab is the one Colour tab that differs: a swatch row,
+        // a position control, and the overlay as a switch.
+        color: ['bg_color_presets', 'bg_position_grid', 'overlay_toggle'],
+        // Grid, not the dropdown Elegant and Minimal use.
+        image: ['image_upload', 'image_position_grid', 'image_scale', 'image_overlay'],
         gradient: GRADIENT_FIELDS_3,
         custom: ['image_upload', 'shape', 'bg_position_grid', 'image_size_slider', 'overlay_toggle'],
     },
     elegant: {
         color: ['bg_colors', 'overlay'],
-        image: IMAGE_FIELDS_MODERN,
+        image: IMAGE_FIELDS_MENU,
         gradient: GRADIENT_FIELDS_3,
         custom: ['image_upload', 'shape', 'bg_position_grid', 'image_size_slider', 'overlay_toggle'],
     },
     minimal: {
         color: ['bg_colors', 'overlay'],
-        image: IMAGE_FIELDS_MODERN,
+        image: IMAGE_FIELDS_MENU,
         gradient: GRADIENT_FIELDS_3,
         custom: ['image_upload', 'bg_position_menu', 'image_size_slider', 'overlay_toggle', 'shape'],
     },
@@ -123,6 +128,8 @@ const CELLS = {
  */
 const WRITERS = {
     bg_colors: (p) => ({ background_color: p.bg, secondary_color: p.accent }),
+    // Modern's swatch row writes the same column the plain hex field does.
+    bg_color_presets: (p) => ({ background_color: p.bg }),
     primary_colors: (p) => ({ background_color: p.bg, secondary_color: p.accent }),
     accent_color: (p) => ({ secondary_color: p.accent }),
     overlay: () => ({ overlay_opacity: 25 }),
