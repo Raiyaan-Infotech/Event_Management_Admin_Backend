@@ -16,6 +16,12 @@ router.use(extractCompanyContext);
 router.get('/stats', hasPermission('decorations.view'), controller.getStats);
 router.patch('/reorder', hasPermission('decorations.edit'), controller.reorder);
 
+// Also before `/:id`, for the same reason. `svg-source` only READS the file the
+// editor already renders, so it sits under view; `recolor` writes a new file to
+// storage, so it needs edit.
+router.get('/svg-source', hasPermission('decorations.view'), controller.getSvgSource);
+router.post('/recolor', hasPermission('decorations.edit'), controller.recolor);
+
 router.get('/', hasPermission('decorations.view'), controller.getAll);
 router.get('/:id', hasPermission('decorations.view'), controller.getById);
 
