@@ -6226,3 +6226,354 @@ backend                     loads clean
 5. `EVENT_QR_SECRET` still unset on Render (§232.4, §236.3).
 6. `FRONTEND_URL` on Render still lacks the public-website and client-portal origins
    (§235, §236.3).
+
+---
+
+## Session 23 — Step 2 becomes per-layout-style, and a preview that had never been legible
+
+> **Date:** 2026-08-24 | **Backend:** `Event_Management_Admin_Backend`
+> **Frontend:** `Event_Management_Admin_Frontend`
+> Four things: a corrupted git repo recovered, step 2 rebuilt as a field matrix,
+> eight new columns applied to production, and a run of preview bugs that had
+> been there since the module shipped. **Schema applied to production.**
+
+### 249. ⚠ The repo was broken, and it looked like "all files are new"
+
+Reported as "why does everything show as newly created". `git log` said
+`fatal: your current branch appears to be broken`.
+
+`.git/refs/heads/main` — the 41-byte file holding the branch SHA — contained
+**41 NUL bytes**:
+
+```
+0000000  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0
+*
+0000040  \0  \0  \0  \0  \0  \0  \0  \0  \0
+```
+
+Git could not resolve HEAD, fell back to "repo has no commits", and with no
+commit to diff against every file in the index read as `A` — all 345 of them.
+`refs/remotes/origin/main` was zeroed the same way.
+
+**Cause: a hard shutdown while git was writing those refs.** The mtime on the
+broken ref is the same second as `.git/index` and `.git/COMMIT_EDITMSG` — it
+died *during* that commit. Known Windows/NTFS failure mode; nothing git or
+anyone did wrong.
+
+**Only the pointers were damaged.** Every object was intact. Recovery:
+
+```
+1. read .git/logs/refs/heads/main   <- the reflog FILE, readable even when
+                                       `git reflog` itself cannot run
+2. cross-check against COMMIT_EDITMSG
+3. git cat-file -t <sha>            <- prove the object exists BEFORE touching
+4. rm the corrupt ref, git update-ref   (update-ref refuses to lock a broken ref)
+5. delete the corrupt loose origin/main -> packed-refs value takes over
+6. git fetch                        -> origin/main 213590a..3e30ace
+```
+
+`0 0` ahead/behind afterwards: **the last commit had already reached GitHub**
+before the crash. All five frontend repos were checked and were healthy — only
+the backend was mid-write.
+
+> The lesson worth keeping is step 3: never write a recovered SHA without
+> proving the object resolves first.
+
+### 250. Step 2 is a MATRIX now, not twenty branches
+
+Five layout styles x four background types, each supplied as its own mockup.
+Written as nested conditionals that is unreadable and impossible to check
+against the designs, so the field list is data:
+
+```
+STEP2_FIELDS  src/hooks/use-event-templates.ts   (frontend, decides what RENDERS)
+CELLS         event-templates-matrix.seeder.js   (backend, decides what sample data WRITES)
+```
+
+The wizard renders whatever the matrix names, **in the order it names it**.
+Adding a style or moving a control is an edit to that table, not to JSX.
+
+**What is deliberately NOT in the matrix:** Orientation, Dimension, both fonts,
+Border / Frame Style and Decorations. Identical in every mockup, so they render
+once outside and cannot drift between styles. This was the user's explicit
+instruction — "decoration and border frame style same as classic for all".
+
+The five rows as built (all from supplied screens; none is a stand-in):
+
+| | color | image | gradient | custom |
+|---|---|---|---|---|
+| classic | bg_colors · overlay | upload · overlay · bg_colors | 2-stop + accent | shape · corner_radius |
+| elegant | bg_colors · overlay | position **menu** | 3-stop | shape · bg_pos grid · size slider |
+| minimal | bg_colors · overlay | position **menu** | 3-stop | bg_pos **menu** · size slider |
+| traditional | bg_colors · overlay | position **grid** | 3-stop | **artwork_style** · size **menu** |
+| modern | **swatch row · bg_pos grid · overlay switch** | position **grid** | 3-stop | shape · bg_pos grid · size slider |
+
+Modern is the odd one out twice over: the only Colour tab that differs from the
+others, and the only style using the position GRID on Image while Elegant and
+Minimal use the dropdown.
+
+### 251. Eight new columns, and two dead ones dropped
+
+```
+gradient_via         optional third gradient stop. NULL = two-stop
+image_position       nine-way, background_type = image
+image_scale          cover|contain|fill|auto
+background_position  nine-way, background_type = custom
+image_size           percent, 10-400
+overlay_enabled      whether the tint draws at all
+overlay_color        tint. NULL = the black the preview always used
+artwork_style        Traditional custom only
+```
+
+**Every default reproduces the OLD rendering** — `center`, `cover`, `100`,
+overlay off, nulls — so all existing templates render identically.
+
+They are columns on EVERY row, not only the styles whose form shows them: a
+template can be switched between layout styles and back, and blanking a column
+on switch would throw away work the previous style saved. Whitelisting follows
+the same rule — **the form decides what is OFFERED, the service decides what is
+LEGAL.**
+
+**Dropped, because nothing read them:**
+
+- `custom_css` — superseded by Upload Design + Image Shape. Stored and
+  whitelisted; no renderer ever evaluated it.
+- `decorations` — the legacy string list. The preview reads `decorationItems`
+  resolved from `decoration_ids` and never touched this column.
+
+The compiler found every consumer once the TS types were cut. A leftover
+`plain.decorations = []` in the service's read `shape()` was still emitting the
+key after the column was gone — caught by the round-trip test, not by reading.
+
+### 252. `tests/template-matrix.test.js` — 65 assertions, and it earns its keep
+
+Two hand-maintained copies of the same table drift the first time somebody edits
+one. So the test **parses the real TypeScript** rather than trusting a duplicate:
+
+```
+1. regex STEP2_FIELDS out of use-event-templates.ts
+2. `new Function` the seeder's CELLS/WRITERS out of the .js
+3. assert the 20 cells are identical
+4. assert every seeded row carries the fields its cell promised, NON-DEFAULT
+5. assert no row carries a field its form never shows
+6. assert custom_css / decorations are really gone
+```
+
+Proven non-vacuous: deleting `image_scale` from `traditional/image` in the
+frontend failed it with a precise diff, then restoring passed again. It has since
+caught real drift twice — both times when only one of the two matrices was edited.
+
+> ⚠ **Step 4 needs a "default is also a real choice" allowlist.** `gradient_type`
+> defaults to `'linear'` and the mockups all show Linear selected, so "chosen" and
+> "untouched" are the same bytes. Seeding `'radial'` to make the test green would
+> hide the Direction control and leave every gradient row carrying a direction its
+> own form would not show. Presence-and-validity is the strongest TRUE assertion
+> there.
+
+### 253. The matrix seeder — 20 rows, one per cell
+
+`event-templates-matrix.seeder.js`, alongside (not replacing) the catalogue
+seeder. That one makes nine browsable templates, all `background_type: image` —
+the right shape for a demo and the wrong shape for proving the form works.
+
+- **Generated SVG, not Unsplash.** Pushed through the same `media.service` the
+  admin uploader uses, so it needs no network beyond S3 and cannot fail because
+  a photo id went away (§242's reasoning).
+- **Every seeded value is deliberately non-default**, so §252.4 can tell "saved"
+  from "happens to hold its default".
+- `--replace` purges first, with `force: true` — a paranoid soft delete leaves
+  `code` taken and the next run collides on all twenty.
+
+### 254. PRODUCTION MIGRATED
+
+```
+BEFORE   event_templates rows 0     <- nothing lost by the two DROPs
+         missing: all 8 new columns
+AFTER    NEW  artwork_style background_position gradient_via image_position
+              image_scale image_size overlay_color overlay_enabled
+         DEAD custom_css, decorations — both dropped
+         replay x2 -> idempotent
+schema-audit  MISSING TABLES: none · MISSING COLUMNS: none
+```
+
+> ⚠ **`ANSI,ANSI_QUOTES` again** (§233, §246 — third outing). Production's
+> sql_mode was confirmed BEFORE applying and cleared outright:
+> `SET SESSION sql_mode = ''`. ANSI implies ANSI_QUOTES, so stripping only
+> ANSI_QUOTES is not enough, and every `COMMENT "..."` in the DDL would have
+> parsed as an identifier.
+
+### 255. ⚠ The preview had never been legible on a dark template
+
+`ink` was **hardcoded** `'#3A2C22'`, a dark brown, regardless of background.
+Three of the five seeded palettes are dark — Modern `#0F172A`, Elegant
+`#2B1B3D`, Traditional `#8B0E1A` — so they rendered dark-brown-on-dark. The
+overlay made it worse by darkening the backdrop without the text knowing.
+
+Now derived: work out the backdrop (gradient stops averaged, else the
+background colour), composite the overlay onto it exactly as the layer below
+paints it, then pick the ink.
+
+> **Pick by COMPARING CONTRAST, never by thresholding luminance.** The first
+> attempt used a 0.42 threshold and got mid-tones wrong in a measurable way —
+> `classic-gradient` was handed light ink at **2.6:1** when dark would have given
+> **4.4:1**. Comparing the two candidates costs the same and cannot be
+> miscalibrated.
+
+```
+meets WCAG AA (4.5:1)   before 8/20   after 19/20
+worst case              1.1:1 (invisible)  ->  3.5:1
+```
+
+The one remaining, `traditional-gradient`, averages to a mid tan that NEITHER
+ink can beat. That is a property of the colour, not a bug to code around — the
+Overlay control is the remedy, which is what it is for.
+
+### 256. `secondary_color` is the accent, and it was drawn as text unchecked
+
+Same class of bug, missed on the first pass. `accent` paints the invite line,
+the ampersand, the QR label and every small stroke — and it is a freely chosen
+colour, so nothing stops it landing near the background. A pale khaki accent on
+an orange card measured **1.41:1**.
+
+Three values now, not one:
+
+```
+accent      as picked          the card's own large border
+accentInk   >= 4.5:1           anything carrying WORDS
+accentLine  >= 3:1             small strokes and icons (WCAG non-text bar)
+```
+
+**Hue and saturation are preserved** — only lightness moves, and only until the
+target is met, so it still reads as the colour that was picked. `#D1D094` ->
+`#3E3E1B`, hue 59deg -> 60deg. It returns early when the colour already passes:
+four seeded accents at 6-8.9:1 were left completely untouched.
+
+### 257. The picked colour was never the colour drawn
+
+Reported as "fix that right primary and secondary color show that". The form
+defaulted **Overlay/Shade to 25%**, so `#E89C59` was drawn as `#AE7543` and
+nothing on screen connected the muddy card to a slider further down.
+
+The overlay is a wash for making text readable OVER A PHOTOGRAPH. On Colour and
+Gradient it is redundant — any result it can produce is reachable by picking
+that colour. **Default is now 0.** The control stays on every tab as the designs
+show; it just starts off.
+
+### 258. ⚠ `object-fit: fill` does NOT stretch an SVG's contents
+
+Three attempts went into "the frame cuts through the text" before the cause was
+found, because the first two treated layout symptoms.
+
+The frame SVGs had **no `preserveAspectRatio`**, so they defaulted to
+`xMidYMid meet`. The seeder's own comment stated the assumption that was wrong:
+
+> *"preserveAspectRatio left at its default, so `object-fill` in the preview
+> stretches it"*
+
+It does not. `object-fit` stretches the element's **replaced-content box**; the
+SVG's own `preserveAspectRatio` still decides how the drawing maps into that
+box, and the default scales it uniformly and centres it.
+
+On a 9:16 card a 600x800 viewBox produced **55px letterbox bands**:
+
+```
+frame rule landed at   3.8% horiz  ·  14.7% vert
+safe area was         11.0% horiz  ·   9.0% vert
+-> the frame sat INSIDE the content area vertically, so the first and last
+   lines rendered outside the border
+```
+
+Fixed at source: `preserveAspectRatio="none"` on the canvas, all 10 frames
+regenerated and re-uploaded. Rule now lands at 3.8% / 2.9% — symmetric.
+
+**Decorations deliberately left alone.** They render at natural aspect
+(`w-2/5`, auto height), so uniform scaling is CORRECT for an ornament. Only a
+frame wrapping an arbitrary card has to stretch.
+
+### 259. The invitation is a fixed canvas — so it scales
+
+Separate from §258, and the reason the earlier "alignment" fixes did not help.
+Twelve components laid out at fixed pixel sizes inside a 248px card, centred
+with `overflow-hidden`, means content taller than the card spills EQUALLY off
+the top and bottom: the invite line disappeared off the top, the footer off the
+bottom. Widening the safe area made it worse — same content, less room.
+
+Content is now **measured and scaled to fit** (`ResizeObserver` + transform):
+
+```
+Mobile portrait   avail 193x362   natural 374px   -> scale 0.97
+Web landscape     avail 406x267   natural 374px   -> scale 0.71
+```
+
+> Two properties that make this correct rather than merely working:
+> **the measurement cannot chase itself** — a CSS transform does not affect
+> layout, so `scrollHeight` stays the UNSCALED height; and **the observer cannot
+> loop** for the same reason. Both box and content are observed, so a web font
+> finishing loading and changing every line height is caught too.
+> Floored at 0.45: below that the honest answer is that too much is switched on.
+
+### 260. Smaller preview corrections
+
+- **`divider` had no render branch at all.** A real, seeded placement — two
+  active decorations use it — that ticked the checkbox, saved cleanly and drew
+  nothing. Added; and NOT full width like `top`/`bottom`, because a stretched
+  divider puts its end ornaments out at the margins where they read as two
+  unrelated shapes floating either side of the content.
+- **Content padding is edge-aware**, then percentage-based. Decorations sit
+  UNDER the content, so a fixed `p-5` put the first line onto a top decoration.
+  ⚠ Applied by absolute insets, not padding: **CSS percentage padding resolves
+  against WIDTH on all four sides**, so `padding-top: 8%` on a 9:16 card is 8%
+  of the width.
+- **Fallback Border removed** (§248 follow-on). Its hidden default was
+  `border_style: 'ornate'`, which with the picker gone could not be seen or
+  changed — a new template silently saved and rendered a border nobody chose.
+  Now defaults to empty; the frame artwork is the only border mechanism.
+- **The detail page showed the legacy list** — `decorations` strings and
+  `border_style` — while a real frame was set. Now shows `frameStyle.name` and
+  the resolved decoration names.
+
+### 261. Verified
+
+```
+template matrix (drift + data)   65/65
+frame styles + categories        30/30
+event-templates API (HTTP)       39 PASS · 0 FAIL
+new fields over HTTP             16/16   create -> read -> update -> clamp/reject
+service round-trip               21/21
+contrast audit                   19/20 AA (the 20th documented in §255)
+frames stretching                10/10
+schema-audit                     MISSING TABLES: none · MISSING COLUMNS: none
+prod replay x2                   idempotent
+tsc --noEmit                     admin frontend clean · client portal clean
+backend                          loads clean
+```
+
+Files: backend 7 changed (+807/-31), frontend 4 changed (+1658/-392).
+
+### 262. Open — carried to next session
+
+1. **⚠ The upload widget has three visual variants across the mockups and one
+   implementation.** Classic/Minimal show a dropzone panel, Elegant and
+   Modern-Custom a file chip (`modern-bg-artwork.jpg · 1920 x 2560 px · JPG`),
+   Modern-Image a thumbnail plus Change/Remove buttons. The chip needs filename,
+   dimensions and byte size **stored on upload** — `background_image` is a bare
+   URL today and deriving them means a HEAD request per row per page load
+   (§241's reasoning). New columns, so it was not done unasked.
+2. **Gradient Direction still has 8 arrows**, the mockups show 4-6 depending on
+   the style. Unchanged for §244's reason: the preview's default runs downward,
+   and without the downward arrows every existing gradient template would show
+   nothing selected.
+3. **Modern's Colour tab has no Secondary Color field**, per its mockup. That
+   colour still paints the divider ornament and QR label, so on that one tab it
+   keeps whatever it holds and cannot be edited there. Same shape as the accent
+   question on Gradient, which WAS given a field (§250).
+4. **⚠ `event_templates` permissions are not granted to the admin role.** All
+   four (`view`/`create`/`edit`/`delete`) exist as rows but were attached to no
+   role — the API test 403'd until they were granted **locally**. Production was
+   NOT touched; if the live admin role has the same gap the Templates module is
+   unusable there. Worth checking first thing.
+5. `layout_style` now has a real consequence (§250) — §248.3 is cleared.
+6. **`initial_setup.sql` is still ~46 tables behind production** (§233.1).
+7. `EVENT_QR_SECRET` still unset on Render (§232.4, §236.3).
+8. `FRONTEND_URL` on Render still lacks the public-website and client-portal
+   origins (§235, §236.3).

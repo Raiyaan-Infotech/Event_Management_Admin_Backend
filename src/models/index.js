@@ -414,4 +414,22 @@ db.SubscriptionPlan.belongsToMany(db.PlanBadge, {
 db.SubscriptionPlan.belongsTo(db.PlanBadge, { foreignKey: 'plan_badge_id', as: 'planBadge' });
 db.PlanBadge.hasMany(db.SubscriptionPlan, { foreignKey: 'plan_badge_id', as: 'badgedPlans' });
 
+// Email System Relationships
+db.EmailTemplate.belongsTo(db.EmailConfig, { foreignKey: 'email_config_id', as: 'email_config' });
+db.EmailConfig.hasMany(db.EmailTemplate, { foreignKey: 'email_config_id', as: 'templates' });
+db.EmailTemplate.belongsTo(db.EmailTemplate, { foreignKey: 'header_id', as: 'header' });
+db.EmailTemplate.belongsTo(db.EmailTemplate, { foreignKey: 'footer_id', as: 'footer' });
+
+db.EmailCampaign.belongsTo(db.EmailTemplate, { foreignKey: 'email_template_id', as: 'template' });
+db.EmailTemplate.hasMany(db.EmailCampaign, { foreignKey: 'email_template_id', as: 'campaigns' });
+db.EmailCampaign.belongsTo(db.EmailConfig, { foreignKey: 'email_config_id', as: 'email_config' });
+db.EmailConfig.hasMany(db.EmailCampaign, { foreignKey: 'email_config_id', as: 'campaigns' });
+
+db.EmailQueue.belongsTo(db.EmailCampaign, { foreignKey: 'campaign_id', as: 'campaign' });
+db.EmailQueue.belongsTo(db.EmailTemplate, { foreignKey: 'template_id', as: 'template' });
+db.EmailQueue.belongsTo(db.EmailConfig, { foreignKey: 'email_config_id', as: 'config' });
+
+db.EmailSentLog.belongsTo(db.EmailCampaign, { foreignKey: 'campaign_id', as: 'campaign' });
+db.EmailSentLog.belongsTo(db.EmailTemplate, { foreignKey: 'template_id', as: 'template' });
+
 module.exports = db;
