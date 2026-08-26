@@ -6577,3 +6577,266 @@ Files: backend 7 changed (+807/-31), frontend 4 changed (+1658/-392).
 7. `EVENT_QR_SECRET` still unset on Render (§232.4, §236.3).
 8. `FRONTEND_URL` on Render still lacks the public-website and client-portal
    origins (§235, §236.3).
+
+## Session 24 — The clone verified and seeded, decorations get colour, and three bugs that only appear at runtime
+
+> **Date:** 2026-08-25 | **Backend:** `Event_Management_Admin_Backend`
+> **Frontend:** `Event_Management_Admin_Frontend`
+> **Also:** `New_Project_Backend` / `New_Project_Frontend` (port 5002 / 3006, DB `new_event_db`)
+> A cloned copy of the whole stack was checked rather than assumed, its database
+> seeded, and `initial_setup.sql` found to be missing four tables. Then the
+> decoration module: a placement preview, recolouring built with **no library**,
+> and three bugs that no type-checker could have caught.
+
+### 263. The clone is a real clone — measured, not assumed
+
+`D:\Jamal\New_Project_Backend` + `New_Project_Frontend`, a copy of the admin
+stack pointed at `new_event_db` on ports 5002 / 3006.
+
+Checked by **content**, not by eye:
+
+```
+diff -rq backend/src   New_Project_Backend/src    -> 0 differing files (325 files)
+diff -rq frontend/src  New_Project_Frontend/src   -> 0 differing files (515 files)
+table names event_ vs new_event_db                -> 0 diff (137 each)
+package names, node_modules, .env wiring          -> consistent
+```
+
+⚠ **It is a SCHEMA clone, not a data clone.** Every table existed and every
+table was empty — `vendors` 13 rows in `event_`, 0 in `new_event_db`. Nothing
+about the file tree says that; only counting rows does.
+
+### 264. Seeding `new_event_db`, and the hole it exposed in `initial_setup.sql`
+
+Seeded 20 tables — login/RBAC (`users`, `modules`, `permissions`, `roles`,
+`role_permissions`), reference data, and business config.
+
+**`cities` (114,546) and `districts` (148,003) deliberately skipped.** Dumping
+them adds ~15-20 MB to a file that is committed. Consequence to know: **any
+city dropdown in that clone is empty** until they are imported separately.
+
+Two things worth keeping:
+
+- **The first import failed halfway** — `Duplicate entry '1' for users.PRIMARY`
+  — because the target tables already held partial rows from an earlier attempt.
+  Re-running an import on top of a half-import does not converge; the tables
+  were truncated with `FOREIGN_KEY_CHECKS=0` and re-imported in one pass.
+- ⚠ **`initial_setup.sql` was missing four tables**: `plan_types`,
+  `subscription_plans`, `subscription_plan_menus` and **`event_menus`**. The
+  last is a genuine breakage, not an omission — `subscription_plan_menus` has a
+  hard FK to `event_menus.id`, so on a fresh setup those 50 rows could never
+  have imported. Now 25 seed sections (was 21), spliced in after `decorations`
+  in the file's own `INSERT IGNORE` style.
+
+Verified by applying the finished file to a scratch database: **no errors**,
+correct row counts, then dropped.
+
+Zero orphan FK rows across all 22 relationships afterwards.
+
+### 265. Decoration placement was guesswork — a position preview
+
+`decorations.type` is a PLACEMENT (§ the model's own note), but nothing on the
+upload screen showed *where* a placement puts the artwork. The preview was the
+raw image on a checkerboard; you had to build a template to find out.
+
+Reading the actual render rules in `template-preview.tsx` shows why it confused:
+
+| type | where it really lands |
+|---|---|
+| `top` | full-width strip, top edge |
+| `ornament` | centred strip **also near the top**, 3/5 width — nearly the same place |
+| `bottom` | full-width strip, bottom edge |
+| `corner` | ONE image auto-mirrored into **all four corners** |
+| `motif` | dead centre, opacity 20%, behind the text |
+| `divider` | dead centre too, opacity 70%, smaller — nearly the same place |
+
+So `ornament`≈`top` and `divider`≈`motif`, and `corner` silently quadruples one
+upload. **Also: only the FIRST decoration of each type ever renders**
+(`.slice(0, 1)`) — activate two Tops and the second is silently ignored.
+
+Added a **Preview Position** modal: a mock invitation card with the upload
+placed by the same rules, copied 1:1 from the renderer so it cannot drift. Plus
+`DECORATION_TYPE_HELP`, a one-line description per type replacing the generic
+"Where it is placed on the invitation".
+
+### 266. The category tile swatch painted every tile the same olive-green
+
+Reported as "showing green gradient". Step 1's Template Style / Theme tiles:
+
+```jsx
+background: selected
+  ? `linear-gradient(140deg, ${form.background_color}, ${form.secondary_color})`
+  : undefined
+```
+
+Those are **step 2's** colour fields — nothing to do with which category the
+tile represents. At the defaults (`#FFF7F0` → `#88860B`) that is a beige-to-olive
+gradient, identical on every tile whichever one you click.
+
+Replaced with a normal selection state: muted swatch, tint + check badge when
+selected, matching the frame/decoration pickers.
+
+### 267. Layout Style was a hardcoded five against a live category table
+
+Step 1 reads `template_categories` from the database. Step 2's Layout Style was
+`LAYOUT_STYLES` — five hardcoded entries. The two lists were independent, so
+Royal and Floral (real, active, ids 79/80) were pickable in step 1 and **absent**
+in step 2, which is the "both data showing dif" report.
+
+⚠ **The first fix was wrong and was reverted.** Adding `royal`/`floral` to
+`LAYOUT_STYLES` (plus `STEP2_FIELDS` and `GRADIENT_PRESETS_BY_STYLE` entries)
+just moves the hardcoding down a level — the next category added breaks it again.
+
+The actual fix: **step 2 renders from the same live `styleOptions`** as step 1.
+Add a category in Template Categories and both screens update, no code change.
+`LAYOUT_STYLES` is demoted to "styles that have a BESPOKE step-2 field
+arrangement", used only by the existing `layoutStyle` fallback — a slug outside
+it falls back to `classic`'s fields and presets rather than rendering nothing.
+A developer touches that list only when a category earns its own design.
+
+### 268. Decorations can be recoloured — and it needed no library
+
+Asked for Figma-style artwork recolouring, "which lib, must be completely free".
+**Answer: none.** All 11 decorations are flat SVGs built from a handful of solid
+hex fills (Pink Floral Corner is five). Recolouring is text substitution. Colour
+picking is the native `<input type="color">` — the same control `ColorField`
+already uses. Zero dependencies added.
+
+**Why the SERVER reads the file.** The bucket sends **no
+`Access-Control-Allow-Origin`** (verified with `curl -I`), so the browser cannot
+fetch the decoration it is already displaying in order to read its palette.
+`GET /decorations/svg-source` reads it server-side and hands down the markup;
+the editor recolours a **local string** for its live preview, so dragging a
+picker costs zero requests. One file is written, on Apply.
+
+**Non-destructive.** Apply writes a NEW file and leaves the original alone.
+`POST /decorations/recolor` returns the new file but **does not touch the row** —
+the normal update saves it, so a recolour goes through the same approval path as
+any other edit instead of a back door around `checkApprovalRequired`.
+
+⚠ **The swap must be ONE pass over the original.** Chained `.replace()` calls
+re-read their own output: red→blue then blue→green turns every originally-red
+shape green. This mapping is user-supplied and routinely *is* a cycle (swapping
+two colours over). Both the server (`applyColorMap`) and the client
+(`recolorSvg`) do a single regex pass with a lookup built from the original map.
+
+`rgba(0,0,0,0.16)` shading strokes are deliberately **excluded** from the
+palette — they are shadow, not colour, and recolouring them flattens the art.
+
+**Two bugs caught only by running it:**
+
+1. **Files saved as `.svg+xml`.** `uploadDataUri` derives the extension from the
+   mime type, and `image/svg+xml` → `.svg+xml`, which no CDN serves as an image.
+   Fixed by calling `mediaService.upload` with an explicit
+   `originalname: 'x.svg'` — `generateFilename` takes the extension from there.
+2. **The hex validator checked length but not the characters.** `normaliseHex`
+   doubled any 3-char string, so the CSS name `"red"` became `#RREEDD` and was
+   accepted — it would have been written into the artwork as a colour that does
+   not exist. Added `/^[0-9a-fA-F]+$/`.
+
+**SSRF.** The endpoint takes a URL from the client and the server fetches it.
+Allow-list is (a) the configured storage base, plus (b) a URL that is already a
+`file_url` on a decoration row — (b) is required because storage settings are
+per-environment and the local DB has them **blank** while carrying production
+CloudFront URLs, which would otherwise make every existing decoration
+un-editable locally. (b) is still gated on `isInternalHost`, since `file_url` is
+a free-text column. Residual, documented: a public name that *resolves* to a
+private address still passes; closing that needs IP checks inside the connect
+handshake.
+
+### 269. ⚠ `bodyTransform` mangles hex when hex is an object KEY
+
+Runtime error: `"#4_a7_a42" → "#47E22C" is not a pair of hex colours.`
+
+`bodyTransform` camelCase→snake_cases **every** request-body key and cannot tell
+a colour from a field name. `camelToSnake('#4A7A42')` → `#4_a7_a42`. The
+recolour payload had used hex values as object keys.
+
+**Rule: never put user data in a request-body KEY.** Only keys are rewritten, so
+the fix is a **list of `{ from, to }` pairs** — the colours ride as VALUES under
+fixed lowercase keys. Proven by pushing both shapes through the real middleware:
+
+```
+old  { "#4A7A42": "#47E22C" }              -> {"#4_a7_a42":"#47E22C"}   (the bug)
+new  [{ from:"#4A7A42", to:"#47E22C" }]    -> unchanged, recolour succeeds
+```
+
+Same trap as §"bodyTransform snake_case" — but that one is about *reading*
+snake_case in controllers. This is the other half: **data that must survive the
+transform cannot be a key at all.**
+
+### 270. `PageLoader` was never actually a full-page loader
+
+Reported as "showing loader okay then it showing also template as well", then
+"it not show actual full page loader".
+
+```jsx
+<div className="fixed inset-0 z-[9999] ... bg-background/80 backdrop-blur-sm">
+```
+
+**80% opaque with a blur** — the page behind it stays legible. That is fine for
+a normal page load ("this screen is busy, here is what you are waiting for") and
+wrong for an action that REPLACES what is on screen: the old artwork shows
+through, so the loader and a stale result appear together.
+
+Added an opt-in **`solid`** prop (`bg-background`, no transparency). Opt-in and
+not the new default because **153 files render this component** — flipping all
+of them is a change nobody asked for. Open question in §272.
+
+Also fixed while in there: the list-load overlay is now gated on
+`isLoading && items.length === 0`. It is `fixed inset-0`, and every surrounding
+mutation invalidates with `refetchType: 'all'`, so without the gate a routine
+background refetch blacks out the whole page long after first paint.
+
+And the follow-up flicker: Apply used to blank the swatches to "Reading
+colours…" straight after the button spinner, because the new file URL starts a
+fresh query. The client already computed the identical SVG for its preview, so
+the cache is primed via an exported `decorationSvgSourceKey(url)` — no second
+request, no second loading state.
+
+### 271. Verified
+
+```
+clone content diff        backend 325 files / frontend 515 files -> 0 differing
+clone schema diff         137 tables, 0 name differences
+initial_setup.sql         applied to a scratch DB -> no errors, correct counts
+FK orphan check           22 relationships -> 0 orphans
+recolour algorithm        4/4  swap-cycle · #RRGGBBAA vs #RRGGBB · shorthand · rgba untouched
+recolour write path       31 values replaced, valid SVG, .svg extension
+recolour validation       "red" / "zzz" / bad source rejected · lowercase key accepted
+SSRF guard                8/8 blocked (metadata, localhost, 127/10/192.168, file://,
+                          foreign host, fake path on the CORRECT CDN host)
+bodyTransform             old shape reproduces the bug · new shape survives
+tsc --noEmit              admin frontend clean
+backend                   loads clean · 3 files syntax-checked
+```
+
+Files: backend 3 changed (+364), frontend 7 changed across two commits
+(+586/-48).
+
+### 272. Open — carried to next session
+
+1. **Applying colours then NOT saving leaves an orphan file in storage.** Same
+   as uploading and abandoning, which the app already does, so no sweep was
+   added unasked.
+2. ⚠ **`recolorSvg` (client) and `applyColorMap` (server) are a MATCHED PAIR.**
+   The panel now displays the client's result as if it were the saved file
+   (§270's cache priming). They are deliberately identical single-pass
+   implementations — same regex, same `normaliseHex` including the digit test.
+   **Change one and the other must change with it.**
+3. **Should `PageLoader` be solid everywhere?** Currently opt-in via `solid`;
+   the other ~152 screens stay translucent. One-line change to flip the default,
+   left as a product decision (§270).
+4. **`new_event_db` has empty `cities` / `districts`** — every city dropdown in
+   the clone is blank until they are imported (§264).
+5. **Raster decorations have no colour editor**, by design — a PNG has no list
+   of fills to swap. Only SVG uploads get the palette.
+6. ⚠ **`event_templates` permissions are still not granted to the admin role**
+   (§262.4). Granted locally only; production untouched. Still worth checking.
+7. **`initial_setup.sql` is still ~46 tables behind production** (§233.1) — §264
+   closed four of them, not the rest.
+8. `EVENT_QR_SECRET` still unset on Render (§232.4, §236.3).
+9. `FRONTEND_URL` on Render still lacks the public-website and client-portal
+   origins (§235, §236.3).
+10. The three §262 step-2 mockup items (upload widget variants, gradient
+    direction arrow count, Modern's missing Secondary Color) are unchanged.

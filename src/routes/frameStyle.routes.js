@@ -16,6 +16,12 @@ router.use(extractCompanyContext);
 // handler goes looking for frame style number NaN (§196, §220, §228).
 router.get('/stats', hasPermission('frame_styles.view'), controller.getStats);
 
+// Also before `/:id`, for the same reason. `svg-source` only READS the file the
+// editor already renders, so it sits under view; `recolor` writes a new file to
+// storage, so it needs edit.
+router.get('/svg-source', hasPermission('frame_styles.view'), controller.getSvgSource);
+router.post('/recolor', hasPermission('frame_styles.edit'), controller.recolor);
+
 router.get('/', hasPermission('frame_styles.view'), controller.getAll);
 router.get('/:id', hasPermission('frame_styles.view'), controller.getById);
 
