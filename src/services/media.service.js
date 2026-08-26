@@ -2,7 +2,9 @@ const { S3Client, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command, D
 const { CloudFrontClient, CreateInvalidationCommand } = require('@aws-sdk/client-cloudfront');
 const path = require('path');
 const fs = require('fs');
-const { Setting } = require('../models');
+const axios = require('axios');
+const { Sequelize, Setting, Decoration, FrameStyle, EventTemplate } = require('../models');
+const { Op } = Sequelize;
 const logger = require('../utils/logger');
 const ApiError = require('../utils/apiError');
 
@@ -642,6 +644,148 @@ const renameFile = async (pathStr, newName, companyId = 1) => {
   }
 };
 
+/**
+ * Hosts the server must never be talked into fetching. Same list as the
+ * decoration/frame-style recolour SSRF guards — kept local rather than
+ * imported, since none of those services are meant to depend on each other.
+ */
+const isInternalHost = (hostname) => {
+  const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+
+  if (!host || host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.internal')) return true;
+  if (host === '::1' || host === '::' || host.startsWith('fc') || host.startsWith('fd')) return true;
+
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (!v4) return false;
+
+  const [a, b] = v4.slice(1).map(Number);
+  return (
+    a === 0 || a === 127 || a === 10
+    || (a === 169 && b === 254)          // link-local — the metadata endpoint
+    || (a === 172 && b >= 16 && b <= 31)
+    || (a === 192 && b === 168)
+  );
+};
+
+/**
+ * Whether `url` is already sitting in a `file_url` / `background_image`
+ * column somewhere this proxy is allowed to read from.
+ *
+ * Only the tables the PNG-export feature actually draws images from —
+ * widening this to every table with a URL column would turn one narrow
+ * export helper into a general "fetch any URL an admin can name" proxy.
+ */
+const isKnownUpload = async (url, companyId) => {
+  const companyWhere = (col) =>
+    companyId !== undefined && companyId !== null ? { [col]: { [Op.or]: [companyId, null] } } : {};
+
+  const [decoration, frame, template] = await Promise.all([
+    Decoration.findOne({
+      where: { file_url: url, ...companyWhere('company_id') },
+      attributes: ['id'],
+      paranoid: false,
+    }),
+    FrameStyle.findOne({
+      where: { file_url: url, ...companyWhere('company_id') },
+      attributes: ['id'],
+      paranoid: false,
+    }),
+    EventTemplate.findOne({
+      where: { background_image: url, ...companyWhere('company_id') },
+      attributes: ['id'],
+      paranoid: false,
+    }),
+  ]);
+
+  return !!(decoration || frame || template);
+};
+
+/**
+ * Fetches one of OUR uploaded files and hands it back as a data URI.
+ *
+ * Exists for canvas-based exports (the templates PNG download): the storage
+ * bucket sends no `Access-Control-Allow-Origin`, so a `<canvas>` that has
+ * drawn a decoration/frame/background image straight from its S3 URL is
+ * "tainted" and refuses `toDataURL()`/`toBlob()` with a SecurityError. The
+ * browser cannot fetch its own image to work around that either — the server
+ * has no such restriction, so this inlines it first.
+ *
+ * SSRF-guarded the same way as the decoration/frame-style recolour reads:
+ * only the CONFIGURED storage base (S3 bucket or local `/uploads/`) is
+ * accepted, never an arbitrary caller-supplied host.
+ */
+const readAsDataUri = async (fileUrl, companyId = 1) => {
+  const url = String(fileUrl || '').trim();
+  if (!url) throw ApiError.badRequest('A file URL is required.');
+
+  const config = await getMediaSettings(companyId);
+  const appUrl = (process.env.APP_URL || '').replace(/\/+$/, '');
+
+  const localPrefixes = ['/uploads/', `${appUrl}/uploads/`].filter(Boolean);
+  for (const prefix of localPrefixes) {
+    if (prefix && url.startsWith(prefix)) {
+      const relative = url.slice(prefix.length);
+      const full = path.resolve(__dirname, '../../uploads', relative);
+      const root = path.resolve(__dirname, '../../uploads');
+      if (!full.startsWith(root + path.sep)) {
+        throw ApiError.badRequest('That file path is not allowed.');
+      }
+      if (!fs.existsSync(full)) throw ApiError.notFound('That file no longer exists.');
+      const buffer = fs.readFileSync(full);
+      const ext = path.extname(full).toLowerCase();
+      const mime = ext === '.svg' ? 'image/svg+xml'
+        : ext === '.png' ? 'image/png'
+        : ext === '.webp' ? 'image/webp'
+        : (ext === '.jpg' || ext === '.jpeg') ? 'image/jpeg'
+        : 'application/octet-stream';
+      return { dataUri: `data:${mime};base64,${buffer.toString('base64')}`, contentType: mime };
+    }
+  }
+
+  const remoteBases = [
+    config.aws_url,
+    config.aws_bucket
+      ? `https://${config.aws_bucket}.s3.${config.aws_region || 'us-east-1'}.amazonaws.com`
+      : null,
+  ]
+    .filter(Boolean)
+    .map((base) => String(base).replace(/\/+$/, ''));
+
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw ApiError.badRequest('That is not a valid file URL.');
+  }
+
+  if (!['http:', 'https:'].includes(parsed.protocol) || isInternalHost(parsed.hostname)) {
+    throw ApiError.badRequest('That file is not one of our uploads.');
+  }
+
+  if (!remoteBases.some((base) => url.startsWith(`${base}/`))) {
+    // Fall back to "is this URL already sitting on one of our own rows".
+    //
+    // Storage settings are per-environment: a database restored from
+    // production carries CDN URLs (e.g. CloudFront) that a local,
+    // unconfigured environment's `remoteBases` above knows nothing about —
+    // without this, every seeded decoration/frame/template background
+    // becomes un-exportable there even though the row plainly names the file.
+    // Still gated on `isInternalHost` above, since these are free-text columns.
+    if (!(await isKnownUpload(url, companyId))) {
+      throw ApiError.badRequest('That file is not one of our uploads.');
+    }
+  }
+
+  const response = await axios.get(url, {
+    timeout: 15000,
+    responseType: 'arraybuffer',
+    maxContentLength: 15 * 1024 * 1024,
+  });
+  const buffer = Buffer.from(response.data);
+  const contentType = response.headers['content-type'] || 'application/octet-stream';
+  return { dataUri: `data:${contentType};base64,${buffer.toString('base64')}`, contentType };
+};
+
 module.exports = {
   upload,
   uploadDataUri,
@@ -656,6 +800,7 @@ module.exports = {
   copyFile,
   moveFile,
   renameFile,
+  readAsDataUri,
   // Aliases used by approval.service.js
   // Media uploads cannot be re-executed from stored data; approval just activates the already-uploaded file
   create: async () => null,

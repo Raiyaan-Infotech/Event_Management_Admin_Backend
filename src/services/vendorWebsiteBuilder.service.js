@@ -1198,13 +1198,22 @@ const deleteListItem = async (tableKey, id, vendor, whereExtra = '') => {
 
 const getBuilderPayload = async (vendor) => {
   const payload = defaultPayload();
-  const missingTables = await getMissingTables();
+
+  /**
+   * These three don't depend on each other — only on `vendor`, which the
+   * caller already has. Run them as one round trip instead of three
+   * sequential ones: production (Aiven) measures ~374ms PER QUERY, so three
+   * awaited-in-a-row calls here alone were costing over a second before a
+   * single content row had been read.
+   */
+  const [missingTables, colorPalettes, website] = await Promise.all([
+    getMissingTables(),
+    getColorPalettes(vendor.company_id),
+    getWebsite(vendor),
+  ]);
   payload.missingTables = missingTables;
   payload.schemaReady = missingTables.length === 0;
-
-  payload.colorPalettes = await getColorPalettes(vendor.company_id);
-
-  const website = await getWebsite(vendor);
+  payload.colorPalettes = colorPalettes;
   payload.website = website;
   if (!website) return payload;
 
@@ -1479,12 +1488,17 @@ const getPublicWebsitePayloadBySlug = async (slug) => {
   if (!vendor) return null;
 
   const vendorJson = vendor.toJSON ? vendor.toJSON() : vendor;
-  const payload = await getBuilderPayload(vendorJson);
-  const subscriptionPlans = await PlanType.findAll({
-    where: { is_active: 1, is_custom: 0 },
-    order: [['sort_order', 'ASC']],
-    attributes: ['id', 'name', 'price', 'discounted_price', 'features', 'label_color'],
-  });
+  // Independent of the builder payload — reads the global plan catalogue,
+  // not anything scoped to this vendor — so it runs alongside it rather
+  // than after it.
+  const [payload, subscriptionPlans] = await Promise.all([
+    getBuilderPayload(vendorJson),
+    PlanType.findAll({
+      where: { is_active: 1, is_custom: 0 },
+      order: [['sort_order', 'ASC']],
+      attributes: ['id', 'name', 'price', 'discounted_price', 'features', 'label_color'],
+    }),
+  ]);
 
   return {
     vendor: vendorJson,

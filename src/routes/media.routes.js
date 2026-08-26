@@ -39,6 +39,12 @@ router.use(isAuthenticated);
 router.use(extractCompanyContext);
 
 router.get('/files', hasPermission('media.view'), mediaController.listFiles);
+
+// No module permission gate: this only inlines a file that is already
+// reachable at its direct S3/local URL, for any authenticated admin session
+// exporting a canvas (e.g. the templates PNG download). It grants no access
+// that a plain `curl` of the file's own URL would not already have.
+router.get('/proxy', mediaController.proxyImage);
 router.post('/folder', hasPermission('media.upload'), mediaController.createFolder);
 router.post('/upload',
     hasPermission('media.upload'),

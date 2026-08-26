@@ -22,6 +22,19 @@ const upload = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Inlines one of our uploaded files as a data URI.
+ * GET /api/v1/media/proxy?url=
+ *
+ * For canvas-based exports (the templates PNG download) — the storage bucket
+ * sends no CORS header, so the browser cannot draw its own S3-hosted image
+ * onto a `<canvas>` and still read the pixels back out.
+ */
+const proxyImage = asyncHandler(async (req, res) => {
+  const result = await mediaService.readAsDataUri(req.query.url, req.companyId);
+  return ApiResponse.success(res, result);
+});
+
+/**
  * Upload multiple files
  * POST /api/v1/media/upload-multiple
  */
@@ -118,4 +131,5 @@ module.exports = {
   renameFile,
   copyFile,
   moveFile,
+  proxyImage,
 };
