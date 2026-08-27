@@ -43,12 +43,30 @@ const clientPortalService = require('./clientPortal.service');
  */
 const WRITABLE_FIELDS = [
     'event_category_id', 'event_type_id', 'religion_id',
-    'name', 'tagline', 'description',
+    'name', 'host_one', 'host_two', 'tagline', 'description',
     'start_date', 'end_date', 'start_time', 'end_time', 'timezone',
     'venue_name', 'venue_address',
+    'organizer', 'contact_phone', 'contact_email', 'footer_note',
     'privacy', 'status',
     'menu_ids',
     'theme_id', 'primary_color',
+    'components', 'component_order',
+];
+
+/**
+ * The invitation components a template can offer, and therefore the only keys a
+ * per-event override may name.
+ *
+ * Kept in the canonical order the admin panel stores, so an override that
+ * supplies no order at all still renders in the order everything else uses.
+ * MUST match COMPONENT_KEYS in eventTemplate.service.js — an unknown key is
+ * dropped rather than stored, so a typo silently does nothing instead of
+ * writing a component nothing will ever render.
+ */
+const COMPONENT_KEYS = [
+    'event_title', 'host_names', 'date_time', 'venue', 'event_qr_code', 'organizer',
+    'event_photos', 'contact_details', 'invitation_message', 'social_icons',
+    'footer_note', 'decoration_elements',
 ];
 
 const PRIVACY_VALUES = ['private', 'public', 'unlisted'];
@@ -218,6 +236,34 @@ const normalise = async (clientId, body, { partial = false } = {}) => {
     if (has('venue_address')) data.venue_address = str(picked.venue_address, 500);
     if (has('timezone')) data.timezone = str(picked.timezone, 80);
 
+    // The invitation's own detail fields. Each backs a template component; all
+    // are optional, because a template that switches the component off has no
+    // use for the value and should not force one.
+    if (has('host_one')) data.host_one = str(picked.host_one, 120);
+    if (has('host_two')) data.host_two = str(picked.host_two, 120);
+    if (has('organizer')) data.organizer = str(picked.organizer, 200);
+    if (has('footer_note')) data.footer_note = str(picked.footer_note, 300);
+
+    if (has('contact_phone')) {
+        const value = str(picked.contact_phone, 30);
+        // Deliberately permissive: digits plus the punctuation international
+        // numbers actually use. Anything stricter rejects a legitimate number
+        // from some country, and this is printed on an invitation rather than
+        // dialled by the system.
+        if (value && !/^[\d\s+()-]{6,30}$/.test(value)) {
+            throw ApiError.badRequest('Please enter a valid contact number.');
+        }
+        data.contact_phone = value;
+    }
+
+    if (has('contact_email')) {
+        const value = str(picked.contact_email, 150);
+        if (value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+            throw ApiError.badRequest('Please enter a valid contact email address.');
+        }
+        data.contact_email = value;
+    }
+
     for (const field of ['start_date', 'end_date']) {
         if (!required(field)) continue;
         const value = str(picked[field], 10);
@@ -283,6 +329,55 @@ const normalise = async (clientId, body, { partial = false } = {}) => {
             throw ApiError.badRequest('Primary colour must be a hex value like #2457D6.');
         }
         data.primary_color = value;
+    }
+
+    /**
+     * ── The client's per-event component override ───────────────────────────
+     *
+     * NULL means "inherit from the template", so an explicit null is accepted
+     * and is how the UI resets back to the template's own design. Anything else
+     * is normalised to a full 0/1 map over the known keys, because a partial
+     * map would leave the reader guessing whether a missing key means off or
+     * inherit — and those are different answers.
+     *
+     * Unknown keys are DROPPED rather than rejected: the catalogue can gain a
+     * component, and an older client sending a stale key should not have its
+     * whole save fail over a field it cannot render anyway.
+     */
+    if (has('components')) {
+        const raw = picked.components;
+        if (raw === null || raw === undefined || raw === '') {
+            data.components = null;
+        } else if (typeof raw !== 'object' || Array.isArray(raw)) {
+            throw ApiError.badRequest('Invalid invitation component settings.');
+        } else {
+            const map = {};
+            for (const key of COMPONENT_KEYS) {
+                // Absent means ON, matching how every renderer reads a template's
+                // own map — a key that was never stored is not "switched off".
+                map[key] = raw[key] === undefined ? 1 : (Number(raw[key]) ? 1 : 0);
+            }
+            data.components = map;
+        }
+    }
+
+    if (has('component_order')) {
+        const raw = picked.component_order;
+        if (raw === null || raw === undefined || raw === '') {
+            data.component_order = null;
+        } else if (!Array.isArray(raw)) {
+            throw ApiError.badRequest('Invalid invitation component order.');
+        } else {
+            // De-duplicated, unknown keys dropped, then anything the client
+            // omitted appended in canonical order — so the stored order is
+            // always the complete list and a renderer never has to guess where
+            // a missing component belongs.
+            const seen = [];
+            for (const key of raw) {
+                if (COMPONENT_KEYS.includes(key) && !seen.includes(key)) seen.push(key);
+            }
+            data.component_order = [...seen, ...COMPONENT_KEYS.filter((k) => !seen.includes(k))];
+        }
     }
 
     return { data, plan: options.plan };

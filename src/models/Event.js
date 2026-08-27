@@ -53,11 +53,28 @@ module.exports = (sequelize) => {
             end_time: { type: DataTypes.TIME, allowNull: true },
             timezone: { type: DataTypes.STRING(80), allowNull: true },
 
-            // Not collected by the wizard yet. The dashboard card already has a
-            // venue line, so the column exists for it to read; the card hides
-            // the line while this is null rather than printing a dash.
             venue_name: { type: DataTypes.STRING(255), allowNull: true },
             venue_address: { type: DataTypes.STRING(500), allowNull: true },
+
+            /**
+             * ── The invitation's own detail fields ──────────────────────────
+             *
+             * Each one backs a component the admin's template catalogue offers.
+             * Before these existed the preview drew placeholders for them —
+             * "Hosted by the family", "+91 00000 00000" — that no client could
+             * change, so five of the twelve components were decorative.
+             *
+             * `host_one` / `host_two` are separate columns rather than one
+             * string because the invitation sets them on their own lines either
+             * side of an ampersand. Splitting "A & B" back apart would guess at
+             * a separator that a single name might legitimately contain.
+             */
+            host_one: { type: DataTypes.STRING(120), allowNull: true },
+            host_two: { type: DataTypes.STRING(120), allowNull: true },
+            organizer: { type: DataTypes.STRING(200), allowNull: true },
+            contact_phone: { type: DataTypes.STRING(30), allowNull: true },
+            contact_email: { type: DataTypes.STRING(150), allowNull: true },
+            footer_note: { type: DataTypes.STRING(300), allowNull: true },
 
             privacy: {
                 type: DataTypes.ENUM('private', 'public', 'unlisted'),
@@ -76,6 +93,19 @@ module.exports = (sequelize) => {
             // ── Step 4 — design ─────────────────────────────────────────────
             theme_id: { type: DataTypes.STRING(64), allowNull: true },
             primary_color: { type: DataTypes.STRING(9), allowNull: true },
+
+            /**
+             * The client's per-event OVERRIDE of the template's component set
+             * and order. NULL on both means "inherit from the template".
+             *
+             * ⚠ NULL is the only correct default, and copying the template's
+             * maps at create time would be wrong: it freezes the design, so an
+             * admin who later enables a component would never reach events
+             * already created. Inheritance has to stay live until the client
+             * actually overrides it.
+             */
+            components: { type: DataTypes.JSON, allowNull: true },
+            component_order: { type: DataTypes.JSON, allowNull: true },
 
             /**
              * The encrypted QR payload — see utils/eventQr.js.
