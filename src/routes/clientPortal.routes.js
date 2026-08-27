@@ -18,6 +18,11 @@ router.get('/me', controller.me);
 router.get('/event-options', controller.eventOptions);
 router.put('/favourite-templates', controller.setFavouriteTemplates);
 
+// Inlines one of our own uploaded files as a data URI, so the invitation
+// download can rasterise a card whose frame and decorations come from a CDN
+// that sends no CORS header. SSRF-guarded in the service — see the controller.
+router.get('/media/proxy', controller.proxyImage);
+
 // Events. `/events/stats` and `/events/qr/decode` are declared BEFORE
 // `/events/:id`, or Express matches "stats" and "qr" as an id and the handler
 // spends its time looking for event number NaN.
