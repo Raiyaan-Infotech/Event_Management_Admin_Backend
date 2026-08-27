@@ -6840,3 +6840,317 @@ Files: backend 3 changed (+364), frontend 7 changed across two commits
    origins (§235, §236.3).
 10. The three §262 step-2 mockup items (upload widget variants, gradient
     direction arrow count, Modern's missing Secondary Color) are unchanged.
+
+---
+
+## Session 25 — The client portal stops guessing: real templates, the missing half of the invitation, and a download that downloads
+
+> **Date:** 2026-08-27 | **Backend:** `Event_Management_Admin_Backend`
+> **Client portal:** `event_client_single` (port 3005)
+> The hardcoded theme catalogue was removed from the client portal, ten premium
+> templates were authored against **measured production conventions** rather
+> than taste, the `events` table gained the eight columns five invitation
+> components had always needed, and "Download Invitation" — a button that had
+> never produced a file — started producing three.
+
+### 273. The templates PNG proxy saves nothing (a question, answered by reading)
+
+`mediaService.readAsDataUri` was mistaken for an upload path. It is not: it
+reads bytes (`fs.readFileSync` local, `axios.get` remote), base64-encodes them
+**in memory**, and returns a `data:` URI. There is no `upload()` call anywhere
+in it.
+
+It exists because the storage bucket sends no `Access-Control-Allow-Origin`, so
+a `<canvas>` that drew a decoration straight from its CDN URL is *tainted* and
+`toDataURL()` throws `SecurityError`. The row's `file_url` / `background_image`
+is unchanged throughout — the data URI is a temporary copy for one export.
+
+### 274. Menus and templates are gated by DIFFERENT rules, and conflating them is a bug
+
+Both reach the client through `getEventOptions`, and they do **not** behave the
+same way:
+
+| | Gate |
+|---|---|
+| **Menus** | `subscription_plan_menus` — a manual admin assignment, full stop |
+| **Templates** | plan scope (category / type / religion) **and** `plan_availability` |
+
+⚠ **A menu is NOT re-filtered by its own `event_category_id`.** Those columns on
+`event_menus` are the menu's general catalogue tag from Menu Management; the
+admin's "Manage Plan Menus" screen attaches any menu to any plan with no
+validation (`syncPlanMenus` does no category check). Plan 7 legitimately grants
+Venue / Speakers / Contact Us, all tagged for *other* categories.
+
+**A regression was introduced and reverted inside this session:** a
+`menusForEvent()` helper mirroring `templatesForEvent()` was added, which
+silently hid three of the seven menus the moment step 1 was filled in. The
+grouping by `menu_group` (Core / Additional / Custom) was kept; the filtering
+was removed. Templates keep their category filter — that one is real.
+
+### 275. The hardcoded theme catalogue is gone from the client portal
+
+`lib/event-themes.ts` was still filling step 4 and the whole Templates screen
+whenever a plan had no matching admin templates. Two things wrong with that:
+
+- it **offered designs the plan does not grant** — the exact mis-sell the plan
+  gating exists to prevent;
+- a full grid of stand-ins made an **empty catalogue look stocked**, so a
+  misconfigured plan was indistinguishable from a working one.
+
+Both now show a real empty state naming the cause — "none of your plan's
+templates match the category, type or religion selected" versus "your plan
+doesn't include any invitation templates yet". `LegacyTemplates` (~470 lines)
+was deleted along with the colour / style / layout filter constants that only
+fed it.
+
+⚠ **`event-themes.ts` still exists and must.** `resolveArtwork` needs it to draw
+events whose `theme_id` is a legacy slug. It is for **rendering history, never
+for offering something new** — the distinction is now documented in both files.
+
+### 276. Ten premium templates, and two wrong cuts before the right one
+
+`plan_availability: 'selected'` had **never had a single row to act on** — every
+template in the system was `'all'`, so the `plan_ids` branch of
+`templatesForPlan()` was dead code. The pack exercises it.
+
+⚠ **Both gates must pass, and the SQL one runs FIRST.** Setting only `plan_ids`
+is the trap: a template scoped to the wrong event type is gone before the plan
+is ever considered. The pack names only the category and leaves type and
+religion NULL.
+
+**The first two cuts were bad, and measurably so.**
+
+Cut 1 — every row invalid against the admin wizard's own option lists:
+
+```
+dimension '5x7in'          not one of the 5 valid values -> dropdown renders blank
+Lato / Jost / Karla /      not in FONT_OPTIONS -> font picker cannot show them,
+Mukta / Nunito Sans        first save silently replaces them
+gradient_direction         'center' is not a direction
+all 12 components ON       TemplatePreview scales content to 0.45 -> the cramped,
+                           identical look that gives a generated card away
+```
+
+Cut 2 fixed the option lists but still *looked* generated. Rather than guess
+again, the **production database was read**: 20 templates real admins had
+authored. The conventions were counted, not eyeballed:
+
+```
+border_style set             0/20   frames are ARTWORK, not a CSS border
+frame_style_id set          15/20
+decoration_ids set          17/20
+overlay_opacity > 0         11/20   a contrast tool, not decoration
+thumbnail set                2/20   a thumbnail REPLACES the rendered design
+canonical component_order   20/20   order is never rearranged, only toggled
+gradient_via (3-stop)        0/20   every real gradient is two stops
+secondary_font              Poppins on all 20
+components on               median 8
+```
+
+Cut 2 had violated **eight of nine**. The two that mattered most:
+
+1. ⚠ **Generated SVG thumbnails were hiding the real design.** A thumbnail
+   replaces the rendered card in the client grid, so ten synthetic drawings sat
+   in front of ten real frames and decorations. 18/20 production rows leave it
+   null on purpose.
+2. **CSS `border_style` instead of frame artwork.** Not one production row uses
+   `border_style`; they all point at `frame_styles`.
+
+Cut 3 matches the house style and `validatePack()` now enforces it — fonts,
+dimensions, directions, hex format, component budget **and** the layout
+conventions — failing the whole run rather than leaving half a catalogue.
+Frames and decorations resolve **by name**, since both catalogues are seeded and
+their ids differ per environment.
+
+### 277. ⚠ The client portal could not draw frames or decorations — the API never sent them
+
+`TEMPLATE_ATTRS` in `clientPortal.service.js` omitted `frame_style_id`,
+`decoration_ids`, `gradient_via/type/direction`, `layout_style` and every
+overlay / image-positioning column.
+
+So the admin preview drew the arch, the toran and the mosque silhouette from
+those columns, and the client portal — handed a flat colour and a name — drew a
+flat colour and a name. **Two previews of the same template, disagreeing
+completely.** It read as a styling bug and was a missing SELECT.
+
+`attachArtwork()` resolves `frame_style_id → frame_url` and
+`decoration_ids → decorationItems[]` in **two queries for the whole page**, not
+two per template (~374ms per round trip against production, §103). It runs only
+on rows that survived gating. Committed as `9599f8f`.
+
+### 278. `InvitationCard` — the portal's counterpart to the admin's preview
+
+The client portal had a hand-rolled card drawing a background, a name, a date
+and nothing else. It now has a real renderer, mirroring
+`admin/templates/_components/template-preview.tsx`:
+
+- frame artwork drawn **last, over** the content (it occupies the margin), and
+  it **replaces** `border_style` rather than stacking with it;
+- decorations placed by `type` — corner mirrored into all four, top, bottom,
+  ornament, divider, motif — drawn **under** the content;
+- all 12 component blocks in the template's `component_order`;
+- contrast-aware ink: WCAG luminance, overlay alpha-composited onto the backdrop
+  *first*, then light vs dark chosen by **comparison, not a threshold**;
+- fixed-canvas scale-to-fit via `ResizeObserver`.
+
+⚠ **Safe-area insets are `top`/`bottom`/`left`/`right`, never padding.** CSS
+percentage padding resolves against the containing block's **width** on all four
+sides, so `padding-top: 8%` on a 9:16 card is about half what it should be.
+
+The two live in separate repos and cannot import each other. **The RULES are
+copied deliberately and marked as such — change one and the other must follow.**
+
+### 279. `EventThumbnail` was built for a 52×72 tile and rendered at 200px
+
+Hardcoded 6.5px and 8.5px type, used at four sizes from a 52×72 guest picker to
+a 200px detail hero. At the large end it was two specks of text in an empty box.
+
+Now `@container` + `cqw` units with `clamp()` floors and ceilings, so one
+component fills all four boxes. The date and venue lines have **two** gates: the
+template must enable the component **and** the tile must be wide enough
+(`@[150px]` / `@[190px]`) — a 52px tile with five lines is a grey smudge however
+much the design wants them.
+
+⚠ The date is formatted **by regex on the `YYYY-MM-DD` string**, never
+`new Date(value)` — parsing a DATEONLY applies the browser's timezone to a value
+that never had one, which shows the day before its own date west of UTC.
+
+### 280. Five of twelve components had no data source at all
+
+Gap analysis against the admin's twelve components:
+
+| Field | column | API | form |
+|---|:--:|:--:|:--:|
+| `venue_name` / `venue_address` | ✅ | ✅ | ❌ |
+| `organizer`, `contact_phone`, `contact_email`, `footer_note`, hosts | ❌ | ❌ | ❌ |
+
+⚠ **Venue was a silent data-loss bug, not a missing feature.** The columns
+existed and `WRITABLE_FIELDS` already accepted them — only the inputs were
+missing, so every invitation printed "Venue to be confirmed" with no way to fix
+it.
+
+Eight columns added (`host_one`, `host_two`, `organizer`, `contact_phone`,
+`contact_email`, `footer_note`, `components`, `component_order`).
+
+**Hosts are two columns, not one string** — the card prints them on their own
+lines round an ampersand, and splitting "A & B" back apart would guess at a
+separator a single name can legitimately contain.
+
+### 281. Per-event component control, and why NULL is the only correct default
+
+`events.components` / `events.component_order` are the client's **override** for
+one event. Step 4 gives 12 switches, a drag-to-reorder chip row and a "Reset to
+template" button that appears only once an override exists.
+
+⚠ **NULL means "inherit from the template", and the override stays null until
+something is actually touched.** Copying the template's maps at create time
+would **freeze the design** — an admin later enabling a component would never
+reach events already made.
+
+Server-side a partial override normalises to a full 12-key map (a partial map
+leaves the reader unable to tell "off" from "inherit"); a partial order gets the
+missing keys appended canonically; unknown keys are dropped, not rejected.
+
+Verified: create → `null`/`null` → override → reset → `null`/`null`.
+
+### 282. Migration removed by request; columns applied to production directly
+
+The Umzug migration was deleted and the DDL run against Aiven by hand. Checked
+first: all 8 genuinely missing, **0 rows** in `events`, all three `AFTER` anchor
+columns present. 29 → 37 columns.
+
+Replaced by `src/database/tools/apply-event-invitation-columns.js` — hand-run,
+`--prod` dry-runs until `--apply`, and **one `ALTER` per column**: a combined
+multi-column statement fails outright if even one column already exists, leaving
+a half-applied schema only fixable by hand-editing SQL.
+
+### 283. Wizard layout — and two CSS traps
+
+Step 1's three selects went to one row; steps 2 and 4 became **two panels**, not
+two columns of fields. Interleaving unrelated fields across a plain grid left
+section rules meaningless — a heading spanning both columns still had the
+previous section's fields beside it. Reading down one column now follows one
+subject; genuine pairs (start/end date, phone/email) nest *inside* a panel.
+
+Two traps found by screenshot:
+
+1. **`max-w-4xl` left a ~700px dead gutter** in a ~1600px card. Self-inflicted —
+   added when widening step 1, then carried into step 2.
+2. ⚠ **This project's `SelectTrigger` defaults to `w-fit`, not `w-full`.** Time
+   Zone, Privacy, Status and the step 1 taxonomy selects all rendered short even
+   while spanning their column. **Any new `<Select>` needs `w-full` explicitly.**
+
+### 284. `primary_color` drives exactly one thing
+
+Traced every reference. It colours **the names printed on the invitation** — in
+`InvitationCard`, in `EventThumbnail`, and shown read-only on the detail page.
+Nothing else. Background, frame and accents all come from the *template's*
+`secondary_color`.
+
+⚠ It is **not rendered as picked**: `InvitationCard` runs it through a 4.5:1
+contrast floor, because the swatch row knows nothing about the design behind it.
+Saved hex and rendered hex can differ, by design.
+
+⚠ `theme-tokens.tsx` has its own `primary_color` from `useThemeSettings()` —
+that is the **portal's brand colour**, unrelated. Easy to confuse when grepping.
+
+### 285. "Download Invitation" downloads something now
+
+It had never produced a file — on the detail page it opened a dialog; in the
+wizard it did nothing at all. Ported from the admin's
+`lib/export-invitation-png.ts`:
+
+- **PNG** (3× pixel ratio), **SVG**, and the **QR on its own** (900px, white
+  quiet zone — a QR flush to its edge scans badly, and a transparent PNG on dark
+  stationery does not scan at all);
+- QR is offered on step 6 and the detail page, **not step 5** — no event exists
+  yet, so there is no token and it would hand back a blank square.
+
+⚠ **`/media/proxy` sits behind `isAuthenticated` — the ADMIN token.** A website
+client gets 401. Added `GET /client/media/proxy` under
+`isWebsiteClientAuthenticated`, calling the same SSRF-guarded `readAsDataUri`.
+Verified it inlines a real frame and decoration and still blocks
+`169.254.169.254` and localhost.
+
+⚠ **The off-canvas capture target is positioned, not hidden.** The detail page
+shows only a thumbnail, so `InvitationDownload` mounts a full `InvitationCard`
+at `left: -10000px`. `display:none` / `visibility:hidden` give it no layout box,
+so `html-to-image` measures 0×0 and writes a **blank file**.
+
+Dependency added to the client portal: `html-to-image@^1.11.13`.
+
+### 286. Verified
+
+```
+tsc --noEmit              client portal clean, every step
+eslint                    0 errors (2 pre-existing warnings, untouched lines)
+templates via API         10 · frame_url 10/10 · decorationItems 10/10 · no gate leakage
+plan gating               plan 7 sees 10 premium; plans 3/5/6/8 see 0
+                          (incl. plan 8 "no scope = all", which would catch a broken gate)
+house style               new pack matches production on all 8 measured conventions
+new columns               local + PRODUCTION, 8/8, re-run is a no-op
+override lifecycle        create null -> partial override normalised to 12 keys -> reset null
+field validation          bad phone and bad email rejected server-side and client-side
+media proxy               frame + decoration inlined; metadata endpoint and localhost blocked
+```
+
+### 287. Open — carried to next session
+
+1. ⚠ **Two seeders were deleted from disk and were never committed** —
+   `event-templates-premium.seeder.js` and `client-events-demo.seeder.js`. Not
+   recoverable from git. Their **output survives** (10 templates, 5 events), so
+   the data is intact but not reproducible. Recreate if the pack matters.
+2. **`event_photos` and `social_icons` still have no data source** — 2 of the 12
+   components remain decorative. They need an upload pipeline and a repeater UI
+   (`photos` / `social_links` JSON). Arguably those two should be disabled on
+   templates until then.
+3. **The 5 sample events predate §280**, so their new fields are null. Only one
+   was backfilled as a live test.
+4. **`initial_setup.sql` does not know about the 8 new `events` columns** — the
+   §233.1 drift widened rather than narrowed.
+5. **`readAsDataUri`'s `isKnownUpload` does not check `event_templates.thumbnail`**
+   — fine today because the premium pack leaves it null, but a template WITH a
+   thumbnail on an unconfigured local env would fail to export.
+6. Everything still open from §272 — notably `EVENT_QR_SECRET` unset on Render
+   (§232.4), `event_templates` permissions ungranted in production (§262.4), and
+   `initial_setup.sql` ~46 tables behind.
