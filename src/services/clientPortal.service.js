@@ -8,6 +8,8 @@ const {
     EventType,
     Religion,
     EventTemplate,
+    FrameStyle,
+    Decoration,
 } = require('../models');
 const { Op } = Sequelize;
 
@@ -53,10 +55,19 @@ const activeWhere = (companyId, extra = {}) => ({
  * wizard load is bytes nobody reads.
  */
 const TEMPLATE_ATTRS = [
-    'id', 'name', 'code', 'description', 'style', 'thumbnail',
+    'id', 'name', 'code', 'description', 'style', 'layout_style', 'thumbnail',
     'background_type', 'background_color', 'secondary_color', 'background_image',
-    'gradient_from', 'gradient_to', 'overlay_opacity', 'orientation',
+    'gradient_from', 'gradient_via', 'gradient_to', 'gradient_type', 'gradient_direction',
+    'overlay_enabled', 'overlay_color', 'overlay_opacity',
+    'image_position', 'image_scale', 'image_shape', 'corner_radius',
+    'background_position', 'image_size',
+    'orientation', 'dimension',
     'primary_font', 'secondary_font', 'border_style',
+    // Without these two the portal cannot draw the frame or the decorations at
+    // all — it was rendering a bare colour where the admin's own preview showed
+    // an arch, a toran and a mosque silhouette, and the two previews of the SAME
+    // template disagreed completely.
+    'frame_style_id', 'decoration_ids',
     'components', 'component_order',
     'event_category_id', 'event_type_id', 'religion_id',
     'is_featured', 'sort_order',
@@ -96,6 +107,59 @@ const TEMPLATE_GATE_ATTRS = ['available_for', 'plan_availability', 'plan_ids'];
  *    offered when the plan grants a trial at all. Excluding it outright would
  *    make the admin's third radio button do nothing at all, which is worse.
  */
+/**
+ * Turn `frame_style_id` and `decoration_ids` into the artwork URLs a preview
+ * can actually draw, for the WHOLE page in two queries.
+ *
+ * Neither is a foreign key Sequelize can join on — `decoration_ids` is a JSON
+ * array — so this batches by hand. Per row it would be two queries per
+ * template: ten templates, twenty round trips, ~374ms each against production.
+ *
+ * Decoration order comes from the stored array, not the query, because the
+ * array IS the display order. Ids that no longer resolve simply do not appear,
+ * which is why a deleted decoration degrades to "no artwork" rather than an
+ * error. Mirrors `attachDecorations` in eventTemplate.service.js.
+ */
+const attachArtwork = async (rows, companyId) => {
+    const frameIds = [...new Set(rows.map((r) => r.frame_style_id).filter(Boolean))];
+    const decoIds = [...new Set(rows.flatMap((r) => r.decoration_ids ?? []))];
+
+    const [frames, decos] = await Promise.all([
+        frameIds.length
+            ? FrameStyle.findAll({
+                where: { id: frameIds, is_active: 1 },
+                attributes: ['id', 'name', 'file_url'],
+                raw: true,
+            })
+            : [],
+        decoIds.length
+            ? Decoration.findAll({
+                where: {
+                    id: decoIds,
+                    is_active: 1,
+                    ...(companyId ? { company_id: companyId } : {}),
+                },
+                attributes: ['id', 'name', 'type', 'file_url'],
+                raw: true,
+            })
+            : [],
+    ]);
+
+    const frameById = new Map(frames.map((f) => [f.id, f]));
+    const decoById = new Map(decos.map((d) => [d.id, d]));
+
+    for (const row of rows) {
+        // Named `frame_url` and `decorationItems` to match what the preview
+        // components already expect, so nothing has to re-map them client-side.
+        row.frame_url = frameById.get(row.frame_style_id)?.file_url ?? null;
+        row.decorationItems = (row.decoration_ids ?? [])
+            .map((id) => decoById.get(id))
+            .filter(Boolean);
+    }
+
+    return rows;
+};
+
 const templatesForPlan = async (companyId, plan) => {
     const where = {
         is_active: 1,
@@ -128,7 +192,7 @@ const templatesForPlan = async (companyId, plan) => {
 
     const hasTrial = Number(plan.trial_days) > 0;
 
-    return rows
+    const entitled = rows
         .map((r) => r.toJSON())
         .filter((t) => {
             // available_for: [] is the admin saying nobody. See the note above.
@@ -146,6 +210,10 @@ const templatesForPlan = async (companyId, plan) => {
             for (const key of TEMPLATE_GATE_ATTRS) delete t[key];
             return t;
         });
+
+    // Only for the templates that SURVIVED the gating — resolving artwork for
+    // rows the client will never see would be work done to be thrown away.
+    return attachArtwork(entitled, companyId);
 };
 
 /**
