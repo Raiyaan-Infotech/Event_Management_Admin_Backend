@@ -12,6 +12,9 @@ const {
     Decoration,
 } = require('../models');
 const { Op } = Sequelize;
+const bcrypt = require('bcryptjs');
+const ApiError = require('../utils/apiError');
+const mediaService = require('./media.service');
 
 /**
  * What a signed-in website client is allowed to see and do in the portal.
@@ -229,6 +232,24 @@ const getMe = async (clientId) => {
     const plain = client.toJSON();
     plain.plan = null;
 
+    /**
+     * Whether this account can sign in with a password at all.
+     *
+     * The HASH is never returned — `defaultScope` drops it and this reports only
+     * whether one is set. The Settings page needs the distinction: an account
+     * created by Google or Facebook has no password, and asking it for a
+     * "current password" that never existed is a dead end with no way out.
+     *
+     * Queried separately rather than via the default scope, which excludes the
+     * column entirely, so `client.password` here would be undefined either way.
+     */
+    const [pw] = await WebsiteClient.scope('withPassword').findAll({
+        where: { id: clientId },
+        attributes: ['id', 'password'],
+        limit: 1,
+    });
+    plain.has_password = pw && pw.password ? 1 : 0;
+
     if (client.subscription_plan_id) {
         const plan = await SubscriptionPlan.findByPk(client.subscription_plan_id, {
             attributes: PLAN_ATTRS,
@@ -370,4 +391,200 @@ const setFavouriteTemplates = async (clientId, ids) => {
     return clean;
 };
 
-module.exports = { getMe, getEventOptions, setFavouriteTemplates };
+
+// ── Self-service account management ──────────────────────────────────────────
+//
+// Everything here acts on the SIGNED-IN client and takes its id from the
+// session, never from the body. There is no client id parameter anywhere in
+// this section, which is what makes it impossible to aim at somebody else.
+
+/**
+ * What a client may change about themselves.
+ *
+ * Narrower than the admin whitelist on purpose. Absent, and absent
+ * deliberately: `is_active` (an admin's decision), `subscription_plan_id` (a
+ * commercial fact — a client granting themselves a plan is the whole reason
+ * this is a whitelist), `vendor_id`, `email_verified`, `mobile_verified`.
+ *
+ * `email` is handled separately below, because changing it changes how they
+ * sign in.
+ */
+const SELF_EDITABLE_FIELDS = ['name', 'company_name', 'bio', 'dial_code', 'mobile', 'avatar_url'];
+
+/** Trim, and map '' to null so a cleared box is stored as empty, not as ''. */
+const selfStr = (value, max) => {
+    if (value === undefined) return undefined;
+    if (value === null) return null;
+    const trimmed = String(value).trim();
+    return trimmed ? trimmed.slice(0, max) : null;
+};
+
+const LIMITS = { name: 200, company_name: 150, bio: 2000, dial_code: 8, avatar_url: 500 };
+
+/**
+ * Update the signed-in client's own profile.
+ *
+ * ── EMAIL IS THE LOGIN, SO IT GETS EXTRA CARE ───────────────────────────────
+ * The web portal signs in with email + password, so changing it changes the
+ * credential. Two things follow: it must stay unique within the tenant (the
+ * `uniq_website_client_email` index would otherwise reject the save with the
+ * bare string "Validation error"), and `email_verified` resets to 0 — a newly
+ * typed address has not been proven to belong to anyone.
+ */
+const updateMe = async (clientId, data = {}) => {
+    const client = await WebsiteClient.findByPk(clientId);
+    if (!client) throw ApiError.notFound('Account not found.');
+
+    const patch = {};
+    for (const field of SELF_EDITABLE_FIELDS) {
+        if (data[field] === undefined) continue;
+        patch[field] = field === 'mobile'
+            ? String(data[field] ?? '').replace(/\D/g, '').slice(0, 15) || null
+            : selfStr(data[field], LIMITS[field] ?? 255);
+    }
+
+    if (patch.name !== undefined && !patch.name) {
+        throw ApiError.badRequest('Your name cannot be empty.');
+    }
+
+    if (data.email !== undefined) {
+        const email = String(data.email || '').trim().toLowerCase();
+        if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+            throw ApiError.badRequest('Please enter a valid email address.');
+        }
+        if (email !== client.email) {
+            const taken = await WebsiteClient.findOne({
+                where: { vendor_id: client.vendor_id, email, id: { [Op.ne]: client.id } },
+                attributes: ['id'],
+                paranoid: false,
+            });
+            if (taken) throw ApiError.badRequest('That email address is already in use.');
+            patch.email = email;
+            patch.email_verified = 0;
+        }
+    }
+
+    // `hooks: false` would skip the password hook, but there is no password in
+    // this patch and leaving hooks on keeps beforeValidate's email normalising.
+    await client.update(patch);
+    return getMe(clientId);
+};
+
+/**
+ * Change the signed-in client's password.
+ *
+ * The current password is required even though the session already proves who
+ * they are: a session can be a borrowed laptop, and this is the credential that
+ * outlives it.
+ *
+ * ⚠ A social-only client has NO password (nullable column, by design — see the
+ * OAuth flow). They are told that rather than being asked for a current
+ * password they never had.
+ */
+const changeMyPassword = async (clientId, { current_password: current, new_password: next } = {}) => {
+    const client = await WebsiteClient.scope('withPassword').findByPk(clientId);
+    if (!client) throw ApiError.notFound('Account not found.');
+
+    if (!client.password) {
+        throw ApiError.badRequest(
+            'This account signs in with Google or Facebook and has no password to change.'
+        );
+    }
+    if (!current || !next) {
+        throw ApiError.badRequest('Both your current and new password are required.');
+    }
+    if (!(await bcrypt.compare(String(current), client.password))) {
+        throw ApiError.unauthorized('Your current password is not correct.');
+    }
+    if (String(next).length < 8) {
+        throw ApiError.badRequest('Your new password must be at least 8 characters.');
+    }
+    if (await bcrypt.compare(String(next), client.password)) {
+        throw ApiError.badRequest('Your new password must be different from the current one.');
+    }
+
+    // Assigned and saved so the model's beforeUpdate hook hashes it. Writing a
+    // pre-hashed value here would double-hash and lock the account silently.
+    client.password = String(next);
+    await client.save();
+    return true;
+};
+
+/**
+ * The client closes their own account.
+ *
+ * Soft delete, and the email is FREED at the same time. `website_clients` has a
+ * plain unique index on (vendor_id, email) which knows nothing about
+ * `deleted_at`, so without stamping the address a deleted row holds it hostage
+ * and the same person can never sign up again — the §172 bug, in the one place
+ * a client can trigger it themselves.
+ */
+const deleteMyAccount = async (clientId) => {
+    const client = await WebsiteClient.findByPk(clientId);
+    if (!client) throw ApiError.notFound('Account not found.');
+
+    await client.update({
+        email: `${client.email}.deleted.${Date.now()}`,
+        is_active: 0,
+    });
+    await client.destroy();
+    return true;
+};
+
+
+/**
+ * Replace the signed-in client's own avatar.
+ *
+ * ── WHY THIS EXISTS RATHER THAN REUSING /media/upload ───────────────────────
+ * That route is triple-gated for admins: `isAuthenticated` (admin JWT),
+ * `hasPermission('media.upload')` and `checkApprovalRequired`. A website client
+ * satisfies none of the three, so it answers 401 for them. Same shape as the
+ * §285 problem with `/media/proxy`, and the same fix: a client-scoped route.
+ *
+ * ── WHY IT IS NOT A GENERAL UPLOAD ENDPOINT ─────────────────────────────────
+ * It does exactly one thing and writes exactly one column. The folder is fixed
+ * here, server-side, so the caller cannot choose where the file lands; the
+ * result goes straight onto `avatar_url` rather than being handed back for the
+ * client to put wherever it likes. A general "upload anything anywhere"
+ * endpoint reachable with a client session is a much larger thing to secure,
+ * and nothing needs it.
+ */
+const updateMyAvatar = async (clientId, file) => {
+    if (!file || !file.buffer) throw ApiError.badRequest('Please choose an image to upload.');
+
+    const client = await WebsiteClient.findByPk(clientId);
+    if (!client) throw ApiError.notFound('Account not found.');
+
+    // Folder is a literal, never derived from the request.
+    const result = await mediaService.upload(
+        file,
+        { folder: 'client-avatars' },
+        client.company_id || 1
+    );
+    if (!result || !result.url) throw ApiError.badRequest('That image could not be stored.');
+
+    await client.update({ avatar_url: result.url });
+    return getMe(clientId);
+};
+
+/**
+ * Remove it again.
+ *
+ * The stored FILE is deliberately left in place. Somebody else's row may point
+ * at the same URL after a copy, and this codebase has no reference counting to
+ * know — deleting on the strength of one row clearing its pointer is how a live
+ * image disappears from somewhere else.
+ */
+const removeMyAvatar = async (clientId) => {
+    const client = await WebsiteClient.findByPk(clientId);
+    if (!client) throw ApiError.notFound('Account not found.');
+    await client.update({ avatar_url: null });
+    return getMe(clientId);
+};
+
+module.exports = {
+    updateMyAvatar,
+    removeMyAvatar,
+    updateMe,
+    changeMyPassword,
+    deleteMyAccount, getMe, getEventOptions, setFavouriteTemplates };

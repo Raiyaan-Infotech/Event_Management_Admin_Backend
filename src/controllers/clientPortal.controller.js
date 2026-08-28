@@ -3,6 +3,8 @@ const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const clientPortalService = require('../services/clientPortal.service');
 const mediaService = require('../services/media.service');
+const logger = require('../utils/logger');
+const { clearWebsiteClientCookies } = require('../middleware/websiteClientAuth');
 
 /**
  * The signed-in client's own profile plus the plan assigned to them.
@@ -63,4 +65,58 @@ const proxyImage = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, result);
 });
 
-module.exports = { me, eventOptions, setFavouriteTemplates, proxyImage };
+
+// ── Self-service account management ──────────────────────────────────────────
+//
+// The client id comes from `req.websiteClient` — the session — in every one of
+// these. None of them accepts an id, which is what makes them impossible to
+// aim at another account.
+
+/** Update the signed-in client's own profile. */
+const updateMe = asyncHandler(async (req, res) => {
+    const client = await clientPortalService.updateMe(req.websiteClient.id, req.body);
+    logger.logRequest(req, `Client profile updated: ${req.websiteClient.id}`);
+    return ApiResponse.success(res, { client }, 'Profile updated');
+});
+
+/** Change the signed-in client's password. */
+const changeMyPassword = asyncHandler(async (req, res) => {
+    await clientPortalService.changeMyPassword(req.websiteClient.id, req.body);
+    logger.logRequest(req, `Client password changed: ${req.websiteClient.id}`);
+    return ApiResponse.success(res, null, 'Password updated');
+});
+
+/**
+ * Close the signed-in client's own account.
+ *
+ * The session cookies are cleared on the way out. Without that the browser
+ * keeps a token for a row that no longer resolves, and the next request reads
+ * as a mysterious 401 rather than as "you closed your account".
+ */
+const deleteMyAccount = asyncHandler(async (req, res) => {
+    await clientPortalService.deleteMyAccount(req.websiteClient.id);
+    clearWebsiteClientCookies(res);
+    logger.logRequest(req, `Client closed their account: ${req.websiteClient.id}`);
+    return ApiResponse.success(res, null, 'Your account has been closed');
+});
+
+
+/** Replace the signed-in client's avatar. Multer puts the file on req.file. */
+const updateMyAvatar = asyncHandler(async (req, res) => {
+    const client = await clientPortalService.updateMyAvatar(req.websiteClient.id, req.file);
+    logger.logRequest(req, `Client avatar updated: ${req.websiteClient.id}`);
+    return ApiResponse.success(res, { client }, 'Photo updated');
+});
+
+/** Clear it. The stored file is left alone — see the service. */
+const removeMyAvatar = asyncHandler(async (req, res) => {
+    const client = await clientPortalService.removeMyAvatar(req.websiteClient.id);
+    return ApiResponse.success(res, { client }, 'Photo removed');
+});
+
+module.exports = {
+    updateMyAvatar,
+    removeMyAvatar,
+    updateMe,
+    changeMyPassword,
+    deleteMyAccount, me, eventOptions, setFavouriteTemplates, proxyImage };

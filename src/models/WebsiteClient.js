@@ -31,6 +31,12 @@ module.exports = (sequelize) => {
             company_id: { type: DataTypes.INTEGER, allowNull: true },
 
             name: { type: DataTypes.STRING(200), allowNull: false },
+
+            /** Free text from the client's own Settings page. Optional. */
+
+            company_name: { type: DataTypes.STRING(150), allowNull: true },
+
+            bio: { type: DataTypes.TEXT, allowNull: true },
             email: { type: DataTypes.STRING(255), allowNull: false },
             dial_code: { type: DataTypes.STRING(8), allowNull: true, defaultValue: '+91' },
             mobile: { type: DataTypes.STRING(20), allowNull: true },

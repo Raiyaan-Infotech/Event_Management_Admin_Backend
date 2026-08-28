@@ -1,4 +1,5 @@
 const express = require('express');
+const multer = require('multer');
 const router = express.Router();
 const controller = require('../controllers/clientPortal.controller');
 const eventController = require('../controllers/clientEvent.controller');
@@ -15,6 +16,58 @@ const { isWebsiteClientAuthenticated } = require('../middleware/websiteClientAut
 router.use(isWebsiteClientAuthenticated);
 
 router.get('/me', controller.me);
+// Self-service account management. No id parameter anywhere: each acts on the
+// session's own client, so none of them can be aimed at another account.
+router.put('/me', controller.updateMe);
+router.put('/me/password', controller.changeMyPassword);
+router.delete('/me', controller.deleteMyAccount);
+
+/**
+ * Avatar upload, client-scoped.
+ *
+ * `/media/upload` cannot serve this: it sits behind the admin JWT,
+ * `hasPermission('media.upload')` and the approval middleware, so a website
+ * client gets 401. Same reason `/client/media/proxy` exists.
+ *
+ * IMAGES ONLY and 4MB, both stricter than the admin uploader's 10MB and its
+ * list that includes PDF, video and audio. A profile photo has no reason to be
+ * any of those, and the narrower the filter the less there is to get wrong.
+ *
+ * SVG is excluded deliberately, unlike the admin list: an SVG is a document
+ * that can carry script, and this one is rendered back into other people's
+ * pages. The raster formats cannot do that.
+ */
+const avatarUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 4 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+        const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+        if (allowed.includes(file.mimetype)) return cb(null, true);
+        cb(new Error('Please choose a JPG, PNG, WEBP or GIF image.'), false);
+    },
+});
+
+router.put(
+    '/me/avatar',
+    (req, res, next) => {
+        // Multer's own errors are surfaced as a readable 400 rather than
+        // reaching the generic handler as a 500 — "File too large" is something
+        // the person can act on.
+        avatarUpload.single('file')(req, res, (err) => {
+            if (err) {
+                return res.status(400).json({
+                    success: false,
+                    message: err.code === 'LIMIT_FILE_SIZE'
+                        ? 'That image is larger than 4MB.'
+                        : err.message || 'That image could not be uploaded.',
+                });
+            }
+            next();
+        });
+    },
+    controller.updateMyAvatar,
+);
+router.delete('/me/avatar', controller.removeMyAvatar);
 router.get('/event-options', controller.eventOptions);
 router.put('/favourite-templates', controller.setFavouriteTemplates);
 
