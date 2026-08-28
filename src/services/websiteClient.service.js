@@ -1,8 +1,11 @@
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const { Sequelize, WebsiteClient, Vendor } = require('../models');
 const { Op } = Sequelize;
 const baseService = require('./base.service');
 const ApiError = require('../utils/apiError');
+const logger = require('../utils/logger');
+const { OTP_TTL_SECONDS, OTP_MAX_ATTEMPTS } = require('./websiteClientOAuth.service');
 
 const MODEL_NAME = 'WebsiteClient';
 const MODULE_SLUG = 'website_clients';
@@ -417,9 +420,188 @@ const getStats = async (companyId = undefined) => {
     };
 };
 
+
+// ── Mobile OTP login (the mobile app's sign-in) ─────────────────────────────
+//
+// A SECOND way in, alongside email + password. The app signs a client in with
+// the mobile number already on their record — nothing is created here, so a
+// number that is not on an account cannot become one.
+//
+// ⚠ NOT the same as `sendMobileOtp` / `verifyMobileOtp` in
+// websiteClientOAuth.service.js. Those ATTACH a number to an account that is
+// already authenticated after a social sign-in, and are authorised by a
+// short-lived link token. These two AUTHENTICATE, and are reached with no
+// session at all — which is why they are here in the login service rather than
+// beside their similarly-named cousins.
+//
+// ⚠ THERE IS STILL NO SMS PROVIDER. The code is generated, hashed and checked
+// for real, but nothing delivers it; with OTP_ACCEPT_ANY on, any value passes.
+// See the note on `verifyLoginOtp`.
+
+/** Finds the ONE active client a number belongs to, within a tenant. */
+const findClientByMobile = async (mobile, vendorId) => {
+    const digits = digitsOnly(mobile);
+    if (digits.length < 7 || digits.length > 15) {
+        throw ApiError.badRequest('Please enter a valid mobile number.');
+    }
+
+    const resolvedVendorId = Number(vendorId) || DEFAULT_VENDOR_ID;
+
+    /**
+     * `unscoped`, because the OTP hash is the whole point of this lookup.
+     *
+     * The model's defaultScope excludes `otp_hash` — correct everywhere else,
+     * and it silently broke this flow: `verifyLoginOtp` read `client.otp_hash`
+     * as `undefined` and answered "please request a code first" for every code,
+     * including a correct one just issued.
+     *
+     * `password` stays excluded rather than using the `withPassword` scope the
+     * OAuth flow reaches for. Nothing here needs it, and an instance that does
+     * not carry the hash cannot re-hash it on save — the trap that silently
+     * bricks an account.
+     */
+    /**
+     * Match on what was TYPED, and on the same number without a country code.
+     *
+     * Every stored `mobile` here is the bare national number (10 digits), with
+     * the country code held separately in `dial_code`. But the login form shows
+     * a `+91` prefix, so people reasonably type `+91 98846 99435` — which
+     * `digitsOnly` turns into 12 digits and an exact match rejects, reporting
+     * "no account is registered with that number" about an account that plainly
+     * exists. That is a wrong answer, not a strict one.
+     *
+     * So the last 10 digits are tried as well. Kept to a small explicit
+     * candidate list rather than a `LIKE '%…'` suffix match: a wildcard prefix
+     * cannot use the index, and it would also match a DIFFERENT subscriber
+     * whose number merely ends the same way.
+     */
+    const candidates = [...new Set([digits, digits.slice(-10)])];
+
+    const client = await WebsiteClient.unscoped().findOne({
+        where: { vendor_id: resolvedVendorId, mobile: { [Op.in]: candidates } },
+        attributes: { exclude: ['password'] },
+    });
+
+    /**
+     * ⚠ THIS ANSWER REVEALS WHETHER A NUMBER IS REGISTERED.
+     *
+     * The email login deliberately says "Invalid email or password" for both an
+     * unknown address and a wrong password, so it cannot be used to enumerate
+     * accounts. This one does not, and that is a considered trade, not an
+     * oversight: these accounts are created BY AN ADMIN, so someone typing
+     * their own number and being told nothing is wrong — then waiting for a
+     * code that can never arrive — has no way to discover that they were never
+     * added. Say so instead.
+     *
+     * If account enumeration matters more than that, return the same generic
+     * "code sent" here and fail at verify.
+     */
+    if (!client) {
+        throw ApiError.unauthorized('No account is registered with that mobile number.');
+    }
+    if (Number(client.is_active) !== 1) {
+        throw ApiError.forbidden('Your account is not active. Please contact us.');
+    }
+    return client;
+};
+
+/**
+ * Step 1 — issue a code to a registered number.
+ *
+ * No password is involved, so a client created by social sign-in (which has no
+ * password at all) can use the app. That is a feature of this route, not a hole:
+ * possession of the number is what is being tested, in place of the password.
+ */
+const requestLoginOtp = async (data = {}, vendorId = DEFAULT_VENDOR_ID) => {
+    const client = await findClientByMobile(data.mobile, vendorId);
+
+    const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+    const otpHash = await bcrypt.hash(code, 10);
+
+    // `hooks: false` so the model's beforeUpdate password hook cannot fire on a
+    // row we did not load the password for.
+    await client.update(
+        {
+            otp_hash: otpHash,
+            otp_expires_at: new Date(Date.now() + OTP_TTL_SECONDS * 1000),
+            otp_attempts: 0,
+        },
+        { hooks: false }
+    );
+
+    // The delivery seam. Replace this line with the SMS call and the whole flow
+    // keeps working unchanged.
+    logger.info?.(
+        `[OTP] login code for website_client ${client.id} -> ${client.dial_code || ''}${digitsOnly(data.mobile)}: ${code} (NOT SENT — no SMS provider)`
+    );
+
+    const echo =
+        process.env.OTP_DEV_ECHO === 'true' && process.env.NODE_ENV !== 'production';
+
+    return {
+        expires_in: OTP_TTL_SECONDS,
+        delivered: false,
+        ...(echo ? { dev_code: code } : {}),
+    };
+};
+
+/**
+ * Step 2 — check the code and return the client to sign in.
+ *
+ * ⚠ OTP_ACCEPT_ANY makes the code decorative: with it on, ANY value passes,
+ * so this endpoint proves only that the caller knows a registered number. That
+ * is the agreed state until SMS exists. Turn it off the moment it does; nothing
+ * else in this flow has to change.
+ *
+ * `mobile_verified` is deliberately NOT set by this route. Under the bypass it
+ * would be a lie, and outside it the number was already verified when it was
+ * put on the account.
+ */
+const verifyLoginOtp = async (data = {}, vendorId = DEFAULT_VENDOR_ID) => {
+    const client = await findClientByMobile(data.mobile, vendorId);
+    const code = digitsOnly(data.otp);
+
+    if (!client.otp_hash || !client.otp_expires_at) {
+        throw ApiError.badRequest('Please request a code first.');
+    }
+    if (new Date(client.otp_expires_at).getTime() < Date.now()) {
+        throw ApiError.badRequest('That code has expired. Please request a new one.');
+    }
+    if (client.otp_attempts >= OTP_MAX_ATTEMPTS) {
+        throw ApiError.badRequest('Too many incorrect attempts. Please request a new code.');
+    }
+
+    const acceptAny = process.env.OTP_ACCEPT_ANY === 'true';
+    const matches =
+        acceptAny || (code.length === 6 && (await bcrypt.compare(code, client.otp_hash)));
+
+    if (!matches) {
+        // Counted BEFORE the throw, or the cap is decorative.
+        await client.update({ otp_attempts: client.otp_attempts + 1 }, { hooks: false });
+        throw ApiError.badRequest('That code is not correct.');
+    }
+
+    if (acceptAny) {
+        logger.warn?.(
+            `[OTP] OTP_ACCEPT_ANY is on — accepted an unchecked login code for website_client ${client.id}`
+        );
+    }
+
+    // Cleared so a used code can never be replayed.
+    await client.update(
+        { otp_hash: null, otp_expires_at: null, otp_attempts: 0, last_login_at: new Date() },
+        { hooks: false }
+    );
+
+    // Re-read through the default scope so the caller never holds otp_hash.
+    return WebsiteClient.findByPk(client.id);
+};
+
 module.exports = {
     register,
     login,
+    requestLoginOtp,
+    verifyLoginOtp,
     getAll,
     getById,
     getStats,

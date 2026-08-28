@@ -8,6 +8,9 @@ const {
     EventType,
     Religion,
     EventMenu,
+    EventTemplate,
+    FrameStyle,
+    Decoration,
 } = require('../models');
 const { Op } = Sequelize;
 const ApiError = require('../utils/apiError');
@@ -453,6 +456,10 @@ const getEventById = async (clientId, eventId) => {
         })).map((m) => m.toJSON())
         : [];
 
+    // Same design block the list attaches, so the detail screen and the card it
+    // was opened from cannot disagree about what the invitation looks like.
+    await attachDesign([presented], presented.company_id ?? null);
+
     return presented;
 };
 
@@ -505,6 +512,96 @@ const SORT_ORDERS = {
  */
 const defaultOrder = (status) =>
     status === 'upcoming' || status === 'live' ? SORT_ORDERS.date_asc : SORT_ORDERS.date_desc;
+
+
+/**
+ * Attach each event's DESIGN so a client can draw the invitation.
+ *
+ * ── WHY THE LIST NEEDS THIS ─────────────────────────────────────────────────
+ * An event stores only `theme_id` (the template's `code`) and `primary_color`.
+ * Everything that makes an invitation look like itself — background, frame
+ * artwork, decorations, fonts — lives on `event_templates`. Without this, a list
+ * row can draw a coloured rectangle and nothing else, which is exactly the
+ * §277 gap: the admin drew an arch and a toran while the client got a flat
+ * swatch, and it read as a styling bug rather than a missing SELECT.
+ *
+ * ── COST ────────────────────────────────────────────────────────────────────
+ * THREE queries for the whole page, not three per row: templates, then frames
+ * and decorations resolved in one round each. At ~374ms per round trip to
+ * production, per-row lookups on a 12-row page would be twenty seconds.
+ *
+ * ── theme_id MAY NOT BE A TEMPLATE AT ALL ───────────────────────────────────
+ * It also holds legacy built-in slugs (`floral-bliss`) from before the admin
+ * catalogue existed, and a code whose template was since deleted. Both resolve
+ * to `design: null`, which the client renders as its own fallback rather than
+ * as an error — an old event keeps working.
+ */
+const TEMPLATE_DESIGN_ATTRS = [
+    'id', 'code', 'name', 'orientation', 'layout_style',
+    'background_type', 'background_color', 'background_image',
+    'gradient_from', 'gradient_via', 'gradient_to', 'gradient_type', 'gradient_direction',
+    'overlay_enabled', 'overlay_color', 'overlay_opacity',
+    'secondary_color', 'primary_font', 'secondary_font', 'border_style',
+    'frame_style_id', 'decoration_ids',
+];
+
+const attachDesign = async (rows, companyId) => {
+    const codes = [...new Set(rows.map((r) => r.theme_id).filter(Boolean))];
+    if (!codes.length) {
+        for (const row of rows) row.design = null;
+        return rows;
+    }
+
+    const templates = await EventTemplate.findAll({
+        where: {
+            code: { [Op.in]: codes },
+            ...(companyId ? { company_id: companyId } : {}),
+        },
+        attributes: TEMPLATE_DESIGN_ATTRS,
+        raw: true,
+    });
+
+    const frameIds = [...new Set(templates.map((t) => t.frame_style_id).filter(Boolean))];
+    const decoIds = [...new Set(templates.flatMap((t) => t.decoration_ids ?? []))];
+
+    const [frames, decos] = await Promise.all([
+        frameIds.length
+            ? FrameStyle.findAll({
+                where: { id: frameIds, is_active: 1 },
+                attributes: ['id', 'name', 'file_url'],
+                raw: true,
+            })
+            : [],
+        decoIds.length
+            ? Decoration.findAll({
+                where: { id: decoIds, is_active: 1 },
+                attributes: ['id', 'name', 'type', 'file_url'],
+                raw: true,
+            })
+            : [],
+    ]);
+
+    const frameById = new Map(frames.map((f) => [f.id, f]));
+    const decoById = new Map(decos.map((d) => [d.id, d]));
+
+    const byCode = new Map(
+        templates.map((t) => {
+            // Same field names the existing preview components already read, so
+            // nothing has to be re-mapped on the client.
+            const { frame_style_id: frameId, decoration_ids: decoList, ...rest } = t;
+            return [t.code, {
+                ...rest,
+                frame_url: frameById.get(frameId)?.file_url ?? null,
+                decorationItems: (decoList ?? [])
+                    .map((id) => decoById.get(id))
+                    .filter(Boolean),
+            }];
+        })
+    );
+
+    for (const row of rows) row.design = byCode.get(row.theme_id) ?? null;
+    return rows;
+};
 
 /**
  * The client's events, filtered the way the My Events tabs filter them.
@@ -561,7 +658,7 @@ const listEvents = async (clientId, query = {}) => {
     });
 
     return {
-        rows: rows.map(present),
+        rows: await attachDesign(rows.map(present), rows[0]?.company_id ?? null),
         pagination: {
             page,
             limit,

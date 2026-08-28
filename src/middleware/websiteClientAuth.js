@@ -38,16 +38,40 @@ const clearWebsiteClientCookies = (res) => {
     res.clearCookie(COOKIE_REFRESH);
 };
 
+/**
+ * The access token, from whichever transport the caller has.
+ *
+ * `Authorization: Bearer` FIRST, because that is the only one a mobile app can
+ * use — it is not a browser, has no cookie jar, and keeps its tokens in the
+ * device keystore. The web portal keeps sending cookies and is unaffected.
+ *
+ * Header wins when both are present: a native client that explicitly attached a
+ * token means that token, and silently preferring a stale cookie from some
+ * other session would be very hard to diagnose.
+ */
+const bearerToken = (req) => {
+    const header = req.get('authorization') || req.get('Authorization') || '';
+    const match = /^Bearer\s+(.+)$/i.exec(header.trim());
+    return match ? match[1].trim() : null;
+};
+
 const isWebsiteClientAuthenticated = async (req, res, next) => {
     try {
-        const accessToken = req.cookies[COOKIE_ACCESS];
+        const headerToken = bearerToken(req);
+        const accessToken = headerToken || req.cookies[COOKIE_ACCESS];
         const refreshToken = req.cookies[COOKIE_REFRESH];
 
         let decoded = accessToken ? verifyAccessToken(accessToken) : null;
 
         // Access token expired — mint a new one from the refresh token so a
         // 15-minute session does not interrupt someone mid-form.
-        if ((!decoded || decoded.type !== 'website_client') && refreshToken) {
+        //
+        // Cookie callers only. A bearer caller has nowhere to receive a rotated
+        // token — a Set-Cookie on a native HTTP client goes nowhere — so it gets
+        // a 401 and refreshes explicitly through
+        // POST /public/website-clients/token/refresh, which hands the new pair
+        // back in the body where the app can actually store it.
+        if ((!decoded || decoded.type !== 'website_client') && refreshToken && !headerToken) {
             const refreshDecoded = verifyRefreshToken(refreshToken);
             if (refreshDecoded && refreshDecoded.type === 'website_client') {
                 const fresh = await WebsiteClient.findByPk(refreshDecoded.id);
@@ -60,7 +84,10 @@ const isWebsiteClientAuthenticated = async (req, res, next) => {
         }
 
         if (!decoded || decoded.type !== 'website_client') {
-            clearWebsiteClientCookies(res);
+            // Only a cookie caller has cookies to clear. Doing it unconditionally
+            // would let an app request with a stale bearer token sign out a
+            // browser session sharing the same connection.
+            if (!headerToken) clearWebsiteClientCookies(res);
             return res.status(401).json({ success: false, message: 'Client authentication required.' });
         }
 
@@ -69,11 +96,11 @@ const isWebsiteClientAuthenticated = async (req, res, next) => {
         // token would otherwise keep working until it expired.
         const client = await WebsiteClient.findByPk(decoded.id);
         if (!client) {
-            clearWebsiteClientCookies(res);
+            if (!headerToken) clearWebsiteClientCookies(res);
             return res.status(401).json({ success: false, message: 'Your account no longer exists.' });
         }
         if (Number(client.is_active) !== 1) {
-            clearWebsiteClientCookies(res);
+            if (!headerToken) clearWebsiteClientCookies(res);
             return res.status(403).json({ success: false, message: 'Your account is not active. Please contact us.' });
         }
 

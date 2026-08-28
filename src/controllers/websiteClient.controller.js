@@ -3,7 +3,8 @@ const oauthService = require('../services/websiteClientOAuth.service');
 const ApiResponse = require('../utils/apiResponse');
 const logger = require('../utils/logger');
 const { asyncHandler } = require('../utils/helpers');
-const { generateWebsiteClientAccessToken, generateWebsiteClientRefreshToken } = require('../utils/jwt');
+const { generateWebsiteClientAccessToken, generateWebsiteClientRefreshToken, verifyRefreshToken } = require('../utils/jwt');
+const { WebsiteClient } = require('../models');
 const { setWebsiteClientCookies, clearWebsiteClientCookies } = require('../middleware/websiteClientAuth');
 
 // ── Public: signup from the tenant website ───────────────────────────────────
@@ -282,10 +283,96 @@ const deleteById = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, null, 'Client deleted successfully');
 });
 
+
+// ── Public: mobile OTP login (the mobile app) ────────────────────────────────
+
+/**
+ * The session payload for a NATIVE client.
+ *
+ * Tokens in the BODY, not in Set-Cookie. A Flutter app is not a browser: it has
+ * no cookie jar, and a Set-Cookie header on a native HTTP client is simply
+ * dropped. The web portal keeps its cookies — this is an additional transport,
+ * not a replacement.
+ *
+ * `expires_in` is stated so the app can refresh ahead of expiry instead of
+ * hardcoding a number that only this backend knows.
+ */
+const sessionPayload = (client) => ({
+    client,
+    access_token: generateWebsiteClientAccessToken(client),
+    refresh_token: generateWebsiteClientRefreshToken(client),
+    token_type: 'Bearer',
+    expires_in: 15 * 60,
+});
+
+/** Step 1 — send a code to a registered mobile number. */
+const requestLoginOtp = asyncHandler(async (req, res) => {
+    const vendorId = req.body.vendor_id || req.query.vendor_id || req.companyId || undefined;
+    const result = await websiteClientService.requestLoginOtp(req.body, vendorId);
+    logger.logRequest(req, 'Mobile OTP login requested');
+    return ApiResponse.success(res, result, 'Verification code sent.');
+});
+
+/** Step 2 — check the code and hand back the session. */
+const verifyLoginOtp = asyncHandler(async (req, res) => {
+    const vendorId = req.body.vendor_id || req.query.vendor_id || req.companyId || undefined;
+    const client = await websiteClientService.verifyLoginOtp(req.body, vendorId);
+
+    // Cookies are set as well, so the SAME endpoint works if the web portal ever
+    // wants OTP sign-in. Harmless to an app, which ignores them.
+    const payload = sessionPayload(client);
+    setWebsiteClientCookies(res, payload.access_token, payload.refresh_token);
+
+    logger.logRequest(req, `Mobile OTP login: client ${client.id}`);
+    return ApiResponse.success(res, payload, 'Login successful');
+});
+
+/**
+ * Trades a refresh token for a fresh pair.
+ *
+ * Exists for bearer callers specifically. A cookie caller is refreshed inside
+ * `isWebsiteClientAuthenticated`, which can rotate the cookie mid-request; an
+ * app has nowhere to receive that, so it asks here and stores what comes back.
+ *
+ * The client row is re-read and re-checked rather than trusted from the token:
+ * this is the one moment a deactivated or deleted account can be caught before
+ * being handed another 15 minutes of access.
+ *
+ * A NEW refresh token is returned each time, so an app that stays in use never
+ * reaches the 7-day expiry — which is what "signed in until you log out" means
+ * in practice. The old one keeps working until it expires; these are stateless
+ * JWTs with no revocation list, so logging out clears the app's copy rather
+ * than invalidating it server-side.
+ */
+const refreshSession = asyncHandler(async (req, res) => {
+    const token = req.body.refresh_token || req.cookies?.website_client_refresh_token;
+    if (!token) return ApiResponse.error(res, 'A refresh token is required.', 401);
+
+    const decoded = verifyRefreshToken(token);
+    if (!decoded || decoded.type !== 'website_client') {
+        return ApiResponse.error(res, 'Your session has expired. Please sign in again.', 401);
+    }
+
+    const client = await WebsiteClient.findByPk(decoded.id);
+    if (!client) {
+        return ApiResponse.error(res, 'Your account no longer exists.', 401);
+    }
+    if (Number(client.is_active) !== 1) {
+        return ApiResponse.error(res, 'Your account is not active. Please contact us.', 403);
+    }
+
+    const payload = sessionPayload(client);
+    setWebsiteClientCookies(res, payload.access_token, payload.refresh_token);
+    return ApiResponse.success(res, payload, 'Session refreshed');
+});
+
 module.exports = {
     register,
     login,
     logout,
+    requestLoginOtp,
+    verifyLoginOtp,
+    refreshSession,
     oauthStart,
     oauthCallback,
     oauthProviders,

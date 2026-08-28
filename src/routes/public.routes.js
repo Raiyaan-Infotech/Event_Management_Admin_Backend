@@ -36,6 +36,14 @@ router.post('/website-clients/register', websiteClientController.register);
 router.post('/website-clients/login', websiteClientController.login);
 router.post('/website-clients/logout', websiteClientController.logout);
 
+// ── Mobile app sign-in: OTP to the number already on the account ────────────
+// Distinct from /website-clients/mobile/* below, which ATTACHES a number to an
+// account already authenticated by a social sign-in. These AUTHENTICATE.
+router.post('/website-clients/login/otp/request', websiteClientController.requestLoginOtp);
+router.post('/website-clients/login/otp/verify', websiteClientController.verifyLoginOtp);
+// Bearer callers refresh explicitly; cookie callers are refreshed in the middleware.
+router.post('/website-clients/token/refresh', websiteClientController.refreshSession);
+
 // ── Social sign-in ──────────────────────────────────────────────────────────
 // `start` and `callback` are top-level browser navigations that answer with a
 // 302, not JSON — the browser has to physically leave for the provider and come

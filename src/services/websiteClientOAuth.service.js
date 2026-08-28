@@ -626,6 +626,12 @@ const verifyMobileOtp = async ({ token, dialCode, mobile, otp }) => {
 };
 
 module.exports = {
+    // Exported so the mobile OTP LOGIN in websiteClient.service.js uses the same
+    // TTL and attempt cap as this flow. Two copies would drift, and an OTP whose
+    // lifetime depends on which endpoint issued it is a support ticket nobody
+    // can reproduce.
+    OTP_TTL_SECONDS,
+    OTP_MAX_ATTEMPTS,
     PROVIDERS,
     signMobileToken,
     sendMobileOtp,
