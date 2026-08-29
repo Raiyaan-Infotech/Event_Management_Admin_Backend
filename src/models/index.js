@@ -109,6 +109,16 @@ db.Decoration = require('./Decoration')(sequelize, Sequelize);
 // Public website signups — people who registered themselves on a tenant site
 db.WebsiteClient = require('./WebsiteClient')(sequelize, Sequelize);
 
+// Client-portal billing. The subscription is the BILLING record (term, price,
+// renewal); website_clients.subscription_plan_id remains the ENTITLEMENT
+// pointer. See ClientSubscription's header for why both exist.
+db.ClientSubscription = require('./ClientSubscription')(sequelize, Sequelize);
+db.ClientSubscriptionEvent = require('./ClientSubscriptionEvent')(sequelize, Sequelize);
+db.ClientInvoice = require('./ClientInvoice')(sequelize, Sequelize);
+db.ClientInvoiceItem = require('./ClientInvoiceItem')(sequelize, Sequelize);
+db.ClientTransaction = require('./ClientTransaction')(sequelize, Sequelize);
+db.ClientSalesEnquiry = require('./ClientSalesEnquiry')(sequelize, Sequelize);
+
 // Events created by those clients in the client portal
 db.Event = require('./Event')(sequelize, Sequelize);
 db.EventGuest = require('./EventGuest')(sequelize, Sequelize);
@@ -343,6 +353,38 @@ db.Decoration.belongsTo(db.User, { foreignKey: 'updated_by', as: 'updater' });
 db.WebsiteClient.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
 db.WebsiteClient.belongsTo(db.User, { foreignKey: 'created_by', as: 'creator' });
 db.WebsiteClient.belongsTo(db.User, { foreignKey: 'updated_by', as: 'updater' });
+
+// Client billing. The client CASCADEs — a deleted account keeps no billing
+// rows. Both plan joins are SET NULL: retiring a plan must never delete
+// somebody's subscription history, and `pendingPlan` is a scheduled change
+// that simply stops being scheduled if its target goes away.
+db.ClientSubscription.belongsTo(db.WebsiteClient, { foreignKey: 'website_client_id', as: 'client' });
+db.WebsiteClient.hasMany(db.ClientSubscription, { foreignKey: 'website_client_id', as: 'subscriptions' });
+db.ClientSubscription.belongsTo(db.SubscriptionPlan, { foreignKey: 'subscription_plan_id', as: 'plan' });
+db.ClientSubscription.belongsTo(db.SubscriptionPlan, { foreignKey: 'pending_plan_id', as: 'pendingPlan' });
+
+db.ClientSubscriptionEvent.belongsTo(db.ClientSubscription, { foreignKey: 'client_subscription_id', as: 'subscription' });
+db.ClientSubscription.hasMany(db.ClientSubscriptionEvent, { foreignKey: 'client_subscription_id', as: 'events' });
+db.ClientSubscriptionEvent.belongsTo(db.SubscriptionPlan, { foreignKey: 'from_plan_id', as: 'fromPlan' });
+db.ClientSubscriptionEvent.belongsTo(db.SubscriptionPlan, { foreignKey: 'to_plan_id', as: 'toPlan' });
+
+// Invoices. The subscription join is SET NULL, not CASCADE — deleting a
+// subscription must never destroy the invoices raised against it; those are
+// financial records and outlive the thing that produced them. Items DO cascade:
+// a line is part of its invoice and means nothing without it.
+db.ClientInvoice.belongsTo(db.WebsiteClient, { foreignKey: 'website_client_id', as: 'client' });
+db.WebsiteClient.hasMany(db.ClientInvoice, { foreignKey: 'website_client_id', as: 'invoices' });
+db.ClientInvoice.belongsTo(db.ClientSubscription, { foreignKey: 'client_subscription_id', as: 'subscription' });
+db.ClientInvoice.belongsTo(db.SubscriptionPlan, { foreignKey: 'subscription_plan_id', as: 'plan' });
+db.ClientInvoice.hasMany(db.ClientInvoiceItem, { foreignKey: 'invoice_id', as: 'items' });
+db.ClientInvoiceItem.belongsTo(db.ClientInvoice, { foreignKey: 'invoice_id', as: 'invoice' });
+
+db.ClientTransaction.belongsTo(db.WebsiteClient, { foreignKey: 'website_client_id', as: 'client' });
+db.WebsiteClient.hasMany(db.ClientTransaction, { foreignKey: 'website_client_id', as: 'transactions' });
+db.ClientTransaction.belongsTo(db.ClientInvoice, { foreignKey: 'invoice_id', as: 'invoice' });
+db.ClientInvoice.hasMany(db.ClientTransaction, { foreignKey: 'invoice_id', as: 'transactions' });
+
+db.ClientSalesEnquiry.belongsTo(db.WebsiteClient, { foreignKey: 'website_client_id', as: 'client' });
 
 // Events. The owning client CASCADEs at the DB level — deleting a client must
 // not leave events with no owner. Everything else is SET NULL: removing a

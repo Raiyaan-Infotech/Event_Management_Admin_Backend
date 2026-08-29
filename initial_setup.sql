@@ -10187,4 +10187,203 @@ INSERT IGNORE INTO `translations` (`id`, `company_id`, `translation_key_id`, `la
 (698, 1, 512, 1, 'Plan Badges', 'reviewed', 1, NULL, NULL, '2026-08-17 03:47:22', '2026-08-17 03:47:22', NULL),
 (699, 1, 513, 1, 'Clients', 'reviewed', 1, NULL, NULL, '2026-08-17 12:08:22', '2026-08-17 12:08:22', NULL);
 
+
+-- ---------------------------------------------------------------------------
+-- Client-portal billing (Phase 1).
+--
+-- client_subscriptions is the BILLING record: the term, the price actually
+-- charged, the renewal date and any cancellation. website_clients.subscription_plan_id
+-- remains the ENTITLEMENT pointer and is NOT replaced by it — see the model header.
+--
+-- DDL dumped from a live database with SHOW CREATE TABLE rather than hand-written,
+-- so what ships here is what is actually running.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS `client_subscriptions` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `website_client_id` int unsigned NOT NULL,
+  `subscription_plan_id` int unsigned DEFAULT NULL,
+  `company_id` int DEFAULT NULL,
+  `vendor_id` int unsigned DEFAULT NULL,
+  `status` enum('trialing','active','cancelled','expired') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'active' COMMENT 'Lifecycle. "expired" is also DERIVED at read time once the period ends.',
+  `billing_cycle` enum('monthly','quarterly','yearly','lifetime') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'monthly' COMMENT 'Snapshot of the plan cycle at purchase, not read through to the plan.',
+  `price` decimal(10,2) NOT NULL DEFAULT '0.00' COMMENT 'Pre-tax, snapshot at purchase.',
+  `currency_code` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'INR',
+  `tax_rate` decimal(5,2) NOT NULL DEFAULT '18.00' COMMENT 'Percent, EXCLUSIVE: added on top of price.',
+  `started_at` datetime NOT NULL,
+  `current_period_start` datetime NOT NULL,
+  `current_period_end` datetime DEFAULT NULL COMMENT 'NULL means lifetime — no renewal date.',
+  `trial_ends_at` datetime DEFAULT NULL,
+  `cancel_at_period_end` tinyint NOT NULL DEFAULT '0' COMMENT 'Cancelling keeps access until the period ends rather than cutting it off.',
+  `cancelled_at` datetime DEFAULT NULL,
+  `cancellation_reason` varchar(150) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `cancellation_comments` varchar(300) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `pending_plan_id` int unsigned DEFAULT NULL COMMENT 'A plan change scheduled for the end of the current period.',
+  `pending_effective_at` datetime DEFAULT NULL,
+  `created_by` int unsigned DEFAULT NULL,
+  `updated_by` int unsigned DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_client_subs_client` (`website_client_id`,`deleted_at`,`status`),
+  KEY `idx_client_subs_plan` (`subscription_plan_id`),
+  KEY `idx_client_subs_pending` (`pending_plan_id`),
+  KEY `idx_client_subs_period` (`current_period_end`),
+  CONSTRAINT `fk_client_subs_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_client_subs_pending` FOREIGN KEY (`pending_plan_id`) REFERENCES `subscription_plans` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_client_subs_plan` FOREIGN KEY (`subscription_plan_id`) REFERENCES `subscription_plans` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `client_subscription_events` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `client_subscription_id` int unsigned NOT NULL,
+  `website_client_id` int unsigned NOT NULL,
+  `type` enum('created','change_scheduled','change_cancelled','change_applied','plan_changed','cancelled','resumed','renewed','expired') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `from_plan_id` int unsigned DEFAULT NULL,
+  `to_plan_id` int unsigned DEFAULT NULL,
+  `description` varchar(300) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `amount` decimal(10,2) DEFAULT NULL COMMENT 'Pre-tax, when the event carries one. NULL for setup rows.',
+  `currency_code` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `actor` enum('client','admin','system') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'client' COMMENT 'A period rollover is "system" — nobody pressed anything.',
+  `actor_id` int unsigned DEFAULT NULL,
+  `occurred_at` datetime NOT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_client_sub_events_client` (`website_client_id`,`occurred_at`),
+  KEY `idx_client_sub_events_sub` (`client_subscription_id`),
+  CONSTRAINT `fk_client_sub_events_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_client_sub_events_sub` FOREIGN KEY (`client_subscription_id`) REFERENCES `client_subscriptions` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ---------------------------------------------------------------------------
+-- Client-portal billing, Phase 2 — invoices, the money ledger, sales enquiries.
+--
+-- client_invoices carries a SNAPSHOT of who was billed (billing_name/email/
+-- address/gstin). An invoice records what was billed to whom at that moment;
+-- joining it from the client row would rewrite last year's invoices when
+-- somebody edits their profile.
+--
+-- Tax is EXCLUSIVE: total = subtotal - discount + tax. tax_breakdown holds the
+-- components as JSON so switching an intra-state CGST+SGST split to a single
+-- inter-state IGST line is data rather than a migration.
+--
+-- client_transactions is the MONEY ledger and is deliberately separate from
+-- client_subscription_events, which is the LIFECYCLE log. The Billing History
+-- screen merges the two at read time.
+--
+-- DDL dumped with SHOW CREATE TABLE, not hand-written.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS `client_invoices` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `invoice_number` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'INV-YYYY-NNNNNN, sequential per company.',
+  `website_client_id` int unsigned NOT NULL,
+  `client_subscription_id` int unsigned DEFAULT NULL,
+  `subscription_plan_id` int unsigned DEFAULT NULL,
+  `company_id` int DEFAULT NULL,
+  `status` enum('draft','issued','paid','partially_paid','cancelled','refunded') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'issued' COMMENT 'No gateway exists, so nothing moves to paid on its own. "unpaid" is issued + amount_due > 0.',
+  `issue_date` date NOT NULL,
+  `due_date` date DEFAULT NULL,
+  `paid_at` datetime DEFAULT NULL,
+  `period_start` date DEFAULT NULL COMMENT 'The billing term this invoice covers.',
+  `period_end` date DEFAULT NULL,
+  `currency_code` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'INR',
+  `subtotal` decimal(12,2) NOT NULL DEFAULT '0.00' COMMENT 'Pre-tax, pre-discount.',
+  `discount_amount` decimal(12,2) NOT NULL DEFAULT '0.00',
+  `tax_rate` decimal(5,2) NOT NULL DEFAULT '18.00',
+  `tax_amount` decimal(12,2) NOT NULL DEFAULT '0.00' COMMENT 'Added ON TOP of subtotal - discount.',
+  `tax_breakdown` json DEFAULT NULL COMMENT 'Components, e.g. [{label:CGST,rate:9,amount:n}]. JSON so IGST needs no migration.',
+  `tax_inclusive` tinyint NOT NULL DEFAULT '0' COMMENT 'Explicit, so no screen has to guess.',
+  `total` decimal(12,2) NOT NULL DEFAULT '0.00',
+  `amount_paid` decimal(12,2) NOT NULL DEFAULT '0.00',
+  `amount_due` decimal(12,2) NOT NULL DEFAULT '0.00',
+  `billing_name` varchar(150) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Snapshot at issue — an invoice must not change when a profile is edited.',
+  `billing_email` varchar(190) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `billing_address` text COLLATE utf8mb4_unicode_ci,
+  `billing_gstin` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `notes` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `created_by` int unsigned DEFAULT NULL,
+  `updated_by` int unsigned DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_client_invoice_number` (`company_id`,`invoice_number`),
+  KEY `idx_client_invoices_client` (`website_client_id`,`deleted_at`,`issue_date`),
+  KEY `idx_client_invoices_status` (`website_client_id`,`status`),
+  KEY `idx_client_invoices_sub` (`client_subscription_id`),
+  KEY `fk_client_invoices_plan` (`subscription_plan_id`),
+  CONSTRAINT `fk_client_invoices_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_client_invoices_plan` FOREIGN KEY (`subscription_plan_id`) REFERENCES `subscription_plans` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_client_invoices_sub` FOREIGN KEY (`client_subscription_id`) REFERENCES `client_subscriptions` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `client_invoice_items` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `invoice_id` int unsigned NOT NULL,
+  `item_type` enum('plan','addon','adjustment','discount') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'plan',
+  `description` varchar(300) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `period_start` date DEFAULT NULL,
+  `period_end` date DEFAULT NULL,
+  `quantity` decimal(10,2) NOT NULL DEFAULT '1.00',
+  `unit_price` decimal(12,2) NOT NULL DEFAULT '0.00',
+  `amount` decimal(12,2) NOT NULL DEFAULT '0.00' COMMENT 'quantity * unit_price, stored so a rounding rule cannot drift.',
+  `sort_order` int NOT NULL DEFAULT '0',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_client_invoice_items_invoice` (`invoice_id`,`sort_order`),
+  CONSTRAINT `fk_client_invoice_items_invoice` FOREIGN KEY (`invoice_id`) REFERENCES `client_invoices` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `client_transactions` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `website_client_id` int unsigned NOT NULL,
+  `client_subscription_id` int unsigned DEFAULT NULL,
+  `invoice_id` int unsigned DEFAULT NULL,
+  `company_id` int DEFAULT NULL,
+  `type` enum('invoice','payment','refund','adjustment','setup') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `status` enum('pending','successful','failed','completed') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'completed',
+  `description` varchar(300) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `amount` decimal(12,2) NOT NULL DEFAULT '0.00' COMMENT 'Signed from the CLIENT side: a payment is negative, an invoice positive.',
+  `currency_code` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'INR',
+  `reference` varchar(80) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'The invoice number, or a provider reference once one exists.',
+  `gateway` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Null throughout — no provider is connected.',
+  `gateway_transaction_id` varchar(190) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `occurred_at` datetime NOT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_client_tx_client` (`website_client_id`,`occurred_at`),
+  KEY `idx_client_tx_invoice` (`invoice_id`),
+  KEY `idx_client_tx_type` (`website_client_id`,`type`),
+  CONSTRAINT `fk_client_tx_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_client_tx_invoice` FOREIGN KEY (`invoice_id`) REFERENCES `client_invoices` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `client_sales_enquiries` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `website_client_id` int unsigned DEFAULT NULL COMMENT 'Null if ever opened to a signed-out visitor.',
+  `company_id` int DEFAULT NULL,
+  `full_name` varchar(150) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `work_email` varchar(190) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `company_name` varchar(190) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `phone` varchar(30) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `events_per_year` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `interests` json DEFAULT NULL COMMENT 'The checkbox set — a list, so it cannot be a column each.',
+  `message` text COLLATE utf8mb4_unicode_ci NOT NULL,
+  `preferred_time` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `status` enum('new','contacted','closed') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'new',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_sales_enquiries_client` (`website_client_id`,`created_at`),
+  KEY `idx_sales_enquiries_status` (`status`,`created_at`),
+  CONSTRAINT `fk_sales_enquiries_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;

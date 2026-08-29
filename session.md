@@ -7154,3 +7154,1051 @@ media proxy               frame + decoration inlined; metadata endpoint and loca
 6. Everything still open from §272 — notably `EVENT_QR_SECRET` unset on Render
    (§232.4), `event_templates` permissions ungranted in production (§262.4), and
    `initial_setup.sql` ~46 tables behind.
+
+---
+
+## Session 26 — The mobile app becomes real, and the client portal grows a Settings module
+
+> **Date:** 2026-08-28 | **Backend:** `Event_Management_Admin_Backend`
+> **Client portal:** `event_client_single` · **Mobile app:** `Event_Invite_Mobile_App` (NEW to this log)
+> **Admin frontend:** `Event_Management_Admin_Frontend` (read only, as the design reference)
+> Four threads: the client portal's template previews stopped being colour swatches,
+> the Flutter app got a working sign-in and a real events list, the portal gained
+> Settings and My Profile, and its sidebar was matched to the admin panel's.
+> **Local + uncommitted. Two columns applied to LOCAL only.**
+
+### 288. A fifth app joins the map
+
+`D:\Jamal\Event_Invite_Mobile_App` — Flutter 3.44.5, Riverpod, go_router, dio.
+The **client-facing mobile app**, signing in as a `website_clients` row: the same
+account the admin creates under Admin → Clients and the same one the web client
+portal uses. Add it to the header table at the top of this file when that is next
+edited.
+
+> It had never been in this log because nothing in it talked to this backend. It
+> does now.
+
+---
+
+## The client portal's previews
+
+### 289. Template previews were flat colour swatches — a missing UI, not a missing SELECT
+
+Reported as "template list preview showing colour only". Three screens painted
+`templateBackground(template)` — the background colour or a two-stop gradient —
+with the template's name written across it, and nothing else:
+
+| Drawn by the admin's `TemplatePreview` | Drawn by the client portal |
+|---|---|
+| Frame artwork (`frame_url`) | ✗ |
+| Decorations, placed by type | ✗ |
+| The 6-8 enabled components in `component_order` | ✗ |
+| Contrast-derived ink, overlay compositing | ✗ |
+
+**The API was innocent** — §277 had already wired `TEMPLATE_ATTRS` + `attachArtwork`.
+Confirmed against the local DB: all 10 premium templates carry a `frame_style_id`,
+decorations, and 6-8 enabled components. The data arrived and the UI discarded it.
+
+New `components/common/template-artwork.tsx` wraps the existing `InvitationCard`
+so a grid tile can use it. The contain fit is CSS, not a second ResizeObserver:
+`container-type: size` plus `min(100cqw, calc(100cqh * 9 / 16))` gives the exact
+"contain" with no measure-then-paint flash and nothing racing the observer
+`InvitationCard` already runs on its own content. `w-full` sits behind the inline
+`min()` as a real fallback — a browser without container-query units discards the
+inline rule as invalid and the cascade falls back to the class.
+
+Applied to the catalogue grid, its Preview dialog (`fit="natural"`, so the card
+renders at its authored 248px) and **wizard step 4**, which had the identical bug
+on the same data.
+
+> Tiles moved `aspect-square` → `aspect-[4/5]`. In a square tile the portrait card
+> was squeezed hard enough to hit `InvitationCard`'s 0.45 scale floor and clip its
+> own content. At 4:5 on a 3-column grid it lands at ~248px, its natural width.
+
+### 290. The thumbnail had no text at all, and the fix had to survive dark palettes
+
+Follow-up report: "invitation unable to see that text". Correct — `EventThumb`
+drew background → decorations → frame and **zero `Text` widgets**. That was a
+deliberate call of mine ("identity layer only") and it was wrong: an empty frame
+is not a thumbnail of an invitation.
+
+Three lines added (name, date, venue), drawn BEFORE the frame so a heavy border
+overlaps the text rather than the reverse, inset by percentage to match the web
+renderer's safe area.
+
+**The part that mattered was the ink.** Four of the six seeded palettes are dark:
+
+```
+Aarav & Meera  #FFF6DC -> #C9A227     Rohan & Diya   #4C1D95 -> #1E0B33
+Kabir & Sara   #C9E9F5 -> #04263F     Priya          #0B1220
+Ajmal Wedding  #0E6B4F -> #052B20
+```
+
+A hardcoded ink — which is exactly what the web renderer used, a fixed dark brown
+— would have been invisible on most of them. So ink is measured: WCAG luminance
+against the resolved backdrop, with the two candidates **compared, not
+thresholded**. A gradient is averaged, because the text sits across the whole
+sweep and one stop is the wrong answer at the other end.
+
+`test/thumb_contrast_test.dart` locks it against the REAL palettes, not invented
+ones — all clear the 3:1 large-text bar.
+
+### 291. Smaller portal fixes
+
+- **"Use" removed from the template card.** The Preview dialog already carries
+  "Use this template", so the action still exists one click later — after the
+  design has actually been looked at, which is a better order now that the tile
+  shows the real invitation.
+- **Card design.** Edge to edge, the template's own frame reached the tile corners
+  and the favourite heart sat on the artwork. The card is matted now (inset on a
+  neutral ground), and **"Used N×" moved into the footer** beside the name — it is
+  metadata, not a control, and stamping it across the design is what put a white
+  pill through the frame's corner. Same treatment on the wizard tiles.
+- **Skeletons matched their tiles.** The catalogue skeleton was still
+  `aspect-square` and the wizard's `aspect-[4/3]`, both left over from before the
+  tiles became 4:5, so the grid jumped height the moment real cards arrived.
+
+---
+
+## The mobile app
+
+### 292. Gradle could not download itself — and it was not the network
+
+`flutter run` failed with `java.net.ConnectException` inside
+`org.gradle.wrapper.Install.createDist`. Not a code error: the wrapper had never
+successfully fetched `gradle-9.1.0-all.zip`, and the cache held only wreckage —
+a 0-byte `.lck` and a 0-byte `.part`.
+
+`services.gradle.org` now 307s to GitHub releases, which redirects again to an
+Azure blob endpoint. **curl reached it fine** (307 → 206 on a ranged request);
+the JVM timed out connecting at ~21s, the Windows TCP connect timeout, matching
+the 24.2s and 22.8s attempts exactly.
+
+Ruled out rather than guessed: no proxy (`ProxyEnable 0x0`, no env vars), and no
+IPv6 involvement — the CDN resolves to IPv4 only and the machine has no IPv6
+route.
+
+Fixed by fetching the distribution with curl straight into the path the wrapper
+computes, after verifying the checksum against Gradle's published `.sha256` (a
+truncated 232MB zip would have failed later as something far more confusing).
+
+> **Two things worth keeping.** A Gradle 9.3.1 distribution was already cached and
+> unused; computing the wrapper's MD5-base36 hash confirmed it matches the
+> standard 9.3.1 URL, so repointing `distributionUrl` would also have worked
+> offline — not done, because it silently bumps the toolchain for everyone.
+>
+> And **this wrapper jar has no `networkTimeout` support** (checked the jar; it
+> predates Gradle 7.6's), so the durable mitigation is unavailable without
+> regenerating `gradle-wrapper.jar`. The same stall will recur on the next bump.
+
+### 293. Portrait lock was set on the wrong activity
+
+Reported as "app opens horizontal even though I locked it". The
+`android:screenOrientation="portrait"` was on **`com.yalantis.ucrop.UCropActivity`**
+— the image cropper — which locks the crop screen only. `.MainActivity` had no
+constraint, and there was no `SystemChrome.setPreferredOrientations` anywhere.
+
+Three layers, **none redundant**:
+
+| Layer | Covers |
+|---|---|
+| `screenOrientation="portrait"` on `.MainActivity` | the LAUNCH window — the native LaunchTheme draws before `main()` runs |
+| `setPreferredOrientations([portraitUp])`, awaited before `runApp` | Flutter, once bound |
+| `UISupportedInterfaceOrientations` in Info.plist | iOS, which ignores both of the above |
+
+> ⚠ Apps targeting **Android SDK 36** have `screenOrientation` ignored on screens
+> ≥600dp. A phone behaves normally; a tablet or foldable will rotate anyway.
+
+### 294. ⚠ The app could not authenticate AT ALL — and the app's API did not exist
+
+Asked to wire "admin portal client login → app shows that client's events".
+Tracing it first turned up three separate problems, and the middle one was the
+blocker:
+
+1. **The app's auth layer targeted an imagined API.** `auth_repository.dart`
+   called `POST /auth/otp/request`, `/auth/otp/verify`, `/auth/register`,
+   `GET /me`, `GET /invites/:code`. **None of those exist.**
+2. **The backend could not authenticate a native client.**
+   `isWebsiteClientAuthenticated` read ONLY `req.cookies[...]`, and `login` put
+   the tokens ONLY in `Set-Cookie`. An app has no cookie jar; a `Set-Cookie` on a
+   native HTTP client is dropped.
+3. Events were ready and waiting behind that same middleware.
+
+The app has no email/password screen — `login_screen.dart` is a chooser and
+`login_mobile_screen.dart` is phone + OTP — while admin-created clients have
+email + password and there is still no SMS provider. **Decision taken by the
+user: phone + OTP against the registered number, any code accepted for now, real
+JWT access + refresh, signed in until explicit logout.**
+
+### 295. Mobile OTP login — new endpoints, and Bearer support
+
+Additive throughout; the web portal's cookies are untouched.
+
+| Method | Path | |
+|---|---|---|
+| POST | `/public/website-clients/login/otp/request` | issue a code to a REGISTERED number |
+| POST | `/public/website-clients/login/otp/verify` | check it, return client + JWT pair in the BODY |
+| POST | `/public/website-clients/token/refresh` | bearer callers refresh explicitly |
+
+⚠ **NOT the same as `sendMobileOtp`/`verifyMobileOtp` in
+`websiteClientOAuth.service.js`.** Those ATTACH a number to an account already
+authenticated by a social sign-in, authorised by a short-lived link token. These
+AUTHENTICATE, reached with no session at all — which is why they live in the
+login service rather than beside their similarly-named cousins.
+
+**Bearer first, cookie second**, in the middleware. The header wins when both are
+present: a native client that attached a token means that token, and silently
+preferring a stale cookie would be very hard to diagnose. Cookie callers are
+still refreshed inside the middleware; a bearer caller has nowhere to receive a
+rotated cookie, so it gets a 401 and refreshes explicitly. `clearWebsiteClientCookies`
+is now conditional — an app request with a stale bearer must not sign out a
+browser session sharing the connection.
+
+**A NEW refresh token is returned on every refresh**, which is what makes
+"signed in until you log out" true rather than "signed in for 7 days".
+
+> ⚠ **The enumeration trade, taken deliberately.** `findClientByMobile` answers
+> "No account is registered with that mobile number" rather than the
+> non-enumerating generic used by the email login. These accounts are created BY
+> AN ADMIN, so someone typing their own number and being told nothing is wrong —
+> then waiting for a code that can never arrive — has no way to discover they
+> were never added. Reversible in one place if that trade stops being worth it.
+
+**A bug I wrote and caught by testing:** `verifyLoginOtp` read `client.otp_hash`,
+which the model's `defaultScope` EXCLUDES — so it answered "please request a code
+first" for every code, including a correct one just issued. Now loaded
+`unscoped()` with `password` still excluded, so there is no hash on the instance
+to accidentally re-hash.
+
+**Tolerant number matching.** Stored mobiles are the bare 10 digits with
+`dial_code` held separately, but the login form shows a `+91` prefix — so typing
+`+91 98846 99435` became 12 digits and was rejected as "no account", about an
+account that plainly exists. Matched against the typed digits AND the last 10,
+as a small explicit candidate list rather than a `LIKE '%…'` suffix match (a
+wildcard prefix cannot use the index, and would also match a different
+subscriber ending the same way).
+
+### 296. The app side
+
+`ApiClient` and `TokenStore` were already right — Bearer header, single-flight
+refresh-on-401, `flutter_secure_storage`. They pointed at endpoints that do not
+exist.
+
+- **`api_endpoints.dart` — every path in ONE file.** They were spread across
+  three, so a rename meant hunting in three places and a path wrong in only one
+  failed at runtime as a bare 404. Verified zero path literals remain elsewhere.
+- **`AppUser` was reading fields that do not exist** — `json['phone']` and
+  `json['photoUrl']` where the API sends `mobile` and `avatar_url`. Every field
+  was silently null.
+- **`restore()` was never called**, so "stay signed in" could not have worked at
+  all. Now runs post-first-frame in `app.dart`.
+- **`SessionState.restoring`** added. On a cold start there is no user yet simply
+  because `/client/me` has not answered; treating that as signed out bounces a
+  returning client to login on every launch.
+
+### 297. ⚠ Errors were displayed as the wrong message entirely
+
+Reported as "wrong number still shows session expired". `ApiException.from` only
+understood a NESTED `{ "error": { "message": … } }` envelope, which **no endpoint
+on this backend produces** — it sends a flat `{ success, message }`. So every
+server message was discarded and replaced by the canned text for its status code:
+
+| Server said | App showed |
+|---|---|
+| No account is registered with that mobile number. | **"Your session has expired. Please sign in again."** |
+| Your account is not active. Please contact us. | **"You do not have access to this event."** |
+
+Not just unhelpful — untrue, and it sends you debugging a session problem that
+does not exist. `test/api_exception_test.dart` locks it with the live bodies
+copied verbatim.
+
+### 298. Home restricted, and wired to the client's own data
+
+- **Auth gate on the router.** It opened straight on `/home` with a comment saying
+  it skipped login "during development". Now an **allowlist** of public routes, so
+  a new screen is private BY DEFAULT. `appRouter` became `routerProvider` so
+  `redirect` can read the session; the push-notification service navigates from
+  outside the widget tree, so the instance is exposed as nullable
+  `appRouterOrNull` (a notification can land before the first frame).
+- **Logout already existed in the design and never cleared the session** — with
+  the gate on, `context.go('/login')` alone bounces straight back to `/home`.
+- **Home maps the real client**: greeting name and avatar from `/client/me`, the
+  events list and its tab counts from `/client/events`. No loading branch added —
+  the design has none, and inventing one would change the screen.
+
+### 299. SVG invitations on the app's event cards
+
+`/client/events` and `/client/events/:id` now attach a `design` block — background,
+`frame_url`, `decorationItems` — resolved from the event's template. **Three
+queries for a whole page, not three per row**: at ~374ms to production, per-row
+lookups on a 12-row page would be twenty seconds.
+
+`theme_id` may not be a template at all (a legacy built-in slug, or one since
+deleted); both resolve to `design: null` and the card falls back to its accent
+tint rather than erroring.
+
+`EventThumb` draws it with `flutter_svg`: background → decorations → frame on top,
+one uploaded corner mirrored into all four. `BoxFit.fill` on the frame, because
+these are authored `preserveAspectRatio="none"` precisely so they stretch (§258).
+
+### 300. Event Info mapped — and the field report
+
+Tapping a card sets `selectedEventIdProvider` and the screen renders
+`GET /client/events/:id`.
+
+**Real:** Event Type · Venue + address · Date & Time · About · banner date/time/venue ·
+Days to Go (derived).
+
+**Partial — the field exists but does not match the design:**
+- **Hosted By** shows two lines in the mockup (names, then "(Rahul's Parents)");
+  `organizer` is ONE free-text line. No second field, not invented.
+- **Contact** shows two phone numbers; there is one `contact_phone`. The email
+  goes on line two rather than a fabricated number.
+- **View on Map** has only `venue_address` — there are **no lat/lng columns**.
+
+**Missing entirely:** the couple photo (no image column), "We're Engaged!" (no
+field; `tagline` stands in), Invited Guests / Guests Joined (`guests_available:
+false`), Invitations Sent (messaging paused). Those three tiles show **—**, not
+`0`: a 0 and an unbuilt feature look identical on a tile and mean opposite things.
+
+**Extra — the backend has these and the screen shows none of them:** `end_time`
+(6/6 populated), `religion.name`, `category.name`, `menus`, `privacy`, `status`,
+`qr_token`, `timezone`. The QR is the notable one.
+
+> **Data note:** across the 6 events, `description`/`venue`/`end_time` are 6/6 but
+> `host_one`, `host_two`, `organizer` and both contact fields are only **3/6** —
+> they predate §280. Half the events legitimately show — for Hosted By and Contact.
+
+> ⚠ **The `/event/...` routes carry no id.** They are reached from ten places,
+> several being "back to the event" buttons inside the invite flows, so a provider
+> holds the selection instead. **Consequence: these screens are not
+> deep-linkable** — opening `/event/info` cold from a push notification has
+> nothing selected.
+
+### 301. Config, and the release build
+
+- **`--dart-define-from-file=env.json`**, not `flutter_dotenv`. Three reasons and
+  the first is the one that matters: **a bundled `.env` is shipped as a Flutter
+  ASSET**, so it lands inside the APK and anyone can unzip it out — it looks like
+  a secret store and is not one. Also compile-time (`const`, tree-shakeable)
+  rather than nullable strings from a runtime map, and no async boot step that can
+  fail before any UI exists to report it. `env.json` is gitignored (it holds a LAN
+  IP); `env.example.json` and `env.prod.json` are committed.
+- **Cleartext HTTP enabled in the DEBUG manifest only.** Android 9+ blocks plain
+  http and fails as a bare connection error with nothing in the logs.
+  > ⚠ **That file broke the build once.** XML forbids the literal `--` inside a
+  > comment, and the comment quoted `--dart-define=…`. The manifest merger reports
+  > `Error parsing AndroidManifest.xml` naming the file but not the line.
+- **⚠ Release builds are signed with the DEBUG key** (`signingConfigs.getByName("debug")`,
+  still the Flutter template default). Play Store will reject it, and every
+  machine's debug key differs. Needs a keystore + `key.properties` in CI.
+
+---
+
+## Environment
+
+### 302. Nothing new was needed — and what production is still missing
+
+Checked by walking every `process.env` the code reads: **the mobile work
+introduced zero new environment variables.** It needs `OTP_ACCEPT_ANY=true`
+(already set on Render) plus the token secrets and DB vars, all present.
+
+Comparing the live Render env against the code:
+
+| Missing on Render | Impact |
+|---|---|
+| **`EVENT_QR_SECRET`** | Open since §200.2. Fails SILENTLY — falls back to `ACCESS_TOKEN_SECRET`, and setting it later makes every printed code undecryptable. Check `SELECT COUNT(*) FROM events WHERE qr_token IS NOT NULL` first |
+| **`PUBLIC_SITE_ROOT_DOMAINS`** | `getRootDomains()` returns empty, so no subdomain can resolve to a tenant |
+| `APP_URL` | `decoration.service.js` cannot recognise its own `/uploads/` URLs |
+
+Not needed by the app at all: `FRONTEND_URL` / `CORS_ORIGIN` — CORS is a browser
+mechanism and a Flutter app never gets a preflight.
+
+> ⚠ **The JWT secrets on production are the template placeholders**, literally
+> `eventinvite_access_secret_key_change_in_production`. Anyone who has seen this
+> repo can forge a token for any admin, vendor or client — and because
+> `EVENT_QR_SECRET` is unset, that same known string currently encrypts the event
+> QR codes. Rotating signs everyone out once; that is the entire cost.
+
+> **`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` are in neither env file and that
+> is expected** — `media.service.js` reads `config.aws_access_key || process.env.…`,
+> so S3 credentials come from the **database `settings` table** first.
+
+### 303. ⚠ The backend code is not deployed
+
+Probed Render directly: `/public/site/resolve` 200 after a **32-second cold
+start**, but `login/otp/request` and `token/refresh` both **404**. A release APK
+gets 404 on login no matter what the environment says.
+
+> The cold start also matters: the app's `connectTimeout` is 15s and
+> `receiveTimeout` 20s, so the first login after the instance sleeps will time out
+> and show "The server took too long to respond."
+
+---
+
+## Client portal: Settings and My Profile
+
+### 304. Scope taken: Phase 1 only
+
+The supplied design was **8 screens**. Checked what is backed first:
+
+```
+client notification prefs  NONE     sessions / devices   NONE
+client notifications feed  NONE     2FA / MFA            NONE
+client preferences         NONE     api keys             NONE
+plan subscriptions (period) NONE    ← "Next Billing Date"
+```
+
+⚠ **Active Sessions is not merely unbuilt, it is impossible as designed.**
+Website-client refresh tokens are stateless JWTs with no server-side store, so
+nothing can enumerate or revoke them — "Log out all other sessions" cannot work
+until tokens are stored. (`client_refresh_tokens` exists but belongs to
+`vendor_clients`, the older portal.)
+
+Asked rather than inventing four tables' worth of schema (§185). **User chose
+Phase 1: Profile + Account + Password.**
+
+### 305. Two columns, four endpoints
+
+`website_clients` gained `company_name` VARCHAR(150) and `bio` TEXT — the only
+FORM fields on the design with no column. Applied to **LOCAL only** via
+`src/database/tools/apply-website-client-profile-columns.js` (dry-runs by default,
+`--prod --apply` for production). **One ALTER per column**: a combined statement
+fails outright if even one column exists, leaving a half-applied schema.
+
+| Endpoint | |
+|---|---|
+| `PUT /client/me` | profile update, narrow whitelist |
+| `PUT /client/me/password` | change password |
+| `DELETE /client/me` | close account |
+| `PUT`/`DELETE /client/me/avatar` | photo |
+
+**None takes an id** — they act on the session, so none can be aimed at another
+account. Proven: a PUT carrying `subscription_plan_id`, `is_active`,
+`email_verified` and `vendor_id` had all four ignored.
+
+Two behaviours carried deliberately: **closing an account FREES the email** (the
+unique index knows nothing about `deleted_at` — the §172 bug, in the one place a
+client can trigger it themselves), and **`email_verified` resets to 0** when the
+address changes.
+
+Password change proven end to end with restore-after: `Test@123 → Temp@9999 →
+Test@123`, logging in at each step. That proves **no double-hash** — assigning a
+pre-hashed value would hash the hash and brick the account silently.
+
+`getMe` now returns `has_password`, queried separately because `defaultScope`
+excludes the column. Without it the Security tab cannot tell a social-only account
+(which has no password by design) from one that does, and would ask for a current
+password that never existed.
+
+### 306. Avatar upload — and why `/media/upload` could not serve it
+
+`/api/v1/media/upload` is triple-gated for admins: `isAuthenticated` (admin JWT),
+`hasPermission('media.upload')` and `checkApprovalRequired`. A website client
+satisfies none of the three. Same shape as the §285 `/media/proxy` problem, same
+fix: a client-scoped route.
+
+Deliberately **not** a general upload endpoint — it does one thing and writes one
+column. The folder is a server-side literal, so the caller cannot choose where the
+file lands. Stricter than the admin uploader: **4MB not 10MB, images only**, and
+**SVG excluded** (an SVG is a document that can carry script, and this one is
+rendered back into other people's pages).
+
+**Cropper added** — the project already had one in both other frontends
+(`react-image-crop` in admin, `react-easy-crop` in vendor, wired into all 12
+upload points) and the client portal had neither. Added `react-easy-crop` to match
+the vendor portal, in a shared `ImageCropDialog`.
+
+**Crop-then-UPLOAD, not upload-then-crop.** The alternative leaves the uncropped
+original on the server: wasted storage, and a copy of a photo the person chose not
+to publish. It never upscales, and fills white before drawing (a transparent
+avatar renders as a hole on a dark theme).
+
+### 307. ⚠ A successful upload rendered as a broken image
+
+The upload worked; the URL did not.
+
+```
+file on disk                                   10,124 bytes  OK
+backend  :5001/uploads/client-avatars/x.jpg -> 200 image/jpeg
+portal   :3005/uploads/client-avatars/x.jpg -> 404
+```
+
+With the **local** driver the backend stores a path relative to ITSELF. The portal
+runs on its own origin and calls cross-origin, so `<img src="/uploads/…">`
+resolves against :3005.
+
+New `lib/media-url.ts` resolves relative paths against the backend origin and
+passes absolute ones through. **Fixed at render time, not in the database:** rows
+already written hold relative paths, so a backend change would not repair them.
+
+> The **same latent bug was in five more places** — invitation frames,
+> decorations, template thumbnails, event thumbnails and CSS `background-image`.
+> They only work today because production seeds absolute CloudFront URLs; on a
+> local-driver environment every one would break identically. All now routed
+> through `mediaUrl`.
+
+> **Where uploads actually land:** whatever the company's media settings say.
+> LOCAL has `driver` empty → `'local'` → disk. PRODUCTION has `driver = s3` →
+> CloudFront (§234). ⚠ If production's settings were ever blank, uploads would
+> silently land on Render's **ephemeral disk** and vanish on the next deploy.
+
+### 308. The two screens
+
+**`/dashboard/settings`** — six tabs. Profile and Account real; Change Password
+real and tells a social-only account it has no password to change. Notifications,
+Preferences, Integrations render an honest state that NAMES what is missing rather
+than saying "coming soon" — the two carry different information.
+
+**`/dashboard/profile`** — a READ view; every Edit links to Settings, because
+Settings already owns the form and a second editor is a second place for the same
+fields to diverge. Reached from the header dropdown, which was pointing at
+`/dashboard/settings` as a stand-in.
+
+⚠ **The "/ Unlimited" denominators and the ratio in the progress bars were
+dropped.** There is no limit field anywhere — a plan carries `price`,
+`billing_cycle` and `trial_days`, no ceiling on events, guests or messages. The
+counts are true; a bar implies a ceiling, and an invented ceiling on a usage panel
+is exactly the kind somebody plans around.
+
+Also absent and stated: Location, Time Zone, Language (no columns), Emails Sent
+(messaging paused), Download My Data / Export Events (no endpoints), 2FA,
+Next Billing Date, Payment Method, Currency.
+
+> **A lint error caught a real bug of mine.** The Settings form seeded in a
+> `useEffect` keyed on `client`, which re-ran on every background refetch — so a
+> refetch landing mid-edit silently overwrote what was being typed. Now seeded
+> once per account id, adjusted during render.
+
+> ⚠ **`<Skeleton>` inside a `<p>` caused a hydration error.** Skeleton renders a
+> `div`; a div inside a paragraph is invalid HTML, so the browser auto-closes the
+> paragraph and the server and client trees diverge. It only appeared WHILE
+> loading, so it came and went — exactly the kind dismissed as a fluke.
+
+### 309. The sidebar matched to the admin panel's
+
+Reported as the client portal's sub-menus reading cramped and narrow beside the
+admin's. Comparing the two in code rather than by eye:
+
+| | Admin | Client (before) |
+|---|---|---|
+| Sub container | `gap-1` (default) | `gap-0` + `gap-0.5 py-1.5 pl-2 pr-0` |
+| Sub button | `h-7 px-2 text-sm` (default) | `h-6` + `h-[30px] px-2.5 !text-[12.5px]` |
+| Parent button | `h-8 p-2 text-sm` (default) | `h-[38px] px-3 text-[13px] gap-2.5` |
+| Icons on children | yes | **none** |
+
+The client portal was **fighting its own primitive** at every call site. Fixed by
+deleting the overrides rather than adding more: the primitive now matches the
+admin's (`gap-1`, `h-7`), children carry icons, and the markup is line-for-line
+the admin's. The custom active pill and its 2px marker went with them — the
+primitive's own `data-[active=true]` handles it.
+
+Safe to edit the primitive here, unlike §210's `Card`: `SidebarMenuSubButton` has
+exactly ONE call site outside it.
+
+> **Still different, and left alone because it is a colour:**
+> `data-[active=true]:bg-sidebar-primary` (admin, a solid fill) vs
+> `bg-sidebar-accent` (client, a faint tint). One token if that should match too.
+
+### 310. Verified
+
+```
+mobile OTP login (HTTP)   request -> verify -> Bearer /client/me -> 6 real events
+                          refresh rotates · garbage bearer 401 · replayed OTP 400
+                          unregistered number 401 · inactive account 403
+tolerant matching         9884699435 / +91 98846 99435 / 919884699435 all OK
+profile endpoints         update · escalation ignored · empty name 400 ·
+                          duplicate email refused · password round-trip + restore
+avatar                    PNG OK · .txt refused · no session 401 · remove OK
+design attach             6/6 events carry frame + decorations
+flutter analyze           No issues found (whole app)
+flutter test              18/18 including contrast + error-mapping regressions
+tsc --noEmit              client portal clean
+routes                    /dashboard, /guests, /profile, /settings -> 200
+```
+
+### 311. Open — carried to next session
+
+1. **⚠ NOTHING IS COMMITTED**, in any of the three repos touched.
+2. **⚠ The backend is not deployed** (§303). Until it is, the mobile app 404s on
+   login and a release APK is untestable.
+3. **`company_name` / `bio` are LOCAL only.** Run
+   `node src/database/tools/apply-website-client-profile-columns.js --prod --apply`
+   before the backend deploys, or the portal's Settings save 500s in production.
+4. **⚠ Rotate the production JWT secrets** (§302) — they are the template
+   placeholders, in production, and they also encrypt the QR codes.
+5. `EVENT_QR_SECRET` and `PUBLIC_SITE_ROOT_DOMAINS` still unset on Render.
+6. **Release APK is signed with the debug key** (§301).
+7. **Settings Phase 2** is `client_preferences` + `client_notification_prefs` —
+   that unlocks four of the eight screens. Sessions/2FA/billing need far more,
+   and sessions need the stateless JWT rearchitected first (§304).
+8. **The `/event/...` routes are not deep-linkable** (§300).
+9. Header dropdown **Billing** points at `/dashboard/billing`, which does not
+   exist and falls through to the catch-all.
+10. Everything still open from §287.
+
+---
+
+## Session 27 — Billing, Phase 1: the subscription record that was never there
+
+> **Date:** 2026-08-29 | **Backend:** `Event_Management_Admin_Backend`
+> **Client portal:** `event_client_single` (port 3005)
+> Twelve Billing screens were supplied. Two are built, because two are all that
+> anything could honestly back. **Local only, uncommitted. Production NOT migrated.**
+
+### 312. The design was read against the schema before anything was written
+
+Asked to review first, which was the right instruction — of the twelve screens,
+**one and a half had data behind them.**
+
+| | |
+|---|---|
+| **Real** | `subscription_plans` (12 rows), `website_clients.subscription_plan_id` |
+| **A stub** | `payments` — 13 columns, **0 rows**, `company_id`/`user_id` scoped behind `isAuthenticated` + `hasPermission('payments.*')`. An admin table; a website client gets 401 |
+| **Absent** | invoices, payment methods, transactions, add-ons, coupons, tax config, billing address, GSTIN, and any payment provider at all (no stripe/razorpay in `package.json`) |
+
+**Two of my own first readings were WRONG, and both mattered to the scope call:**
+
+1. **Plan limits DO exist.** `subscription_plan_menus.limits_json` carries
+   `max_events`, `max_guests_per_event`, `max_rsvps`, `max_photos`, `max_videos`,
+   `storage_gb` — 26 of 50 rows. The mockup's "100 GB" is literally
+   `storage_gb: "100 GB"` from this table, so the designer was reading real data.
+2. **A feature list exists**, via `plan_type_id` to `plan_types.features`. Unusable
+   though: Quill HTML of generic filler, and Basic Plan and Free Trial Plan both
+   resolve to plan_type 1, so they would advertise identical features.
+
+> **Three arithmetic contradictions in the mockups, flagged before building** —
+> they decide the data model, so guessing would have been expensive:
+> - **Pay & Upgrade does not add up.** 20,285 − 4,057 + **tax 2,712** = 18,940,
+>   but it prints **16,228**. Checkout prints the same 16,228 with *no* tax line.
+> - **The invoice shows tax it does not charge.** Subtotal 1,499, CGST 134.91 +
+>   SGST 134.91, Total **1,499**. Displayed and never added.
+> - The struck-through monthly is **1,899** on Upgrade Now and **1,799** in
+>   Checkout, and the 20% annual discount is applied to add-ons billed for ONE month.
+>
+> **Decision taken: Phase 1 only, and tax is EXCLUSIVE — added on top.**
+
+### 313. `client_subscriptions` — the missing half of two screens
+
+`website_clients.subscription_plan_id` is a bare FK. It says WHICH plan and
+nothing else: not when the term started, when it renews, whether it was
+cancelled, or which cycle was bought. Every one of those is on the Overview.
+
+The same gap is why the ADMIN panel's Plan Usage figures are still the hardcoded
+118 / 96 / 22 flagged since §140. **One table closes both.**
+
+`src/database/tools/apply-client-subscriptions.js` — dry-runs by default,
+`--prod --apply` for production. Applied to **LOCAL**, re-run proven a no-op.
+
+**Four decisions worth defending:**
+
+1. **`price`, `billing_cycle`, `currency_code`, `tax_rate` are SNAPSHOTS**, copied
+   at purchase and never read through to the plan. An admin raising a price must
+   not silently re-price everyone already on it. Same reasoning as the QR payload.
+2. **`subscription_plan_id` STAYS.** It is the ENTITLEMENT pointer that
+   `ClientPlanGate`, `getEventOptions` and `templatesForPlan` all read; the
+   subscription row is the BILLING record. `clientBilling.service` is the only
+   writer of both, so they cannot become two sources of truth — the §178/§193.4
+   complaint, avoided rather than repeated.
+3. **FK types read from the referenced tables at runtime**, never hardcoded. That
+   guess has cost this codebase six migrations.
+4. **`client_subscription_events` is append-only** — no `deleted_at`, not
+   paranoid. A billing history somebody can quietly remove rows from is not one.
+
+**Backfill:** clients already carrying a plan get a term dated from their own
+`created_at` and rolled forward by whole cycles until it lands in the future, so
+"next billing date" is a real date on the plan's rhythm. 2 rows created.
+
+### 314. Rollover is LAZY, because a cron here would not fire
+
+A scheduled plan change and an elapsed term are both applied **on read**, in
+`reconcile()`. The only scheduled work in this backend is the email worker, and
+**Render sleeps a free instance** — a job that fires on a machine that is not
+running has not fired. A rollover that happens when somebody looks cannot be
+missed, and is idempotent because it is driven entirely by comparing stored
+dates against now.
+
+Renewal is **recorded, not charged**: it rolls the dates and logs a `renewed`
+row. When a gateway exists, that is the exact point that raises an invoice.
+
+### 315. The `cancelling` state had to exist — the bug that proved it
+
+Testing found the **double-cancel guard never fired**, and it wrote a duplicate
+row into the billing history.
+
+`cancelSubscription` checked `deriveStatus() === 'cancelled'`. But a term
+cancelled and still running correctly derives as **`active`** — `cancel_at_period_end`
+is set while `status` stays `active`, because access continues. The guard could
+never match.
+
+The real gap: **"cancelled but still running" had no name.** `deriveStatus` now
+returns a derived-only `cancelling`, and both guards test a set rather than a
+string. It is deliberately NOT added to the stored ENUM — `cancel_at_period_end`
+plus a date already record the fact, and a fifth stored value could disagree.
+
+**A second contradiction closed:** changing plan while cancelling scheduled a
+change AND an ending for the same date. Refused, with the way out named, rather
+than silently un-cancelling — reversing a cancellation nobody asked to reverse
+is a worse surprise than an extra click.
+
+### 316. What the screens say instead of showing a number
+
+`GET /client/billing/overview` returns an `unavailable` block — the reasons live
+in the API, not in strings typed into the UI, so these unlock when the backend
+stops reporting them and nobody has to remember which files to revisit.
+
+| Tile | Renders |
+|---|---|
+| Events | real count + the plan's `max_events`, with an over-limit state |
+| Guests | real heads (`party_size`); `max_guests_per_event` is PER EVENT so it is **not** used as a total denominator |
+| Messages Sent | an em dash and "messaging is paused" (§222). Never 0 |
+| Storage Used | an em dash with the ceiling shown. The limit is known and **nothing measures the numerator** — a bar there would look precise and be invented |
+
+> **Usage is counted per BILLING PERIOD, not "this month"** as the design labels
+> it, and shows the period's own dates. On a yearly plan a monthly count against
+> an annual allowance is a number that means nothing.
+
+**Feature bullets come from the menus the plan GRANTS** — the only per-plan
+feature data in the database that is true. Not `plan_types.features` (§312.2).
+
+**The comparison table is real**: rows are the union of granted modules. NOT the
+design's Team Members / API Access / SSO, which name entitlements that exist
+nowhere in this system.
+
+### 317. Verified
+
+```
+tests/client-billing.test.js   42/42   deriveStatus 8 boundary states,
+                                       "100 GB" -> 100, "200" -> 200,
+                                       tax exclusive, unavailable carries reasons
+HTTP round trip                login -> overview -> change-plan -> cancel ->
+                               resume -> history, all with a real session cookie
+guards                         double-cancel refused, double-resume refused,
+                               inactive plan refused, unknown plan refused,
+                               missing plan_id refused, no session 401,
+                               change-plan while cancelling refused
+scheduling                     plan change SCHEDULES, current plan clears it,
+                               entitlement pointer stays until the term ends
+initial_setup.sql              2 tables appended (SHOW CREATE TABLE, not
+                               hand-written); replayed twice into a scratch DB,
+                               idempotent, then dropped
+schema-audit                   local vs prod: only the 2 new tables plus the
+                               pre-existing company_name/bio gap
+tsc --noEmit                   client portal clean, backend loads clean
+routes                         /dashboard/billing and /billing/change-plan
+                               both 200, neither the catch-all
+```
+
+Test rows were restored to their pre-test state (12 test event rows removed, the
+2 backfill `created` rows kept). A curl cookie jar that landed in the repo was
+deleted rather than committed.
+
+### 318. Open
+
+1. **PRODUCTION NOT MIGRATED.** Run
+   `node src/database/tools/apply-client-subscriptions.js --prod --apply`
+   **before** the backend deploys, or `/client/billing/*` 500s on missing tables.
+2. **Nothing is committed**, in either repo.
+3. **Phase 2 is invoices + transactions** (`client_invoices`, `client_transactions`,
+   numbering, PDF). Phase 3 is payment methods and checkout, and needs a gateway
+   decision first — there is no `stripe`/`razorpay` dependency anywhere.
+4. **Storage has a ceiling and no meter.** Making that tile real needs bytes
+   tracked per client at upload time; the limit is already resolvable.
+5. **`limits_json` is per-MENU and inconsistently typed** — plan 3 stores `"200"`
+   as a string where 4-6 store `200`, and `storage_gb` is `"100 GB"`. All coerced
+   in `resolvePlanLimits`, with the merge rule "highest across granted menus".
+   Worth normalising at the admin end.
+6. **The plans are not monthly/yearly PAIRS.** Basic is monthly-only, Premium
+   yearly-only, so the design's Monthly-to-Yearly toggle and its "Save 20%" have
+   nothing to toggle between. Would need a paired-plan or per-cycle-price model.
+7. **A client is over their plan limit right now** — client 23 has 6 events
+   against a `max_events` of 5. Nothing enforces limits on write; the tile only
+   reports it.
+8. §311.9 is cleared: the header dropdown's Billing link and the sidebar's
+   reinstated "View plan & billing" button both resolve to a real screen now.
+9. Everything else still open from §311 — notably `EVENT_QR_SECRET` unset on
+   Render, the production JWT secrets still being template placeholders, and
+   `company_name`/`bio` not yet applied to production.
+
+---
+
+## Session 27 (continued) — Billing Phase 2, and the three screens that needed no gateway
+
+> Same day. Picks up §318's own list: invoices, transactions, and the screens
+> that were buildable and simply had not been built.
+> **Local only, uncommitted. Production NOT migrated.**
+
+### 319. What was actually tested, asked and answered
+
+The question was which parts had been tested. Honestly, at §318: the service
+logic was locked by 42 assertions, and the HTTP layer had been exercised by hand
+with curl and **never saved**. Nothing had been clicked in a browser.
+
+The manual pass is now `tests/client-billing-api.test.js` — 56 assertions
+through the real stack: routes, `bodyTransform`, the auth middleware, the
+session cookie and the JSON envelope. **Every billing bug so far has lived in
+one of those layers, not in the service.** It restores what it touches, because
+a test that leaves a cancelled subscription behind poisons the next run.
+
+Browser testing is still not done — carried since §127.
+
+### 320. Four tables, and why the ledger is separate from the lifecycle log
+
+`apply-client-invoices.js` — `client_invoices`, `client_invoice_items`,
+`client_transactions`, `client_sales_enquiries`. Applied to LOCAL, re-run proven
+a no-op, then replayed twice into a scratch database from `initial_setup.sql`.
+
+**`client_transactions` is NOT `client_subscription_events`.** They answer
+different questions and the Billing History screen shows both: one is MONEY (an
+invoice raised, a payment, a refund), the other is LIFECYCLE (created, plan
+changed, cancelled). Merging them would mean either a lifecycle row carrying a
+nullable amount forever, or a money row for "plan changed", which is not money.
+The endpoint merges them at read time; the old subscription-events-only
+`getHistory` was deleted rather than left as a second source of truth.
+
+**The billing address lives on the INVOICE, as a snapshot.** `website_clients`
+has no address columns at all, so `billing_name`/`email`/`address`/`gstin` are
+copied on issue. An invoice records what was billed to whom at that moment;
+joining it live would rewrite last year's invoices the day somebody edits their
+profile.
+
+**`amount` is signed from the client's side** — an invoice positive, a payment
+negative. That is what makes the design's `- ₹1,499.00` fall out of the data
+rather than being decided by a switch in the UI.
+
+### 321. ⚠ Invoices were showing OVERDUE for a payment route that does not exist
+
+Caught on the first HTTP run. An invoice was raised with `due_date = issue + 7
+days`, `displayStatus` derives `overdue` from a due date in the past, and the
+backfilled term was already older than that — so the very first thing the
+Invoices tab showed was a red **OVERDUE** badge for money nobody has any way to
+send.
+
+Fixed with one constant, `PAYMENTS_ENABLED = false`, read everywhere:
+
+- **no due date is stamped while it is false**, so nothing can derive `overdue`;
+- every payload carries it as `payments_enabled` with a reason, so the screens
+  describe the real state instead of each hardcoding an assumption.
+
+Flip it when a provider is genuinely wired; nothing else changes. The two
+already-stamped invoices had their `due_date` cleared.
+
+> The general shape: **a status derived from a deadline is a claim about
+> somebody's conduct.** It has to be gated on whether they could have acted.
+
+### 322. A second bug the tests caught: tax lines on a free plan
+
+`computeTotals` gated its CGST/SGST breakdown on the RATE being non-zero rather
+than the TAX. A ₹0 plan at an 18% rate therefore emitted
+`CGST (9%) ₹0.00 / SGST (9%) ₹0.00` — two lines implying a charge that is not
+there. Now gated on `tax > 0`.
+
+> **The components sum EXACTLY to `tax_amount`**, with the second half absorbing
+> any rounding remainder. Splitting an odd paisa evenly is precisely how the
+> supplied invoice mockup ended up printing CGST and SGST and then never adding
+> them to its own total (§312).
+
+### 323. Screens built
+
+| Route | |
+|---|---|
+| `/dashboard/billing` → Invoices tab | tiles over the WHOLE account, search, status filters, paging |
+| `/dashboard/billing` → History tab | the merged ledger, type filter, activity summary rail |
+| `/dashboard/billing/invoices/[id]` | full invoice, items, tax breakdown, timeline |
+| `/dashboard/billing/upgrade` | Upgrade Now — plan cards, comparison, current-plan rail, FAQs |
+| `/dashboard/billing/features` | All Features — full matrix, grouped by `menu_group` |
+| `/dashboard/billing/contact-sales` | the form, prefilled from the client's own row |
+
+Three departures from the mockups, each stated on the screen rather than left to
+be discovered:
+
+1. **"Download Invoice (PDF)" is print.** A real PDF needs a renderer neither
+   side has; the browser's own print-to-PDF produces a genuine, selectable file
+   from the same markup, with a scoped print stylesheet.
+2. **The Monthly ⇄ Yearly toggle FILTERS, it does not re-price.** A plan has one
+   `billing_cycle` — Basic is monthly-only, Premium yearly-only — so there is no
+   pair to toggle and no discount field. It hides itself when only one cycle
+   exists (§318.6, now visible in the UI rather than only in this log).
+3. **All Features rows are modules a plan actually grants.** The design's own
+   rows — Team Members & Roles, API Access, SSO, White-label — name entitlements
+   that exist nowhere in this system. Ticking them would be a pricing page
+   promising undeliverable things.
+
+**Contact Sales is STORED, not emailed** — there is no SMTP anywhere here. The
+success state promises a follow-up and never claims a message went out, and no
+`sales@` address or phone number is invented, because a mailbox nobody monitors
+sends people into a void.
+
+### 324. Still NOT built, and the reason is the same for all four
+
+Checkout, Pay & Upgrade, Upgrade Complete, Payment Methods. **No payment
+provider exists in this project** — no `stripe`, no `razorpay`, nothing. Those
+four are a money flow, and building them means a "Pay ₹16,228" button that takes
+nothing and a receipt for a payment that never happened.
+
+`recordPayment()` is written and reachable from **no route**: it is the seam a
+gateway webhook plugs into. Exposing it would let a client mark their own
+invoice paid.
+
+### 325. Verified
+
+```
+tests/client-billing.test.js       58/58   deriveStatus, limits coercion,
+                                           tax exclusive, breakdown reconciles,
+                                           invoice display status
+tests/client-billing-api.test.js   56/56   real HTTP, real cookie:
+                                           401 on every route unsigned-in ·
+                                           change SCHEDULES not applies ·
+                                           double-cancel refused ·
+                                           change-while-cancelling refused ·
+                                           another client's invoice -> 404 ·
+                                           /invoices/abc not queried as NaN ·
+                                           nothing "overdue" while unpayable ·
+                                           tax components sum exactly ·
+                                           lifecycle rows amount NULL not 0 ·
+                                           enquiry reports delivery: stored
+                                           — and restores state at the end
+initial_setup.sql                  4 tables appended, replayed TWICE into a
+                                   scratch DB, idempotent, then dropped
+tsc --noEmit                       client portal clean
+backend                            loads clean
+routes                             8 billing routes 200, none the catch-all
+```
+
+Test data restored: 2 subscriptions, 2 lifecycle events, 2 invoices, 2 ledger
+rows, 0 enquiries.
+
+> **A pre-existing failure found on the way past, NOT caused by this work:**
+> `tests/guest-import.test.js` errors on all 4 rows because its sample CSV names
+> an event — "Our Special Wedding" — that no longer exists; the demo events were
+> replaced in §290. The importer is behaving exactly as §215 designed and
+> correctly reports the missing event. **The test's fixture is stale, not the
+> code.** It needs its CSV repointed at a current event name.
+
+### 326. Open
+
+1. **PRODUCTION NOT MIGRATED.** In order:
+   `apply-client-subscriptions.js --prod --apply`, then
+   `apply-client-invoices.js --prod --apply`, then
+   `backfill-client-invoices.js --prod --apply`. The second has a hard FK into
+   the first and refuses to run early.
+2. **Nothing is committed**, in either repo.
+3. **A gateway is the only thing standing between here and the last four
+   screens.** Flip `PAYMENTS_ENABLED` in `clientInvoice.service.js` when one
+   exists; due dates and every screen's wording follow from it.
+4. **No PDF renderer** — invoice download is print-to-PDF (§323).
+5. **Add-ons and coupons remain unbuilt** — no catalogue, no price list, no
+   tables. The Checkout mockup's ₹999/₹799/₹499 rows have no source.
+6. **`guest-import.test.js` fixture is stale** (§325).
+7. Everything still open from §318 — notably the per-menu `limits_json` typing,
+   plans not being monthly/yearly pairs, and client 23 sitting over their event
+   ceiling with nothing enforcing it on write.
+
+### 327. PRODUCTION MIGRATED — and the blocker it exposed was much larger than recorded
+
+§326's three commands were run against Aiven. The first two applied cleanly; the
+**third failed**, and the failure was worth more than the migration:
+
+```
+node .../backfill-client-invoices.js --prod --apply
+FAILED: Unknown column 'company_name' in 'field list'
+```
+
+**Nothing partial was written** — `raiseInvoiceForTerm` threw while READING the
+client, before its transaction opened. Production held 0 invoices, verified
+before doing anything else.
+
+#### ⚠ The real finding: §311.3 badly understated this
+
+`website_clients.company_name` and `.bio` (§305) had never been applied to
+production. That was logged as *"or the portal's Settings save 500s"*. It is far
+worse than that.
+
+`middleware/websiteClientAuth.js:97` re-reads the client row on **EVERY
+authenticated request** — that is §188's deliberate design, so an admin
+deactivating a client takes effect at once. An unqualified `findByPk` selects
+every column the MODEL declares, so with those two columns missing from the
+database:
+
+> **the moment the backend deploys, every client-portal and every mobile-app
+> request 500s.** Not Settings. All of it.
+
+Production was safe only because it still runs code that predates those model
+columns. That is the §72 shape again — older code against a newer schema — with
+the polarity reversed and much sharper teeth.
+
+Applied (additive, two nullable columns, re-run proven a no-op), then the
+backfill re-run:
+
+```
+website_clients        25 -> 27 columns   company_name, bio
+client_invoices        INV-2026-000001    INR 999.00 + 179.82 tax = 1,178.82
+                       CGST 9% 89.91 + SGST 9% 89.91  == tax_amount exactly
+                       due_date NULL      (payments disabled, so nothing is overdue)
+client_transactions    invoice 1178.82
+re-run                 already invoiced — idempotent
+
+schema-audit           MISSING TABLES: none · MISSING COLUMNS: none
+```
+
+Local and production schemas now match completely.
+
+#### The code fault underneath it, fixed
+
+`raiseInvoiceForTerm` and `createSalesEnquiry` both did a bare
+`WebsiteClient.findByPk(id)`, selecting **every** column the model declares when
+they need three between them. That is what turned a missing unrelated column
+into a hard failure.
+
+Both now name their attributes (`['id','company_id','name','email']` and
+`['id','company_id']`), which is the pattern the rest of this codebase already
+uses — `PLAN_ATTRS`, `TEMPLATE_ATTRS`, `MENU_INCLUDE`.
+
+> **The rule worth keeping: a bare `findByPk` couples a query to the whole
+> model.** It reads as harmless and makes every unrelated migration a potential
+> outage. The 20-odd other unqualified `WebsiteClient` reads across the client
+> services are the same latent hazard — they are safe now that the schema
+> matches, and they will be unsafe again the next time a column is added to the
+> model before the database.
+
+#### Proven against production, not assumed
+
+The fix was verified by running **the exact query that failed** — the bare
+`findByPk` the auth middleware executes on every authenticated request — against
+Aiven, rather than by re-reading the migration output:
+
+```
+1. auth middleware read (bare findByPk, ALL model columns)
+     OK -> Jamal J.M | jamaludheen779@gmail.com
+     company_name: null · bio: null          <- present, and correctly empty
+
+2. every model attribute resolves against the real table
+     model declares 27 attributes · table has 27 columns
+     missing from the database: NONE
+
+3. billing tables on production
+     client_subscriptions        1     client_invoice_items    1
+     client_subscription_events  1     client_transactions     1
+     client_invoices             1     client_sales_enquiries  0
+
+VERDICT: RESOLVED — the query that failed now succeeds.
+```
+
+Point 2 is the one that matters and is the check worth repeating after any
+future model change: it compares **what the model declares** against **what the
+table has**, which is the precise mismatch that would take the portal down. A
+migration reporting success only proves the columns it knew about were added; it
+says nothing about the ones a model gained since.
+
+> **DB issue: resolved.** Production schema and local schema match completely —
+> `schema-audit` reports no missing tables and no missing columns.
+>
+> **Deploy is still blocked on other things**, none of them the database: the
+> backend code is not deployed (§303), nothing is committed, `EVENT_QR_SECRET`
+> is unset on Render, and the production JWT secrets are still the template
+> placeholders (§302).
+
+#### Still open
+
+Everything in §326 except item 1, which is now done. Production has the schema;
+it does NOT have the code — the backend is still undeployed (§303).
