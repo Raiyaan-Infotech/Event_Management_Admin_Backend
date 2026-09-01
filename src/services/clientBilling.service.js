@@ -884,6 +884,10 @@ module.exports = {
     // definitions rather than a second copy of them.
     deriveStatus,
     resolvePlanLimits,
+    // Exported so the invoice detail can report usage for THAT invoice's period
+    // without clientInvoice.service requiring this one — that direction is
+    // already taken (line 18) and requiring back would be a cycle.
+    getUsage,
     addCycle,
     withTax,
 };

@@ -94,7 +94,9 @@ const changeMyPassword = asyncHandler(async (req, res) => {
  * as a mysterious 401 rather than as "you closed your account".
  */
 const deleteMyAccount = asyncHandler(async (req, res) => {
-    await clientPortalService.deleteMyAccount(req.websiteClient.id);
+    // The body carries the identity confirmation — a password, or the account's
+    // own email address for a social-only client that has none.
+    await clientPortalService.deleteMyAccount(req.websiteClient.id, req.body);
     clearWebsiteClientCookies(res);
     logger.logRequest(req, `Client closed their account: ${req.websiteClient.id}`);
     return ApiResponse.success(res, null, 'Your account has been closed');

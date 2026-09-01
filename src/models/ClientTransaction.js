@@ -60,6 +60,35 @@ module.exports = (sequelize) => {
         reference: { type: DataTypes.STRING(80), allowNull: true },
         gateway: { type: DataTypes.STRING(50), allowNull: true },
         gateway_transaction_id: { type: DataTypes.STRING(190), allowNull: true },
+
+        /**
+         * WHICH saved card paid this, and what it looked like at the time.
+         *
+         * The id is the live link — follow it for the expiry and the status.
+         * The two snapshot columns are what an ARCHIVED invoice prints: they
+         * are written once, at payment time, and never updated, so a receipt
+         * cannot change its wording because the card row was later edited or
+         * removed.
+         *
+         * ⚠ Both snapshot fields are DISPLAY ONLY and are a copy of what
+         * `client_payment_methods` already holds. There is no card number and
+         * no CVC in this table, in that one, or anywhere else — see §341 and
+         * `assertNoRawCard()`.
+         *
+         * Null on every row until a payment provider exists.
+         */
+        client_payment_method_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+        method_brand: { type: DataTypes.STRING(30), allowNull: true },
+        method_last4: { type: DataTypes.CHAR(4), allowNull: true },
+        /**
+         * The rendered name, snapshot at payment time.
+         *
+         * A card is brand + last4; a UPI address is neither, so reassembling a
+         * label from parts only works for one method type. This holds what the
+         * invoice actually prints — "Visa ending in 4242", "UPI · name@bank".
+         */
+        method_label: { type: DataTypes.STRING(120), allowNull: true },
+
         occurred_at: { type: DataTypes.DATE, allowNull: false },
     }, {
         tableName: 'client_transactions',
@@ -72,6 +101,7 @@ module.exports = (sequelize) => {
         indexes: [
             { fields: ['website_client_id', 'occurred_at'] },
             { fields: ['invoice_id'] },
+            { fields: ['client_payment_method_id'] },
         ],
     });
 

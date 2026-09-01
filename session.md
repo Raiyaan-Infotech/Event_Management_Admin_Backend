@@ -8202,3 +8202,582 @@ says nothing about the ones a model gained since.
 
 Everything in §326 except item 1, which is now done. Production has the schema;
 it does NOT have the code — the backend is still undeployed (§303).
+
+---
+
+## Session 28 — Settings module: the audit, and the one screen that needed no schema
+
+> **Date:** 2026-08-29 | **Backend:** `Event_Management_Admin_Backend`
+> **Client portal:** `event_client_single` (port 3005)
+> Ten Settings screens supplied. **One built**, deliberately — see §329.
+> Local only, uncommitted. **No migration: this phase adds no tables.**
+
+### 328. The audit, run against the live schema rather than against §304
+
+§304 audited eight of these screens in the last pass. Re-checked rather than
+quoted, because the schema has moved since (`company_name`/`bio` in §305, the
+six billing tables in §313/§320) and a stale audit is worse than none.
+
+| Screen | Backing | |
+|---|---|---|
+| Delete Account | `DELETE /client/me` already live | **buildable now** |
+| Settings › Profile | all columns exist | built in §308 |
+| Account Settings | ID, created, plan, **next billing date now real** (§313) | 3 rows still fiction |
+| Preferences | nothing | needs `client_preferences` |
+| Notification Settings (Email) | nothing, **and `email_configs` has 0 rows** | table + a caveat |
+| In-App Notifications | nothing, no client feed | table + a feed |
+| Security | password real; the rest not | one third real |
+| Manage 2FA | no table, no TOTP lib, no QR lib | largest new build |
+| Active Sessions | — | **impossible as designed** |
+| Authorized Devices | — | same root cause |
+
+**§304's session finding re-proven, not assumed.** `client_refresh_tokens` has
+`client_id → vendor_clients` — the OLDER portal — and `activity_logs.user_id →
+users`, the admin table. Website-client refresh tokens are stateless JWTs with
+nothing persisted. So **"Log Out All Other Sessions" cannot revoke anything**:
+the token stays valid until it expires whatever the button does. A session list
+that cannot revoke is worse than no list — it tells somebody they have ejected
+an intruder who is still signed in.
+
+Three more that decide scope:
+
+- **`email_configs`: 0 rows.** Nodemailer is a dependency; no SMTP is configured
+  anywhere. "Send Test Email" and every email-alert toggle control nothing.
+- **The Language dropdown has one option** — `languages` holds exactly 1 row.
+- **Theme (Light/Dark/System) is already real**; `next-themes` is wired and the
+  header uses it. A table would only add cross-device persistence.
+
+**Phase chosen: Delete Account only**, and the Email tab deliberately left in
+its §308 not-built state rather than shipping toggles over a dead delivery path.
+
+### 329. The design's "What will be deleted?" list was false on all five lines
+
+It promised events/guests/RSVPs, templates and designs, settings and
+integrations, billing history and payment information, and team members.
+`deleteMyAccount` does **one** thing: soft-deletes the `website_clients` row and
+frees the email. **Nothing cascades.** Events, guests, invoices and uploads all
+stay. ("Team members and collaborators" name a thing that exists nowhere here —
+the §323 shape again.)
+
+Printing that list would be a promise of erasure the system does not perform, on
+the one screen somebody may be using **because** they want their data gone. So
+the panel is two: **what actually happens**, and **what is deliberately kept**,
+with the way to ask for the rest named *before* the button — afterwards they
+have no account to ask from.
+
+### 330. ⚠ The endpoint accepted a bare click, and the old flow showed no confirmation at all
+
+Two faults, both found by reading the existing path rather than by testing:
+
+1. **`DELETE /client/me` took no body.** A session cookie alone closed the
+   account — which is also all an XSS or a CSRF would need. It now re-confirms
+   identity, for the reason `changeMyPassword` already states: a session can be
+   a borrowed laptop, and this is the one portal action that cannot be undone
+   from the portal.
+
+   > ⚠ **A social-only client has NO password** (nullable column, by design).
+   > They re-type their own email instead. The check is **not skipped** for
+   > them — skipping it makes the accounts that cannot prove themselves the
+   > easiest ones to delete. The server picks which gate applies; the UI only
+   > picks which field to show, so a wrong guess there cannot weaken it.
+
+2. **The success screen could not exist under `/dashboard`.** Cookies are
+   cleared on close, every dashboard route sits inside `ClientAuthGate`, and the
+   gate reads a 401 as "not signed in" and redirects to the tenant WEBSITE's
+   login page. The old code did `router.replace('/')` — and `/` redirects to
+   `/dashboard` — so **closing an account bounced straight out to a login screen
+   with no confirmation at all.** `/account-deleted` now lives outside the
+   dashboard tree and reads nothing, reached by a **full page load** so the
+   React Query cache holding the deleted profile is torn down with it.
+
+**A second delete flow was found on `/dashboard/profile`** — its own dialog,
+its own wording, no identity check. Exactly the §308 divergence, in the flow
+where it matters most. Both entry points now link to the one screen that owns it.
+
+### 331. Verified
+
+```
+tests/client-delete-account.test.js  20/20  real HTTP, real session:
+                                            401 unsigned-in · bare DELETE 400 ·
+                                            wrong password 401 · account still
+                                            open after each refusal ·
+                                            email-instead-of-password 400 ·
+                                            social account NOT waved through ·
+                                            password on a passwordless account 400 ·
+                                            own email cased+padded accepted ·
+                                            soft-deleted not hard · is_active 0 ·
+                                            email freed (§172) · session dead after
+                                            — throwaway rows only, hard-deleted at the end
+tests/client-billing.test.js         58/58  no regression
+tests/client-billing-api.test.js     56/56  no regression
+tsc --noEmit                         client portal clean
+eslint                               4 changed files clean
+routes                               /dashboard/settings/delete-account and
+                                     /account-deleted both 200, neither the catch-all
+```
+
+The test never touches a real account: the endpoint deletes, so each case seeds
+its own throwaway row (including a `password IS NULL`, `source='google'` one,
+which `/register` cannot produce) and hard-deletes it afterwards.
+
+### 332. Open
+
+1. **Nothing is committed** in the client portal; the backend change is
+   uncommitted too.
+2. **Browser testing still not done** — carried since §127.
+3. **⚠ Stale copy on the Settings › Account tab.** It still prints "Next Billing
+   Date —" and "nothing in this system records a subscription period". §313 built
+   `client_subscriptions` with `current_period_end`, so that sentence is now
+   false. Left alone as out of this phase's scope, but it is wrong on screen.
+4. **Settings Phase 2 remains `client_preferences` + `client_notification_prefs`**
+   (§311.7) — 3 more screens. 2FA is its own pass (two new dependencies, touches
+   the login path). Sessions/devices need the stateless JWT rearchitected first.
+5. Everything still open from §326 — notably the undeployed backend (§303),
+   `EVENT_QR_SECRET` unset on Render, and the placeholder production JWT secrets.
+
+---
+
+## Session 28 (continued) — Settings Phase 2: preferences and notification consent
+
+> Same day. Picks up §332.4, which is what §311.7 named as the unlock.
+> **Local only, uncommitted. PRODUCTION NOT MIGRATED — two new tables.**
+
+### 333. The question asked was "why are the other screens not possible", and the answer was that most of them are
+
+§328's table read as ten refusals. It was not. Restated, and worth keeping in
+this shape because it decides what unblocks each one:
+
+| | Screens | Blocked by |
+|---|---|---|
+| **Impossible** | Active Sessions, Authorized Devices | stateless JWTs — needs the auth path rearchitected |
+| **Buildable** | Preferences, In-App Notifications, 2FA | tables and build time, nothing else |
+| **Would be theatre** | Email Notifications, 3 Account rows | no SMTP / no gateway / no column |
+
+Two findings from re-checking rather than repeating §304:
+
+1. **The mobile app makes sessions MORE necessary, not less.** One account signs
+   in on a laptop, a second laptop and the app — the app on the same phone
+   number. The middleware takes a Bearer header where the browser sends a
+   cookie, but it is the same stateless token either way, so **none of those
+   three appear anywhere and a lost phone cannot be cut off.**
+2. **⚠ There is no SMS provider at all.** `sendMobileOtp` writes the code to the
+   log with `(NOT SENT — no SMS provider)`. That kills the design's SMS tab and
+   SMS-based 2FA — and makes **TOTP the right 2FA to build**, because an
+   authenticator app and the server share a secret and nothing is ever sent.
+
+**Decision taken: `client_preferences` + `client_notification_prefs`, with the
+email tab built after all** — store the consent now, map it to real sending when
+SMTP exists. The screen names the delivery state rather than implying the
+switches do something.
+
+### 334. Two tables, and the four decisions in them
+
+`apply-client-preferences.js` — dry-runs by default, `--prod --apply` for
+production. Applied to LOCAL, re-run proven a no-op, appended to
+`initial_setup.sql` from `SHOW CREATE TABLE`, then replayed **twice** into a
+scratch database (143 tables both passes) and dropped.
+
+1. **`client_notification_prefs` is NARROW** — a row per `(client, channel,
+   type)`, not a column per notification. A wide table needs a MIGRATION every
+   time somebody adds a notification; here a new type is a row and the only
+   thing that changes is the catalogue.
+2. **Do Not Disturb is a WINDOW, not a boolean plus a duration.** A boolean has
+   to be switched back off by something, and §314 established nothing here runs
+   on a schedule to do it — Render sleeps a free instance — so it would stay on
+   forever. Two timestamps expire by comparison with the clock. Same reasoning
+   as the lazy rollover, reached independently.
+3. **`'sms'` is deliberately NOT in the channel enum.** An enum value nothing
+   ever writes reads as a channel that exists. (§315 made the same call about
+   not adding `cancelling` to a stored ENUM.)
+4. **The FK type is READ from `website_clients.id` at runtime**, never
+   hardcoded — the guess that has cost this codebase six migrations.
+
+**Master switches live on the preference row, not as a notification type.** A
+row meaning "all the other rows" invites being read as just another one. Proven
+in the tests: switching "disable all emails" does not rewrite the individual
+choices, so switching it back restores them.
+
+### 335. The catalogue is SERVED, and four of the design's switches are not in it
+
+`GET /client/settings` returns the stored values, the notification **catalogue**,
+the allowed values for every dropdown, which preferences are actually applied,
+and whether either channel can deliver. Both writes answer with that same shape,
+so a save REPLACES the cache instead of being merged into it — merging is where
+§308's "a refetch mid-edit overwrote what was being typed" came from.
+
+**Nothing is typed into the UI.** A list in a React component drifts from the
+list the server validates against, and the failure is silent: the toggle saves
+nothing and still looks saved.
+
+Four types the design asked for are refused, because the event cannot occur:
+
+| Refused | Why |
+|---|---|
+| Team Member Activity | there are no team members (§323 refused the same row) |
+| Guest Check-in | `event_guests` has no check-in column; nothing records one |
+| New Message / Reply | messaging is paused (§222) and unbuilt |
+| Surveys & Feedback | no survey feature exists anywhere |
+
+> **A switch for something that can never happen is a switch wired to nothing.**
+
+**Delivery state is data, with a reason per channel** — email reads
+`email_configs` and turns itself on the day somebody configures a provider; no
+flag to remember. The banner disappears by itself. Hiding it would be §321 with
+sharper teeth: somebody enables "Account Security" alerts, believes they will be
+warned about a break-in, and nothing can send.
+
+**Email toggles are NOT duplicated on Preferences.** The design put them on both
+screens under different names; Preferences links across instead (§308).
+
+### 336. ⚠ "Saved, not applied yet" — and the preferences that had to be made real
+
+A preferences screen where nothing changes is the same failure as an email
+toggle that sends nothing. `applied` is served per key and the badge reads it,
+so a preference unlocks when the backend flips a flag and nobody has to find
+this component.
+
+**Made genuinely real:** `theme` (pushed into next-themes by `ThemeSync`, so the
+choice follows the client between laptop and phone rather than living in one
+browser's localStorage), and `date_format` + `time_zone` via a new shared
+`lib/format.ts` — Settings, Profile, Guests, Guest Groups and Event Detail all
+route through it now, replacing five separate hand-rolled `formatDate`s.
+
+**`default_landing` was demoted to `applied: false`, deliberately.** This portal
+has NO login of its own — the client signs in on the website and arrives with a
+cookie — so there is no "just signed in" moment to redirect from. Applying it on
+every visit to `/dashboard` would mean somebody who chose "My Events" could
+never open their dashboard again.
+
+Still stored-not-applied: `items_per_page`, `compact_mode`, `auto_save`,
+`show_tips`, `language_code` (the `languages` table has exactly one row).
+
+**Reset to Defaults reads the defaults off the MODEL's column defaults**, served
+by the API, so a reset and a brand-new account land in the same place.
+
+### 337. ⚠ The formatter I wrote had the exact bug the old code was guarding against
+
+`lib/format.ts` first sent EVERY value through `Intl` with the client's zone.
+That is right for an instant and **wrong for a bare `YYYY-MM-DD`**:
+`new Date('2025-05-25')` parses as UTC midnight, so a client in Los Angeles
+would have seen an event dated **the 24th**.
+
+Five files in this portal carry a comment warning about precisely this. It would
+have looked correct in Asia/Kolkata (+05:30 lands the same day) — which is where
+it would have been tested.
+
+Date-only strings are now split, never parsed into an instant. The regression is
+locked by `src/lib/format.test.mts` across five zones including two American
+ones. `formatTime` was also restored and deliberately left OUT of the
+preference: an event's start time is the wall clock **at its venue**, and
+shifting it would tell a guest in another zone to arrive at the wrong hour.
+
+> **The rule: a date-only value is a calendar date, not an instant.** Converting
+> it is not a formatting choice, it is a wrong answer.
+
+### 338. Verified
+
+```
+tests/client-settings-api.test.js  47/47  real HTTP, real cookie:
+                                          401 on all three routes unsigned-in
+                                          first read creates the row (findOrCreate)
+                                          catalogue + options + defaults served
+                                          the 4 fictional types absent
+                                          value outside the option list -> 400,
+                                            naming the field AND the value
+                                          website_client_id not editable
+                                          DND ends-before-starts -> 400
+                                          an elapsed window reads inactive with
+                                            nothing running to expire it
+                                          same slot saved twice = ONE row
+                                          sms channel -> 400, unknown type -> 400
+                                          nothing stored on the way to a 400
+                                          master switch leaves choices intact
+                                          — and deletes its rows at the end
+src/lib/format.test.mts            16/16  date-only unshifted in 5 zones
+                                          all 5 formats
+                                          an instant DOES follow the zone
+                                          null/garbage/unknown zone never throw
+tests/client-delete-account.test.js 20/20 no regression
+tests/client-billing.test.js        58/58 no regression
+tests/client-billing-api.test.js    56/56 no regression
+initial_setup.sql                   2 tables appended (SHOW CREATE TABLE,
+                                    AUTO_INCREMENT counters stripped), replayed
+                                    TWICE into a scratch DB, then dropped
+schema-audit                        local vs prod: ONLY the 2 new tables.
+                                    MISSING COLUMNS: none
+tsc --noEmit                        clean
+eslint                              clean on every file this session touched
+routes                              /dashboard/settings, ?tab=preferences,
+                                    ?tab=notifications, /profile, /guests,
+                                    /settings/delete-account — all 200
+```
+
+> **Three lint errors in `guests/page.tsx`, `guests/groups/page.tsx` and
+> `event-detail.tsx` are PRE-EXISTING** — `setState` inside an effect, plus
+> unused imports. Confirmed by re-running eslint against a stash, not assumed:
+> 6 problems before these changes, the same 6 after. **The one in
+> `settings/page.tsx` WAS mine** — the tab-from-URL sync — and is fixed by
+> adjusting during render instead, which is also what stops an incoming
+> `?tab=` link flashing Profile before it switches.
+
+### 339. Open
+
+1. **⚠ PRODUCTION NOT MIGRATED.** Run
+   `node src/database/tools/apply-client-preferences.js --prod --apply`
+   before the backend deploys, or `/client/settings` 500s on missing tables.
+   `schema-audit` confirms these two tables are the only gap.
+2. **Nothing is committed** in the client portal. The backend has the billing
+   work committed (§320 landed as `2019c5e`) but not this session's changes.
+3. **Delivery is still not wired for either channel.** Consent is recorded; when
+   SMTP is configured, email switches itself on with no code change. In-app
+   needs a feed built AND `deliveryState()`'s one hardcoded `false` flipped.
+4. **Four preferences are stored and not read** — `items_per_page`,
+   `compact_mode`, `auto_save`, `show_tips`. The screen says so, from data.
+5. **Browser testing still not done** — carried since §127. Everything this
+   session was proven over HTTP and by tsc/eslint/route checks, not by clicking.
+6. **§332.3 still stands:** the Settings › Account tab prints "Next Billing
+   Date —" and "nothing records a subscription period", which §313 made false.
+7. **Next: 2FA (TOTP) or the session store.** The session store is the bigger
+   piece and the one the mobile app makes matter (§333.1); it changes the
+   middleware every request passes through and logs everyone out once when it
+   ships.
+8. Everything still open from §332 and §326 — the undeployed backend (§303),
+   `EVENT_QR_SECRET` unset on Render, placeholder production JWT secrets.
+
+---
+
+## Session 28 (continued) — Billing Phase 3: saved payment methods, and the two screens that were asked to be redesigned
+
+> Same day. **Local only, uncommitted. PRODUCTION NOT MIGRATED — three tables now
+> pending** (`client_preferences`, `client_notification_prefs`,
+> `client_payment_methods`).
+>
+> ⚠ **This session was interrupted part-way.** Payment Methods and Billing
+> History are finished; the **invoice-detail REDESIGN is backend-only** — see
+> §345. Read that before assuming the screen changed.
+
+### 340. Three Account rows made real, and one screen that had gone stale
+
+Asked to use the client's own email as the billing email, to check for saved
+card details, and to fix the currency to INR.
+
+**The card claim was checked, not argued with.** Searched every column in all
+143 tables for `card`, `last4`, `cvv`, `expiry`, `payment_method`,
+`gateway_key`. The only hits were `company_website_seo_settings.twitter_card`
+and its vendor twin — a social meta tag. `payments` has **0 rows** and no
+gateway library is installed. `payments` and `client_transactions` do carry
+`gateway` / `gateway_transaction_id`: **plumbing for a provider that does not
+exist**, which is probably what was remembered.
+
+| Row | Now |
+|---|---|
+| Billing Email | the account's own email — invoices are addressed there, and a second address would be a second thing to keep in step |
+| Currency | read from the subscription's snapshot (`currency_code`), which is INR for every plan in the catalogue |
+| Next Billing Date | real since §313 — and null now reads **"No upcoming charge"**, because a cancelled or lifetime term genuinely has none |
+| Payment Method | "Not set up yet" — see §341 |
+
+**§332.3 is cleared.** The Account tab still printed "nothing in this system
+records a subscription period", which §313 had made false, and **AccountOverview
+on the Profile tab carried the same dead sentence plus a disabled "Manage
+Billing" button** labelled "Billing is not available yet". Both fixed; the button
+now leads to the billing screens that have existed since §323.
+
+### 341. ⚠ Payment methods: built, and built the only way it can lawfully be built
+
+The instruction was to add the Payment Methods module and use it. The supplied
+design draws Card Number / Expiry / CVC inputs — **and, in its own sidebar,
+"PCI DSS compliant · Powered by Stripe".** Those two things cannot both be true
+of plain inputs posting here. In a real integration those boxes are the
+PROVIDER'S hosted fields in an iframe on the provider's domain: the digits go
+from the browser straight to them. That is what makes the badge true rather than
+decorative, so the design already assumes what was built.
+
+`client_payment_methods` therefore has **no card-number column and no CVC
+column**, and never will:
+
+- a full card number here makes this project a party to **PCI DSS** — assessment,
+  segmentation, key rotation, breach liability;
+- a **CVC may not be retained after authorisation by anyone**, compliant or not.
+  There is no configuration that permits it.
+
+What is stored is the provider's **token**, plus brand / last4 / expiry — the
+only parts a person needs to recognise their own card, and parts that cannot
+charge anything.
+
+> **The rule is enforced in code, not in a comment.** `assertNoRawCard()` refuses
+> a body carrying `card_number`, `cvv`, `cvc`, `expiry` — **or a Luhn-valid
+> 13–19 digit string hiding in any other field**. A comment lasts until the next
+> person in a hurry; a guard survives the form being rewired.
+>
+> The Luhn check is the reason a 16-digit ORDER REFERENCE is not mistaken for a
+> card. Both directions are tested.
+
+**Four more decisions:**
+
+1. **`gateway` is stored per ROW**, not assumed globally — the day a second
+   provider appears, or the first is swapped, every existing row still says who
+   holds it.
+2. **`'sms'`-style optimism avoided again:** adding a card while no provider is
+   connected answers **503, not 400**. The request is fine; our capability is
+   missing, and 400 would tell the client they made a mistake they did not make.
+   (`ApiError.serviceUnavailable` added for this.)
+3. **Soft delete.** A removed card is still named by the invoices it paid;
+   hard-deleting would blank the payment method on last year's receipts.
+4. **Removing the default PROMOTES the next usable card** — and never promotes
+   an expired one. "No default" is the state that makes a renewal silently not
+   charge.
+
+**The five-method cap is enforced server-side.** A UI limit is not a limit.
+
+### 342. ⚠ A test caught a timezone bug in card expiry
+
+`isExpired` used `new Date(exp_year, exp_month, 1)` — midnight **in whatever zone
+the server runs in**. Render is UTC, this machine is IST, so a card on its very
+last day would read as expired in one deployment and valid in the other, for
+five and a half hours every month-end.
+
+Now `Date.UTC(...)`. A card expiry is a calendar fact with no zone attached.
+
+> Same family as §337's date-only bug, found the same way — by a test that
+> asserted the boundary rather than the happy path. Both would have looked
+> correct in IST.
+
+The month is deliberately **not** decremented: `Date.UTC(y, m, 1)` with a 1-based
+month is already the first instant of the following month, which is exactly when
+a card marked 06/27 stops being valid. Locked by tests on 30 Jun and 1 Jul.
+
+### 343. The screen, and the one claim it will not make
+
+Everything READ-side is real today: listing, the default card, make-default,
+removal with promotion, the expiry badge, the cap. **Only the ADD step waits on a
+provider**, and it says so with the server's own reason rather than a hardcoded
+string.
+
+**It does not print a PCI DSS badge or a Stripe logo.** A compliance badge for an
+integration that does not exist is the one claim on that screen nobody should
+make. In its place, the panel explains where a card would actually live.
+
+Brand marks are **text, not logo files** — shipping Visa/Mastercard artwork means
+licensing their marks, and a stretched logo looks worse than a clean label.
+
+### 344. Billing History rebuilt to the new design
+
+Backend gained `search`, `status`, `from`, `to` and `filtered_count`.
+
+> **⚠ The date range is INCLUSIVE of the `to` day.** `2026-08-29` parses as that
+> day's midnight, so a naive `<=` silently excludes everything that happened
+> during the final chosen day — the most confusing possible off-by-one, because
+> the row is visible in the list right up until you filter for it.
+
+**The Transaction Summary rail counts the WHOLE account, never the filtered
+page.** A count that moved while somebody typed in the search box would be
+reporting the search, not the account. "Showing 1 to 10 of 26" uses
+`filtered_count`, which is deliberately the other number.
+
+**The time-zone footnote is the client's own.** The design hardcodes
+"All times are shown in Asia/Kolkata (GMT +5:30)"; since §336 that is a real
+preference, so the note reads it and links to Settings — and every timestamp in
+the table goes through the same formatter, so the sentence and the rows cannot
+disagree.
+
+Two things the design asked for that are **not** offered, each stated on screen:
+
+- **Download Statement** — there is no statement generator. A button producing
+  nothing is worse than no button; individual invoices print from their own page.
+- **A per-row download icon** — it links to the invoice, which carries the print
+  action, rather than being an icon with nothing behind it.
+
+`amount: null` still renders an em dash, never ₹0.00 (§320): "Subscription
+created" is a lifecycle fact, not a zero-rupee transaction.
+
+### 345. ⚠ Invoice detail — BACKEND DONE, SCREEN NOT REDESIGNED
+
+The interruption landed here. **`invoice-detail.tsx` is untouched** — confirmed
+against git, it is not in the modified list. The existing §323 screen still
+renders, correctly and unchanged.
+
+**What IS already built and returned by the API, waiting for the screen:**
+
+| Field | |
+|---|---|
+| `invoice.amount_in_words` | "One Thousand Four Hundred Ninety Nine Rupees Only" — **Indian grouping** (crore/lakh), paise spoken separately, singular "Rupee"/"Paisa" for exactly one. Computed server-side so the words and the figure can never disagree; **null for non-INR**, which has no rupees/paise reading |
+| `invoice.timeline[]` | created / payment received / refund / paid, **derived from real timestamps, never stored**. Only events that happened appear — a greyed-out "awaiting payment" step reads as stuck rather than not started |
+| `usage` | counted for **THIS INVOICE'S period**, not the current one — an invoice records a past term, and today's numbers under last month's dates are a different fact wearing the same label |
+| transactions | now carry `gateway` and `gateway_transaction_id` for the design's Transaction ID row |
+
+`usage` is composed in the **controller**, not the invoice service:
+`clientBilling.service` already requires `clientInvoice.service` (line 18), so
+requiring back would be a cycle. `getUsage` was exported for this.
+
+**Still to do on that screen** (all front-end): the hero amount + words block,
+the meta grid, the Actions rail, the usage panel, and the timeline rendering.
+
+Three of the design's actions should NOT be built as drawn, and the reasons are
+already established: **Download Credit Note** (no credit-note concept exists
+anywhere), **Download Receipt** (a receipt needs a payment, and payments are
+disabled — §321), **Share Invoice** (invoices are auth-scoped, so a shared link
+404s for anyone not signed in to that account).
+
+### 346. Verified
+
+```
+tests/client-payment-methods.test.js  41/41  raw card refused 7 ways ·
+                                             ordinary data NOT refused 4 ways ·
+                                             expiry boundary 30 Jun / 1 Jul ·
+                                             401 unsigned-in · add -> 503 not 400 ·
+                                             raw card over HTTP -> 400, nothing stored ·
+                                             THE TOKEN NEVER LEAVES THE SERVER ·
+                                             exactly one default after a switch ·
+                                             expired card cannot be default ·
+                                             /payment-methods/abc -> 404, not NaN ·
+                                             removing the default promotes a
+                                               usable card, never the expired one ·
+                                             removal is a SOFT delete
+tests/client-settings-api.test.js     47/47  (§338, re-run after these changes)
+tests/client-delete-account.test.js   20/20  no regression
+tests/client-billing.test.js          58/58  no regression
+tests/client-billing-api.test.js      56/56  no regression
+src/lib/format.test.mts               16/16  no regression
+initial_setup.sql                     client_payment_methods appended
+                                      (SHOW CREATE TABLE, AUTO_INCREMENT stripped);
+                                      replayed TWICE into a scratch DB — 144
+                                      tables both passes, 17 columns, forbidden
+                                      card/CVC columns: NONE — then dropped
+tsc --noEmit                          client portal clean
+eslint                                clean on every file touched
+backend                               all modules load clean
+```
+
+> **⚠ The HTTP suites above were green when run during this session, but could
+> NOT be re-run at the end — the local backend on :5001 had stopped
+> (ECONNREFUSED).** The in-process ones (`client-billing`, `format`) were re-run
+> and pass. **Re-run the four HTTP suites once the server is back** before
+> trusting this block as current.
+
+> **A safety check that cried wolf on its first run, and was fixed rather than
+> ignored:** the migration tool prints whether any card-number/CVC column exists,
+> and an unanchored `/pan/` matched **`company_id`** — reporting the table as
+> unsafe the very first time it ran. Anchored on whole words now. A check nobody
+> believes is worse than no check.
+
+### 347. Open
+
+1. **⚠ PRODUCTION NOT MIGRATED — three tables**, in any order:
+   `node src/database/tools/apply-client-preferences.js --prod --apply`
+   `node src/database/tools/apply-client-payment-methods.js --prod --apply`
+   Both dry-run by default. Run before the backend deploys or `/client/settings`
+   and `/client/billing/payment-methods` 500 on missing tables.
+2. **Nothing is committed**, in either repo. This is now carried from §318.
+3. **The invoice-detail screen redesign is unfinished** (§345). The API is ready.
+4. **No payment provider is connected.** Set `RAZORPAY_KEY_ID` (or
+   `STRIPE_SECRET_KEY` + `STRIPE_PUBLISHABLE_KEY`) and the Add-card path,
+   `can_add` and the gateway banner all switch themselves on — `gatewayState()`
+   reads the environment, so it is a deploy setting and not a code edit.
+   `PAYMENTS_ENABLED` in `clientInvoice.service.js` is the separate flag for due
+   dates and invoice wording (§321).
+5. **The local backend was stopped at the end of this session** — the HTTP tests
+   need one more run (§346).
+6. **Browser testing still not done** — carried since §127.
+7. Everything still open from §339 — the undeployed backend (§303),
+   `EVENT_QR_SECRET` unset on Render, placeholder production JWT secrets,
+   and the four stored-but-unapplied preferences.

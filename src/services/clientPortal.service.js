@@ -513,15 +513,53 @@ const changeMyPassword = async (clientId, { current_password: current, new_passw
 /**
  * The client closes their own account.
  *
+ * ── IDENTITY IS RE-CONFIRMED, EVEN THOUGH THE SESSION ALREADY PROVES IT ─────
+ * Same reasoning as changeMyPassword above, and it matters more here: a session
+ * can be a borrowed laptop or a tab left open, and this is the one action in
+ * the portal that cannot be undone from the portal. A single click behind a
+ * cookie is also all an XSS or a CSRF would need.
+ *
+ * ⚠ A social-only client has NO password (nullable column, by design — see the
+ * OAuth flow), so a password prompt would be unanswerable for them. They
+ * re-type their own email address instead. The check is deliberately NOT
+ * skipped for those accounts: skipping it would make the accounts that cannot
+ * prove themselves the easiest ones to delete.
+ *
+ * ── WHAT IS AND IS NOT REMOVED ───────────────────────────────────
+ * ONLY the client row, and only softly. Their events, guests, RSVPs, invoices
+ * and billing history are all left exactly where they are — nothing here
+ * cascades. The screen says so rather than promising an erasure that does not
+ * happen.
+ *
  * Soft delete, and the email is FREED at the same time. `website_clients` has a
  * plain unique index on (vendor_id, email) which knows nothing about
  * `deleted_at`, so without stamping the address a deleted row holds it hostage
  * and the same person can never sign up again — the §172 bug, in the one place
  * a client can trigger it themselves.
  */
-const deleteMyAccount = async (clientId) => {
-    const client = await WebsiteClient.findByPk(clientId);
+const deleteMyAccount = async (clientId, { password, confirm_email: confirmEmail } = {}) => {
+    const client = await WebsiteClient.scope('withPassword').findByPk(clientId);
     if (!client) throw ApiError.notFound('Account not found.');
+
+    if (client.password) {
+        if (!password) {
+            throw ApiError.badRequest('Please enter your password to confirm.');
+        }
+        if (!(await bcrypt.compare(String(password), client.password))) {
+            throw ApiError.unauthorized('That password is not correct.');
+        }
+    } else {
+        // normalizeEmail is what the model's beforeValidate hook already applied
+        // to the stored address, so comparing lowercased+trimmed on both sides
+        // compares like with like.
+        const typed = String(confirmEmail || '').trim().toLowerCase();
+        if (!typed) {
+            throw ApiError.badRequest('Please type your email address to confirm.');
+        }
+        if (typed !== String(client.email || '').trim().toLowerCase()) {
+            throw ApiError.badRequest('That does not match the email address on this account.');
+        }
+    }
 
     await client.update({
         email: `${client.email}.deleted.${Date.now()}`,

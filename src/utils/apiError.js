@@ -43,6 +43,17 @@ class ApiError extends Error {
   static internal(message = 'Internal server error') {
     return new ApiError(message, 500);
   }
+
+  /**
+   * The request was fine; the capability it needs is not connected.
+   *
+   * Distinct from 400 on purpose — telling somebody "bad request" when the
+   * fault is a missing integration on our side sends them looking for a mistake
+   * they did not make. Used where a payment provider is absent.
+   */
+  static serviceUnavailable(message = 'This is not available yet') {
+    return new ApiError(message, 503);
+  }
 }
 
 module.exports = ApiError;

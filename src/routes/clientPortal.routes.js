@@ -5,6 +5,7 @@ const controller = require('../controllers/clientPortal.controller');
 const eventController = require('../controllers/clientEvent.controller');
 const guestController = require('../controllers/clientGuest.controller');
 const billingController = require('../controllers/clientBilling.controller');
+const preferencesController = require('../controllers/clientPreferences.controller');
 const { isWebsiteClientAuthenticated } = require('../middleware/websiteClientAuth');
 
 /**
@@ -22,6 +23,23 @@ router.get('/me', controller.me);
 router.put('/me', controller.updateMe);
 router.put('/me/password', controller.changeMyPassword);
 router.delete('/me', controller.deleteMyAccount);
+
+/**
+ * Settings — preferences and notification choices.
+ *
+ * `/settings` returns everything the two screens need in ONE response:
+ * the client's stored values, the notification CATALOGUE, the allowed options
+ * for every dropdown, which preferences are actually applied yet, and whether
+ * either channel can deliver anything. The catalogue is served rather than
+ * hardcoded in the UI so the list the screen renders and the list the server
+ * validates against cannot drift apart.
+ *
+ * Both writes answer with that same full shape, so the screen replaces its
+ * state instead of merging into it.
+ */
+router.get('/settings', preferencesController.getSettings);
+router.put('/settings/preferences', preferencesController.updatePreferences);
+router.put('/settings/notifications', preferencesController.updateNotifications);
 
 /**
  * Avatar upload, client-scoped.
@@ -142,6 +160,21 @@ router.post('/billing/resume', billingController.resume);
 // Invoices. The literal path comes BEFORE `/billing/invoices/:id`, the same
 // trap as `/events/stats` and `/guests/groups` — otherwise Express matches the
 // word as an id and the handler looks for invoice number NaN.
+/**
+ * Payment methods.
+ *
+ * ⚠ POST takes the PROVIDER'S TOKEN, never card details. The card is taken by
+ * the gateway's own hosted field in the browser and never reaches this server;
+ * `clientPaymentMethod.service` refuses a card-shaped body so that stays true.
+ *
+ * The literal path comes BEFORE `/:id`, the same ordering §325 already caught
+ * once on the invoice routes.
+ */
+router.get('/billing/payment-methods', billingController.listPaymentMethods);
+router.post('/billing/payment-methods', billingController.addPaymentMethod);
+router.put('/billing/payment-methods/:id/default', billingController.setDefaultPaymentMethod);
+router.delete('/billing/payment-methods/:id', billingController.removePaymentMethod);
+
 router.get('/billing/invoices', billingController.listInvoices);
 router.get('/billing/invoices/:id', billingController.getInvoice);
 

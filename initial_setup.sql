@@ -10353,6 +10353,10 @@ CREATE TABLE IF NOT EXISTS `client_transactions` (
   `reference` varchar(80) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'The invoice number, or a provider reference once one exists.',
   `gateway` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Null throughout — no provider is connected.',
   `gateway_transaction_id` varchar(190) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `client_payment_method_id` int unsigned DEFAULT NULL COMMENT 'The saved card this payment used. NULL for a payment made another way.',
+  `method_brand` varchar(30) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'DISPLAY ONLY snapshot, written once at payment time.',
+  `method_last4` char(4) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'DISPLAY ONLY — never the full number.',
+  `method_label` varchar(120) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Rendered at payment time. Visa ending in 4242 / UPI name@bank.',
   `occurred_at` datetime NOT NULL,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -10360,6 +10364,7 @@ CREATE TABLE IF NOT EXISTS `client_transactions` (
   KEY `idx_client_tx_client` (`website_client_id`,`occurred_at`),
   KEY `idx_client_tx_invoice` (`invoice_id`),
   KEY `idx_client_tx_type` (`website_client_id`,`type`),
+  KEY `client_transactions_method` (`client_payment_method_id`),
   CONSTRAINT `fk_client_tx_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_client_tx_invoice` FOREIGN KEY (`invoice_id`) REFERENCES `client_invoices` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -10384,6 +10389,112 @@ CREATE TABLE IF NOT EXISTS `client_sales_enquiries` (
   KEY `idx_sales_enquiries_client` (`website_client_id`,`created_at`),
   KEY `idx_sales_enquiries_status` (`status`,`created_at`),
   CONSTRAINT `fk_sales_enquiries_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ---------------------------------------------------------------------------
+-- Client portal Settings (Phase 2)
+--
+-- client_preferences is one row per client: how the portal looks for them, the
+-- two master notification switches, and the Do Not Disturb WINDOW. The window
+-- is two timestamps rather than a boolean plus a duration because nothing here
+-- runs on a schedule to switch a boolean back off (Render sleeps a free
+-- instance), and a comparison against the clock expires by itself.
+--
+-- client_notification_prefs is one row per (client, channel, type). Narrow, not
+-- a column per notification, so adding a type is a row rather than a migration;
+-- the catalogue in clientPreferences.service.js is what a valid type means.
+--
+-- ⚠ Neither table drives any sending yet. There is no SMTP configured anywhere
+-- (email_configs is empty) and the portal has no in-app feed. They record
+-- CONSENT so it is already correct on the day delivery is wired — the API
+-- reports the real delivery state per channel, with its reason.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS `client_preferences` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `website_client_id` int unsigned NOT NULL,
+  `language_code` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'en',
+  `date_format` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'DD/MM/YYYY',
+  `time_zone` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'Asia/Kolkata',
+  `theme` enum('light','dark','system') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'system',
+  `default_landing` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'dashboard',
+  `items_per_page` smallint unsigned NOT NULL DEFAULT '20',
+  `compact_mode` tinyint(1) NOT NULL DEFAULT '0',
+  `auto_save` tinyint(1) NOT NULL DEFAULT '1',
+  `show_tips` tinyint(1) NOT NULL DEFAULT '1',
+  `emails_disabled` tinyint(1) NOT NULL DEFAULT '0',
+  `in_app_disabled` tinyint(1) NOT NULL DEFAULT '0',
+  `dnd_starts_at` datetime DEFAULT NULL,
+  `dnd_ends_at` datetime DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `client_preferences_client` (`website_client_id`),
+  CONSTRAINT `fk_client_preferences_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `client_notification_prefs` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `website_client_id` int unsigned NOT NULL,
+  `channel` enum('email','in_app') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `type` varchar(60) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `enabled` tinyint(1) NOT NULL DEFAULT '1',
+  `frequency` varchar(30) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `sound` tinyint(1) DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `client_notification_prefs_slot` (`website_client_id`,`channel`,`type`),
+  KEY `client_notification_prefs_lookup` (`website_client_id`,`channel`,`enabled`),
+  CONSTRAINT `fk_client_notification_prefs_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+
+-- ---------------------------------------------------------------------------
+-- Saved payment methods (Billing Phase 3)
+--
+-- ⚠ THERE IS NO CARD NUMBER COLUMN AND NO CVC COLUMN, DELIBERATELY.
+--
+-- The gateway takes the card in the BROWSER and returns a token; this table
+-- stores that token plus brand / last4 / expiry, which are the only parts a
+-- person needs to recognise their own card. Keeping a full card number here
+-- would make this project a party to PCI DSS, and a CVC may not be retained
+-- after authorisation by anyone at all.
+--
+-- Soft-deleted, because a removed card is still named by the invoices it paid.
+-- The unique key is (gateway, token): two different cards can share a brand and
+-- last four, so those cannot be the duplicate check.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS `client_payment_methods` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `website_client_id` int unsigned NOT NULL,
+  `company_id` int DEFAULT NULL,
+  `gateway` varchar(30) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `gateway_customer_id` varchar(120) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `gateway_payment_method_id` varchar(120) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'The provider token. NULL for a manually recorded method — there is no provider to issue one.',
+  `brand` varchar(30) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'visa / mastercard / amex / rupay …',
+  `last4` char(4) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'DISPLAY ONLY — never the full number',
+  `exp_month` tinyint unsigned DEFAULT NULL,
+  `exp_year` smallint unsigned DEFAULT NULL,
+  `holder_name` varchar(120) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `upi_id` varchar(120) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'name@bank. A payment ADDRESS, not a credential — it cannot authorise anything.',
+  `bank_name` varchar(120) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `account_last4` char(4) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'LAST FOUR ONLY — there is deliberately no column for a full account number.',
+  `ifsc` varchar(11) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Public RBI branch routing code. Not a secret.',
+  `method_type` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'card',
+  `is_default` tinyint(1) NOT NULL DEFAULT '0',
+  `is_verified` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'Manual rows are client-typed and unchecked. A tokenised row is verified by the provider.',
+  `status` enum('active','expired','removed') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'active',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `client_payment_methods_token` (`gateway`,`gateway_payment_method_id`),
+  KEY `client_payment_methods_client` (`website_client_id`,`deleted_at`,`is_default`),
+  CONSTRAINT `fk_client_payment_methods_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;

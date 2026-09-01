@@ -8,7 +8,11 @@ const {
     ClientTransaction,
     ClientSubscriptionEvent,
     ClientSalesEnquiry,
+    ClientPaymentMethod,
 } = require('../models');
+// Only the label renderer — one place decides how a method is worded, and a
+// payment's snapshot has to match the screen the client saved it on.
+const paymentMethods = require('./clientPaymentMethod.service');
 const { Op } = Sequelize;
 const ApiError = require('../utils/apiError');
 
@@ -289,9 +293,32 @@ const raiseInvoiceForTerm = async (subscription, {
  * gateway webhook plugs into; exposing it to the portal would let a client mark
  * their own invoice paid.
  */
-const recordPayment = async (invoiceId, { amount, reference = null, gateway = null, gatewayTransactionId = null, occurredAt = new Date() }) => {
+const recordPayment = async (invoiceId, {
+    amount, reference = null, gateway = null, gatewayTransactionId = null,
+    paymentMethodId = null, occurredAt = new Date(),
+}) => {
     const invoice = await ClientInvoice.findByPk(invoiceId);
     if (!invoice) throw ApiError.notFound('Invoice not found.');
+
+    /*
+      The card is SNAPSHOT here, at payment time, not joined at read time.
+
+      ⚠ Only the two display fields are copied — brand and last four. Those are
+      the only card fields this system has at all; there is no card number and
+      no CVC to copy, by design (§341).
+
+      Scoped to the invoice's own client, so a crafted id cannot attach somebody
+      else's card to this payment. `paranoid: false` because a card that was
+      removed after paying is exactly the case the snapshot exists for.
+    */
+    let method = null;
+    if (paymentMethodId) {
+        method = await ClientPaymentMethod.findOne({
+            where: { id: paymentMethodId, website_client_id: invoice.website_client_id },
+            paranoid: false,
+        });
+        if (!method) throw ApiError.badRequest('That payment method is not on this account.');
+    }
 
     const paid = round2(Number(invoice.amount_paid) + Number(amount));
     const due = round2(Number(invoice.total) - paid);
@@ -317,8 +344,14 @@ const recordPayment = async (invoiceId, { amount, reference = null, gateway = nu
             amount: -Math.abs(round2(amount)),
             currency_code: invoice.currency_code,
             reference: reference || invoice.invoice_number,
-            gateway,
+            gateway: gateway || method?.gateway || null,
             gateway_transaction_id: gatewayTransactionId,
+            client_payment_method_id: method?.id ?? null,
+            method_brand: method?.brand ?? null,
+            // A UPI method has no last four of its own; the bank one's live in
+            // `account_last4`. Both end up in the label, which is what prints.
+            method_last4: method?.last4 ?? method?.account_last4 ?? null,
+            method_label: method ? paymentMethods.labelFor(method) : null,
             occurred_at: occurredAt,
         }, { transaction: t });
 
@@ -329,6 +362,167 @@ const recordPayment = async (invoiceId, { amount, reference = null, gateway = nu
 /* ─────────────────────────────────────────────────────────────────────────────
  * Reading
  * ────────────────────────────────────────────────────────────────────────── */
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Amount in words
+ * ────────────────────────────────────────────────────────────────────────── */
+
+const ONES = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
+    'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen',
+    'Nineteen'];
+const TENS = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+const underThousand = (n) => {
+    if (n === 0) return '';
+    if (n < 20) return ONES[n];
+    if (n < 100) return `${TENS[Math.floor(n / 10)]}${n % 10 ? ` ${ONES[n % 10]}` : ''}`;
+    return `${ONES[Math.floor(n / 100)]} Hundred${n % 100 ? ` ${underThousand(n % 100)}` : ''}`;
+};
+
+/**
+ * "One Thousand Four Hundred Ninety Nine Rupees Only" — the line every Indian
+ * invoice carries, and the one on the supplied design.
+ *
+ * ── INDIAN GROUPING, NOT WESTERN ────────────────────────────────────────────
+ * Crore / lakh / thousand, NOT million / billion. Every plan here is priced in
+ * INR and this is an Indian tax invoice; "1.5 million rupees" on a GST invoice
+ * is wrong in the way a reader notices immediately.
+ *
+ * Paise are spoken separately ("… and Fifty Paise") rather than as a decimal,
+ * which is how the amount is read aloud and how it is written on a cheque.
+ * Rounded to 2dp FIRST, so 0.005 cannot print as zero paise while the total
+ * beside it shows one.
+ */
+function amountInWords(value, currencyCode = 'INR') {
+    const amount = round2(Math.abs(Number(value) || 0));
+    // Only INR has a rupees/paise reading. Anything else gets no words at all
+    // rather than rupee wording over a different currency's number.
+    if (String(currencyCode).toUpperCase() !== 'INR') return null;
+
+    const whole = Math.floor(amount);
+    const paise = Math.round((amount - whole) * 100);
+
+    if (whole === 0 && paise === 0) return 'Zero Rupees Only';
+
+    const parts = [];
+    const push = (n, label) => { if (n) parts.push(`${underThousand(n)} ${label}`); };
+
+    push(Math.floor(whole / 10000000), 'Crore');
+    push(Math.floor((whole % 10000000) / 100000), 'Lakh');
+    push(Math.floor((whole % 100000) / 1000), 'Thousand');
+    const rest = whole % 1000;
+    if (rest) parts.push(underThousand(rest));
+
+    // Singular for exactly one. "One Rupees Only" on a printed invoice is the
+    // kind of thing a client screenshots.
+    const rupees = parts.length ? `${parts.join(' ')} ${whole === 1 ? 'Rupee' : 'Rupees'}` : '';
+    const paiseText = paise ? `${underThousand(paise)} ${paise === 1 ? 'Paisa' : 'Paise'}` : '';
+
+    if (rupees && paiseText) return `${rupees} and ${paiseText} Only`;
+    return `${rupees || paiseText} Only`;
+}
+
+
+/**
+ * The invoice's own history, assembled from timestamps that already exist.
+ *
+ * Only real events appear. An unpaid invoice gets one entry, not a greyed-out
+ * "awaiting payment" step — a timeline that shows steps which have not happened
+ * reads as a process that is stuck rather than one that has not started.
+ */
+function buildTimeline(j) {
+    const entries = [{
+        key: 'created',
+        label: 'Invoice created',
+        detail: `Invoice ${j.invoice_number} was created.`,
+        at: j.created_at || j.issue_date,
+    }];
+
+    for (const tx of j.transactions || []) {
+        if (tx.type === 'payment') {
+            // Names the card when one is recorded — "…received via Visa ending
+            // in 4242" — from the transaction's own snapshot, so the line stays
+            // true after the card is removed.
+            const via = tx.method_label
+                ? ` via ${tx.method_label}`
+                : tx.method_last4
+                    ? ` via ${titleCase(tx.method_brand) || 'card'} ending in ${tx.method_last4}`
+                    : '';
+            entries.push({
+                key: `payment-${tx.id}`,
+                label: 'Payment received',
+                detail: `${tx.description || 'Payment received'}${via}.`,
+                at: tx.occurred_at,
+            });
+        }
+        if (tx.type === 'refund') {
+            entries.push({
+                key: `refund-${tx.id}`,
+                label: 'Refund issued',
+                detail: tx.description || 'Refund issued.',
+                at: tx.occurred_at,
+            });
+        }
+    }
+
+    if (j.paid_at) {
+        entries.push({
+            key: 'paid',
+            label: 'Invoice paid',
+            detail: 'Invoice marked as paid.',
+            at: j.paid_at,
+        });
+    }
+
+    return entries
+        .filter((e) => e.at)
+        .sort((a, b) => new Date(a.at) - new Date(b.at));
+}
+
+/**
+ * How a payment names the card that made it.
+ *
+ * Read from the transaction's own SNAPSHOT columns, never by joining the live
+ * card row. An archived invoice must keep saying what it said the day it was
+ * settled — if the client later edits the holder name or removes the card, the
+ * receipt cannot quietly change with it. `client_payment_method_id` is still
+ * carried so a screen that wants the live card (its expiry, its status) can
+ * follow it deliberately.
+ *
+ * Returns null when there is nothing to say, which is every payment today:
+ * no provider is connected, so nothing has been paid by card.
+ */
+const shapeMethod = (tx) => {
+    if (!tx) return null;
+    if (!tx.method_label && !tx.method_brand && !tx.method_last4 && !tx.gateway) return null;
+    const brand = titleCase(tx.method_brand);
+    return {
+        payment_method_id: tx.client_payment_method_id ?? null,
+        brand: tx.method_brand ?? null,
+        last4: tx.method_last4 ?? null,
+        gateway: tx.gateway ?? null,
+        gateway_transaction_id: tx.gateway_transaction_id ?? null,
+        /*
+          The label the payment-method service rendered at payment time, kept
+          verbatim. Reassembling it from brand + last4 only works for a card —
+          a UPI address has neither — and would also let this invoice word the
+          same method differently from the screen the client saved it on.
+        */
+        label: tx.method_label
+            || (tx.method_last4
+                ? `${brand || 'Card'} ending in ${tx.method_last4}`
+                : brand || titleCase(tx.gateway) || 'Payment method'),
+    };
+};
+
+const titleCase = (v) => (v ? String(v).charAt(0).toUpperCase() + String(v).slice(1) : null);
+
+/** The payment that settled an invoice — the most recent successful one. */
+const settlingPayment = (txs = []) =>
+    txs
+        .filter((t) => t.type === 'payment' && t.status !== 'failed')
+        .sort((a, b) => new Date(b.occurred_at) - new Date(a.occurred_at))[0] ?? null;
 
 const shapeInvoice = (inv, { withItems = false } = {}) => {
     const j = inv.toJSON ? inv.toJSON() : inv;
@@ -343,6 +537,9 @@ const shapeInvoice = (inv, { withItems = false } = {}) => {
         period_start: j.period_start,
         period_end: j.period_end,
         currency_code: j.currency_code,
+        // The line an Indian tax invoice is expected to carry. Computed here so
+        // the words and the figure can never disagree.
+        amount_in_words: amountInWords(j.total, j.currency_code),
         subtotal: Number(j.subtotal),
         discount_amount: Number(j.discount_amount),
         tax_rate: Number(j.tax_rate),
@@ -378,8 +575,27 @@ const shapeInvoice = (inv, { withItems = false } = {}) => {
                     description: tx.description,
                     amount: Number(tx.amount),
                     reference: tx.reference,
+                    gateway: tx.gateway,
+                    gateway_transaction_id: tx.gateway_transaction_id,
+                    payment_method: shapeMethod(tx),
                     occurred_at: tx.occurred_at,
                 })),
+                /*
+                  The card that settled THIS invoice, lifted to the top so the
+                  Payment Summary panel does not have to pick a transaction out
+                  of the ledger and re-derive "which one was the payment".
+                */
+                payment_method: shapeMethod(settlingPayment(j.transactions || [])),
+                /*
+                  The "Invoice Timeline" on the design.
+
+                  DERIVED from what happened, never stored: every entry is an
+                  existing row's timestamp. A stored timeline would be a third
+                  place for the same facts and the first to fall out of step —
+                  the reason `client_transactions` and `client_subscription_events`
+                  are merged at read time rather than copied (§320).
+                */
+                timeline: buildTimeline(j),
             }
             : {}),
     };
@@ -412,6 +628,32 @@ const listInvoices = async (clientId, { status, search, from, to, page = 1, limi
 
     let shaped = rows.map((r) => shapeInvoice(r));
     if (status && !STORED.includes(status)) shaped = shaped.filter((i) => i.status === status);
+
+    /*
+      The Payment Method column.
+
+      ONE extra query for the whole page, not one per row: the list is at most
+      100 invoices and this is an indexed `IN`. Doing it here rather than as an
+      `include` keeps the count query above from having to join a hasMany.
+    */
+    if (shaped.length) {
+        const payments = await ClientTransaction.findAll({
+            where: {
+                invoice_id: shaped.map((i) => i.id),
+                type: 'payment',
+                status: { [Op.ne]: 'failed' },
+            },
+            order: [['occurred_at', 'DESC'], ['id', 'DESC']],
+            raw: true,
+        });
+        const byInvoice = new Map();
+        // Ordered newest-first, so the FIRST one seen for an invoice is the
+        // one that settled it.
+        for (const tx of payments) {
+            if (!byInvoice.has(tx.invoice_id)) byInvoice.set(tx.invoice_id, tx);
+        }
+        shaped = shaped.map((i) => ({ ...i, payment_method: shapeMethod(byInvoice.get(i.id)) }));
+    }
 
     // The tiles count the WHOLE account, never the filtered page — a "Total
     // Invoices" that changes when you type in the search box is not a total.
@@ -486,7 +728,9 @@ const getInvoice = async (clientId, invoiceId) => {
  * UNION across two differently-shaped tables in SQL would be harder to read
  * than the thing it saves.
  */
-const getBillingHistory = async (clientId, { type, page = 1, limit = 10 } = {}) => {
+const getBillingHistory = async (clientId, {
+    type, search, from, to, status, page = 1, limit = 10,
+} = {}) => {
     const p = Math.max(1, Number(page) || 1);
     const l = Math.min(100, Math.max(1, Number(limit) || 10));
 
@@ -538,12 +782,54 @@ const getBillingHistory = async (clientId, { type, page = 1, limit = 10 } = {}) 
         }),
     ].sort((a, b) => new Date(b.occurred_at) - new Date(a.occurred_at));
 
-    const filtered = type && type !== 'all' ? rows.filter((r) => r.type === type) : rows;
+    /*
+      The summary counts the WHOLE ledger, not the filtered page.
 
+      A "Transaction Summary" rail that changed every time somebody typed in the
+      search box would be reporting the search, not the account — and the design
+      places it beside the filters as a stable fact about the account.
+    */
     const summary = { all: rows.length, payment: 0, invoice: 0, refund: 0, setup: 0, failed: 0 };
     for (const r of rows) {
         if (summary[r.type] !== undefined) summary[r.type] += 1;
         if (r.status === 'failed') summary.failed += 1;
+    }
+
+    let filtered = rows;
+    if (type && type !== 'all') filtered = filtered.filter((r) => r.type === type);
+    if (status && status !== 'all') filtered = filtered.filter((r) => r.status === status);
+
+    if (search) {
+        // Description, invoice number and reference — the three things visible
+        // in the row, so searching finds what the person can actually see.
+        const q = String(search).trim().toLowerCase();
+        if (q) {
+            filtered = filtered.filter((r) =>
+                [r.description, r.invoice_number, r.reference]
+                    .some((v) => v && String(v).toLowerCase().includes(q)));
+        }
+    }
+
+    /*
+      Date range is INCLUSIVE of the `to` day.
+
+      `to` arrives as a plain date (2026-08-29) which parses as that day's
+      midnight, so a naive `<=` silently excludes everything that happened
+      during the chosen final day — the most confusing possible off-by-one,
+      because the row is visible in the list until you filter for it.
+    */
+    if (from) {
+        const start = new Date(from);
+        if (!Number.isNaN(start.getTime())) {
+            filtered = filtered.filter((r) => new Date(r.occurred_at) >= start);
+        }
+    }
+    if (to) {
+        const end = new Date(to);
+        if (!Number.isNaN(end.getTime())) {
+            if (/^\d{4}-\d{2}-\d{2}$/.test(String(to).trim())) end.setHours(23, 59, 59, 999);
+            filtered = filtered.filter((r) => new Date(r.occurred_at) <= end);
+        }
     }
 
     return {
@@ -555,6 +841,9 @@ const getBillingHistory = async (clientId, { type, page = 1, limit = 10 } = {}) 
             totalPages: Math.max(1, Math.ceil(filtered.length / l)),
         },
         summary,
+        // What the filters actually matched, as distinct from the account total
+        // above — the design prints "Showing 1 to 10 of 26".
+        filtered_count: filtered.length,
         note: 'Payments appear here once online payment is enabled.',
     };
 };
@@ -627,4 +916,6 @@ module.exports = {
     getBillingHistory,
     createSalesEnquiry,
     nextInvoiceNumber,
+    // Exported for the tests — the words and the figure must never disagree.
+    amountInWords,
 };

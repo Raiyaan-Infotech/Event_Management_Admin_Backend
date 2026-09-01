@@ -1,5 +1,7 @@
 const { asyncHandler } = require('../utils/helpers');
+const paymentMethodService = require('../services/clientPaymentMethod.service');
 const ApiResponse = require('../utils/apiResponse');
+const logger = require('../utils/logger');
 const billingService = require('../services/clientBilling.service');
 const invoiceService = require('../services/clientInvoice.service');
 
@@ -72,7 +74,25 @@ const listInvoices = asyncHandler(async (req, res) => {
 
 const getInvoice = asyncHandler(async (req, res) => {
     const data = await invoiceService.getInvoice(req.websiteClient.id, req.params.id);
-    return ApiResponse.success(res, data, 'Invoice retrieved');
+
+    /*
+      The design's "Usage Summary (12 May – 11 Jun)" panel.
+
+      Composed HERE rather than inside the invoice service, because usage lives
+      in clientBilling.service and that module already requires this one's
+      service — requiring back would be a cycle.
+
+      ⚠ It is counted for THIS INVOICE'S period, not the current one. An invoice
+      is a record of a past term; showing today's numbers on last month's
+      invoice would be a different fact wearing the same label.
+    */
+    const inv = data.invoice;
+    const usage = await billingService.getUsage(req.websiteClient.id, {
+        current_period_start: inv.period_start,
+        current_period_end: inv.period_end,
+    });
+
+    return ApiResponse.success(res, { ...data, usage }, 'Invoice retrieved');
 });
 
 /**
@@ -85,6 +105,10 @@ const getInvoice = asyncHandler(async (req, res) => {
 const history = asyncHandler(async (req, res) => {
     const data = await invoiceService.getBillingHistory(req.websiteClient.id, {
         type: req.query.type,
+        status: req.query.status,
+        search: req.query.search,
+        from: req.query.from,
+        to: req.query.to,
         page: req.query.page,
         limit: req.query.limit,
     });
@@ -105,7 +129,47 @@ const contactSales = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, data, 'Enquiry received');
 });
 
+/* ── Payment methods ─────────────────────────────────────────────────────── */
+
+/**
+ * The client's saved cards, plus whether a provider is connected at all.
+ *
+ * ⚠ The gateway TOKEN is never in this payload — only brand, last four and
+ * expiry, which cannot be used to charge anything. See the service header.
+ */
+const listPaymentMethods = asyncHandler(async (req, res) => {
+    const data = await paymentMethodService.listPaymentMethods(req.websiteClient);
+    return ApiResponse.success(res, data, 'Payment methods retrieved');
+});
+
+/**
+ * Save a TOKENISED card.
+ *
+ * ⚠ The body must carry the provider's token, never card details. The service
+ * refuses a card-shaped body outright, so a form rewired to post the number
+ * fails loudly rather than quietly storing it.
+ */
+const addPaymentMethod = asyncHandler(async (req, res) => {
+    const method = await paymentMethodService.addPaymentMethod(req.websiteClient, req.body);
+    // The token is deliberately absent from this log line as well.
+    logger.logRequest(req, `Client saved a payment method: ${req.websiteClient.id} (${method.label})`);
+    return ApiResponse.success(res, { method }, 'Payment method saved');
+});
+
+const setDefaultPaymentMethod = asyncHandler(async (req, res) => {
+    const data = await paymentMethodService.setDefaultPaymentMethod(req.websiteClient, req.params.id);
+    logger.logRequest(req, `Client changed default payment method: ${req.websiteClient.id}`);
+    return ApiResponse.success(res, data, 'Default payment method updated');
+});
+
+const removePaymentMethod = asyncHandler(async (req, res) => {
+    const data = await paymentMethodService.removePaymentMethod(req.websiteClient, req.params.id);
+    logger.logRequest(req, `Client removed a payment method: ${req.websiteClient.id}`);
+    return ApiResponse.success(res, data, 'Payment method removed');
+});
+
 module.exports = {
+    listPaymentMethods, addPaymentMethod, setDefaultPaymentMethod, removePaymentMethod,
     overview, plans, changePlan, cancel, resume,
     listInvoices, getInvoice, history, contactSales,
 };

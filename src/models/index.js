@@ -119,6 +119,14 @@ db.ClientInvoiceItem = require('./ClientInvoiceItem')(sequelize, Sequelize);
 db.ClientTransaction = require('./ClientTransaction')(sequelize, Sequelize);
 db.ClientSalesEnquiry = require('./ClientSalesEnquiry')(sequelize, Sequelize);
 
+// Settings Phase 2 — how the portal looks for one client, and what they agreed
+// to be notified about. Neither drives delivery yet; see the model headers.
+db.ClientPreference = require('./ClientPreference')(sequelize, Sequelize);
+db.ClientNotificationPref = require('./ClientNotificationPref')(sequelize, Sequelize);
+
+// Saved cards — the TOKEN only. See the model header: no card number, no CVC.
+db.ClientPaymentMethod = require('./ClientPaymentMethod')(sequelize, Sequelize);
+
 // Events created by those clients in the client portal
 db.Event = require('./Event')(sequelize, Sequelize);
 db.EventGuest = require('./EventGuest')(sequelize, Sequelize);
@@ -378,6 +386,16 @@ db.ClientInvoice.belongsTo(db.ClientSubscription, { foreignKey: 'client_subscrip
 db.ClientInvoice.belongsTo(db.SubscriptionPlan, { foreignKey: 'subscription_plan_id', as: 'plan' });
 db.ClientInvoice.hasMany(db.ClientInvoiceItem, { foreignKey: 'invoice_id', as: 'items' });
 db.ClientInvoiceItem.belongsTo(db.ClientInvoice, { foreignKey: 'invoice_id', as: 'invoice' });
+
+// Settings. Both cascade with the client: a preference has no meaning without
+// the person whose preference it is, unlike an invoice, which is a financial
+// record and deliberately outlives them.
+db.ClientPaymentMethod.belongsTo(db.WebsiteClient, { foreignKey: 'website_client_id', as: 'client' });
+db.WebsiteClient.hasMany(db.ClientPaymentMethod, { foreignKey: 'website_client_id', as: 'paymentMethods' });
+db.ClientPreference.belongsTo(db.WebsiteClient, { foreignKey: 'website_client_id', as: 'client' });
+db.WebsiteClient.hasOne(db.ClientPreference, { foreignKey: 'website_client_id', as: 'preferences' });
+db.ClientNotificationPref.belongsTo(db.WebsiteClient, { foreignKey: 'website_client_id', as: 'client' });
+db.WebsiteClient.hasMany(db.ClientNotificationPref, { foreignKey: 'website_client_id', as: 'notificationPrefs' });
 
 db.ClientTransaction.belongsTo(db.WebsiteClient, { foreignKey: 'website_client_id', as: 'client' });
 db.WebsiteClient.hasMany(db.ClientTransaction, { foreignKey: 'website_client_id', as: 'transactions' });
