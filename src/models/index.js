@@ -131,8 +131,13 @@ db.ClientPaymentMethod = require('./ClientPaymentMethod')(sequelize, Sequelize);
 db.Event = require('./Event')(sequelize, Sequelize);
 db.EventGuest = require('./EventGuest')(sequelize, Sequelize);
 db.EventGuestGroup = require('./EventGuestGroup')(sequelize, Sequelize);
+db.EventGuestNote = require('./EventGuestNote')(sequelize, Sequelize);
+db.EventGuestTag = require('./EventGuestTag')(sequelize, Sequelize);
+db.EventGuestReminder = require('./EventGuestReminder')(sequelize, Sequelize);
+db.EventGuestResponseLog = require('./EventGuestResponseLog')(sequelize, Sequelize);
 db.EventMessage = require('./EventMessage')(sequelize, Sequelize);
 db.EventMessageCampaign = require('./EventMessageCampaign')(sequelize, Sequelize);
+db.ClientNotification = require('./ClientNotification')(sequelize, Sequelize);
 
 // Translations
 db.Language = require('./Language')(sequelize, Sequelize);
@@ -430,11 +435,42 @@ db.EventMessage.belongsTo(db.EventGuest, { foreignKey: 'guest_id', as: 'guest' }
 db.EventGuestGroup.hasMany(db.EventGuest, { foreignKey: 'group_id', as: 'guests' });
 db.EventGuest.belongsTo(db.EventGuestGroup, { foreignKey: 'group_id', as: 'group' });
 
+// The guest profile: notes, tags, reminders and response history.
+//
+// Every one of these CASCADES with the guest, which is the right call for all
+// four: a note about somebody who is no longer on the list is not a note about
+// anything, and a response history with no responder is not a history. This is
+// the same reasoning as the message join above, and deliberately NOT the SET
+// NULL used for groups — a group outlives its members, a guest's own notes
+// cannot outlive them.
+db.EventGuest.hasMany(db.EventGuestNote, { foreignKey: 'guest_id', as: 'guestNotes' });
+db.EventGuestNote.belongsTo(db.EventGuest, { foreignKey: 'guest_id', as: 'guest' });
+db.EventGuest.hasMany(db.EventGuestTag, { foreignKey: 'guest_id', as: 'tags' });
+db.EventGuestTag.belongsTo(db.EventGuest, { foreignKey: 'guest_id', as: 'guest' });
+db.EventGuest.hasMany(db.EventGuestReminder, { foreignKey: 'guest_id', as: 'reminders' });
+db.EventGuestReminder.belongsTo(db.EventGuest, { foreignKey: 'guest_id', as: 'guest' });
+
+// A reminder can outlive the note it came from — SET NULL in the schema. It
+// still names a real task on a real date, and deleting a note should not
+// silently cancel it.
+db.EventGuestNote.hasMany(db.EventGuestReminder, { foreignKey: 'note_id', as: 'reminders' });
+db.EventGuestReminder.belongsTo(db.EventGuestNote, { foreignKey: 'note_id', as: 'note' });
+
+db.EventGuest.hasMany(db.EventGuestResponseLog, { foreignKey: 'guest_id', as: 'responseLogs' });
+db.EventGuestResponseLog.belongsTo(db.EventGuest, { foreignKey: 'guest_id', as: 'guest' });
+db.EventGuestResponseLog.belongsTo(db.Event, { foreignKey: 'event_id', as: 'event' });
+
 // Campaigns: one composed message, many per-recipient delivery rows.
 db.EventMessageCampaign.hasMany(db.EventMessage, { foreignKey: 'campaign_id', as: 'deliveries' });
 db.EventMessage.belongsTo(db.EventMessageCampaign, { foreignKey: 'campaign_id', as: 'campaign' });
 db.Event.hasMany(db.EventMessageCampaign, { foreignKey: 'event_id', as: 'campaigns' });
 db.EventMessageCampaign.belongsTo(db.Event, { foreignKey: 'event_id', as: 'event' });
+
+// The notification feed. Both joins are optional and both are SET NULL in the
+// schema, so a row survives the event or guest it describes being deleted.
+db.ClientNotification.belongsTo(db.WebsiteClient, { foreignKey: 'website_client_id', as: 'client' });
+db.ClientNotification.belongsTo(db.Event, { foreignKey: 'event_id', as: 'event' });
+db.ClientNotification.belongsTo(db.EventGuest, { foreignKey: 'guest_id', as: 'guest' });
 
 // Subscription Plans
 db.SubscriptionPlan.belongsTo(db.PlanType, { foreignKey: 'plan_type_id', as: 'planType' });

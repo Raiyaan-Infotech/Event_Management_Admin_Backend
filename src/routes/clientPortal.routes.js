@@ -6,6 +6,9 @@ const eventController = require('../controllers/clientEvent.controller');
 const guestController = require('../controllers/clientGuest.controller');
 const billingController = require('../controllers/clientBilling.controller');
 const preferencesController = require('../controllers/clientPreferences.controller');
+const messageController = require('../controllers/clientMessage.controller');
+const rsvpController = require('../controllers/clientRsvp.controller');
+const guestProfileController = require('../controllers/clientGuestProfile.controller');
 const { isWebsiteClientAuthenticated } = require('../middleware/websiteClientAuth');
 
 /**
@@ -138,6 +141,96 @@ router.post('/guests', guestController.create);
 router.get('/guests/:id', guestController.getById);
 router.put('/guests/:id', guestController.update);
 router.delete('/guests/:id', guestController.remove);
+
+/**
+ * Messages.
+ *
+ * ⚠ Nothing here delivers anything yet. No WhatsApp, SMS or SMTP provider is
+ * configured, so `send` records the campaign and its per-recipient rows and
+ * says so in its own response — the same shape the vendor newsletter uses.
+ * Every payload carries `channels[]` with the real state and the reason, so the
+ * screens describe it rather than each hardcoding an assumption.
+ *
+ * `composer`, `preview` and `test` come BEFORE `/messages/:id`, or Express
+ * matches them as an id and the handler looks for campaign number NaN.
+ */
+router.get('/messages/composer', messageController.composer);
+// Writes nothing — it resolves the audience so the review step and the send
+// cannot disagree about who is reachable.
+router.post('/messages/preview', messageController.preview);
+router.post('/messages/test', messageController.sendTest);
+router.post('/messages/send', messageController.send);
+router.get('/messages', messageController.list);
+router.get('/messages/:id', messageController.getById);
+
+/**
+ * RSVPs.
+ *
+ * ⚠ An RSVP is NOT a row — it is the response columns on a guest. So there is
+ * no DELETE here. `PUT /:id/reset` CLEARS the response and leaves the guest on
+ * the list; deleting the PERSON is `DELETE /guests/:id`, which already exists.
+ * Two verbs for two different acts, so a destructive button cannot be wired to
+ * the wrong one by reading the route name.
+ *
+ * `stats`, `export` and `groups` precede `/:id`, or Express matches them as an
+ * id and the handler looks for RSVP number NaN.
+ */
+router.get('/rsvps/stats', rsvpController.stats);
+router.get('/rsvps/export', rsvpController.exportRows);
+router.get('/rsvps/groups/:id', rsvpController.getGroup);
+router.get('/rsvps', rsvpController.list);
+router.get('/rsvps/:id', rsvpController.getById);
+router.put('/rsvps/:id', rsvpController.update);
+// Named `reset`, not `delete`. See above.
+router.put('/rsvps/:id/reset', rsvpController.resetResponse);
+router.put('/rsvps/:id/group', rsvpController.moveToGroup);
+
+/**
+ * Guest Profile — the PERSON across every event.
+ *
+ * ⚠ A different question from `/rsvps/:id`, which is one guest's answer about
+ * ONE event. The profile stitches every guest row sharing an email; the
+ * payload's `identity` block says so, because that stitch can be wrong in two
+ * directions and only the reader can tell.
+ *
+ * `:id` is a guest id — the same id `/rsvps/:id` takes, because an RSVP IS a
+ * guest. One row, two lenses.
+ *
+ * ⚠ Every nested route repeats `:id`. Ownership is then checked on BOTH the
+ * guest and the child, so a valid note id cannot be reached through a guest it
+ * does not belong to.
+ *
+ * There is deliberately no route that writes name / email / phone here. Those
+ * belong to `/guests/:id` — the same rule the RSVP edit screen follows.
+ */
+router.get('/guests/:id/profile', guestProfileController.get);
+router.put('/guests/:id/profile', guestProfileController.update);
+
+router.post('/guests/:id/notes', guestProfileController.createNote);
+router.put('/guests/:id/notes/:noteId', guestProfileController.updateNote);
+router.delete('/guests/:id/notes/:noteId', guestProfileController.deleteNote);
+
+router.post('/guests/:id/tags', guestProfileController.addTag);
+router.delete('/guests/:id/tags/:tagId', guestProfileController.removeTag);
+
+router.post('/guests/:id/reminders', guestProfileController.createReminder);
+router.put('/guests/:id/reminders/:reminderId', guestProfileController.updateReminder);
+router.delete('/guests/:id/reminders/:reminderId', guestProfileController.deleteReminder);
+
+/**
+ * Notifications.
+ *
+ * Reads and flags only. There is deliberately NO create route: the feed is
+ * written by other services through `notify()`, and a client who could post to
+ * their own feed could forge "Payment Successful".
+ *
+ * `/count` and `/read-all` precede `/:id` for the same reason as above.
+ */
+router.get('/notifications/count', messageController.notificationCount);
+router.put('/notifications/read-all', messageController.markAllRead);
+router.get('/notifications', messageController.listNotifications);
+router.put('/notifications/:id/read', messageController.markRead);
+router.put('/notifications/:id/archive', messageController.archive);
 
 /**
  * Billing — Phase 1: Overview and Change Plan.

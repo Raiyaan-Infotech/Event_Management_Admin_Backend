@@ -92,9 +92,9 @@ const gatewayState = () => {
  * are the two that carry a REFERENCE the vendor can reconcile against a bank
  * statement, which is the whole point of recording one.
  */
-const MANUAL_TYPES = ['upi', 'bank_transfer'];
+const MANUAL_TYPES = ['upi', 'bank_transfer', 'cash'];
 
-const MANUAL_LABELS = { upi: 'UPI', bank_transfer: 'Bank transfer' };
+const MANUAL_LABELS = { upi: 'UPI', bank_transfer: 'Bank transfer', cash: 'Cash' };
 
 /**
  * NPCI's shape for a virtual payment address: handle@psp.
@@ -118,11 +118,21 @@ function readManual(body = {}) {
     const type = String(body.method_type || '').trim().toLowerCase();
     if (!MANUAL_TYPES.includes(type)) {
         throw ApiError.badRequest(
-            `Choose how you pay: ${MANUAL_TYPES.map((t) => MANUAL_LABELS[t]).join(' or ')}.`,
+            `Choose how you pay: ${MANUAL_TYPES.map((t) => MANUAL_LABELS[t]).join(', ')}.`,
         );
     }
 
     const holder = body.holder_name ? String(body.holder_name).trim().slice(0, 120) : null;
+
+    /*
+      Cash carries no identifiers at all — no address, no account, nothing that
+      could ever double as a reference. It exists so a client whose event was
+      paid for in cash has something to pick as their record, rather than being
+      forced into a UPI or bank field that names a route the money never took.
+    */
+    if (type === 'cash') {
+        return { method_type: 'cash', holder_name: holder };
+    }
 
     if (type === 'upi') {
         const upi = String(body.upi_id || '').trim();
@@ -261,6 +271,7 @@ function isExpired(row, now = new Date()) {
  * payment's snapshot cannot word the same method four ways.
  */
 function methodLabel(j) {
+    if (j.method_type === 'cash') return 'Cash';
     if (j.method_type === 'upi') return `UPI · ${j.upi_id}`;
     if (j.method_type === 'bank_transfer') {
         const bank = j.bank_name || 'Bank account';
@@ -414,15 +425,25 @@ const addPaymentMethod = async (client, body = {}) => {
           meaningless. Caught here rather than by a unique index because the
           index would have to be on nullable columns and could not say this.
         */
+        // Cash has no field to match on — a second row would be identical to the
+        // first, so the clash is simply "one already exists".
         const clash = await ClientPaymentMethod.findOne({
             where: {
                 website_client_id: client.id,
-                ...(manual.method_type === 'upi'
-                    ? { upi_id: manual.upi_id }
-                    : { account_last4: manual.account_last4, bank_name: manual.bank_name }),
+                ...(manual.method_type === 'cash'
+                    ? { method_type: 'cash' }
+                    : manual.method_type === 'upi'
+                        ? { upi_id: manual.upi_id }
+                        : { account_last4: manual.account_last4, bank_name: manual.bank_name }),
             },
         });
-        if (clash) throw ApiError.badRequest('You have already saved that payment method.');
+        if (clash) {
+            throw ApiError.badRequest(
+                manual.method_type === 'cash'
+                    ? 'You have already saved Cash as a payment method.'
+                    : 'You have already saved that payment method.',
+            );
+        }
 
         fields = {
             gateway: 'manual',

@@ -88,7 +88,38 @@ module.exports = (sequelize) => {
         /** NULL = added to the list but not yet invited. */
         invited_at: { type: DataTypes.DATE, allowNull: true },
         responded_at: { type: DataTypes.DATE, allowNull: true },
+        /**
+         * What the GUEST said with their response.
+         *
+         * ⚠ Not the host's notes about them — those are rows in
+         * `event_guest_notes`. Two authors, two lifetimes; merging them would
+         * lose which of the two a sentence came from.
+         */
         notes: { type: DataTypes.STRING(500), allowNull: true },
+
+        photo: { type: DataTypes.STRING(500), allowNull: true },
+        /**
+         * Three states, not a boolean.
+         *
+         * The profile prints "—" for a guest nobody has asked, and a tinyint
+         * cannot tell "not required" from "never answered" — the difference
+         * between a guest who declined a room and one still to be chased.
+         */
+        accommodation: {
+            type: DataTypes.ENUM('unknown', 'required', 'not_required'),
+            allowNull: false,
+            defaultValue: 'unknown',
+        },
+        /** Free text. A fixed list would exclude the relationship somebody
+         *  actually has, and this is separate from `group_id` even when the
+         *  two happen to agree. */
+        relationship: { type: DataTypes.STRING(60), allowNull: true },
+        /**
+         * "Invited By". NULL forever on rows added before this existed —
+         * backfilling them with the account owner would be inventing a fact,
+         * so they read "—", which is correct.
+         */
+        added_by_client_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
     }, {
         tableName: 'event_guests',
         timestamps: true,

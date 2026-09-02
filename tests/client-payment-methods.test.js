@@ -154,9 +154,9 @@ const seedCard = (clientId, over = {}) => ClientPaymentMethod.create({
                 list.body?.data?.manual?.enabled === true
                 && typeof list.body?.data?.manual?.reason === 'string',
                 JSON.stringify(list.body?.data?.manual));
-            ok('and it offers UPI and bank transfer, not card',
+            ok('and it offers UPI, bank transfer and cash, not card',
                 JSON.stringify((list.body?.data?.manual?.types ?? []).map((t) => t.value))
-                    === JSON.stringify(['upi', 'bank_transfer']),
+                    === JSON.stringify(['upi', 'bank_transfer', 'cash']),
                 JSON.stringify(list.body?.data?.manual?.types));
             ok('the max is stated by the server, not the UI',
                 list.body?.data?.max_methods === svc.MAX_METHODS);
@@ -253,6 +253,19 @@ const seedCard = (clientId, over = {}) => ClientPaymentMethod.create({
                 bank.body?.data?.method?.label === 'HDFC Bank ending in 4242',
                 bank.body?.data?.method?.label);
             ok('the IFSC is upper-cased', bank.body?.data?.method?.ifsc === 'HDFC0001234');
+
+            const cash = await call('POST', '/client/billing/payment-methods', {
+                method_type: 'cash',
+            });
+            ok('cash is saved with NO fields at all', cash.status === 200 || cash.status === 201,
+                `got ${cash.status} ${cash.body?.message}`);
+            ok('the label is just "Cash"', cash.body?.data?.method?.label === 'Cash',
+                cash.body?.data?.method?.label);
+            ok('cash is not chargeable either', cash.body?.data?.method?.is_chargeable === false);
+
+            const dupeCash = await call('POST', '/client/billing/payment-methods', { method_type: 'cash' });
+            ok('a second Cash row -> 400, one is enough',
+                dupeCash.status === 400, `got ${dupeCash.status}`);
 
             /*
               The point of the whole change, asserted directly against the

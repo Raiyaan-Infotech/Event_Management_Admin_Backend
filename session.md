@@ -11,6 +11,8 @@ before touching a file.
 | `D:\Jamal\Event_Management_Website_Builder_Frontend`, `D:\Jamal\Website_Builder` | Older builder ADMIN folders | — |
 | `D:\Jamal\Event_Management_Admin_Frontend` | Admin panel. Also still holds **legacy copies** of the public routes + the in-admin preview | 3001 |
 | `D:\Jamal\Event_Management_Admin_Backend` | Shared backend for all of the above | 5001 · Render |
+| `D:\Jamal\event_client_single` | **The CLIENT PORTAL.** Billing, Guests, Messages, Notifications, Settings all live here | 3005 |
+| `D:\Jamal\Event_Management_Client_Frontend` | **STALE — do not use.** No billing, settings or messages module. Cost twenty minutes in §348 | — |
 
 **How the output site gets its content** (§116–§120): it is **host-addressed**, not header-addressed.
 `GET /api/v1/public/site/resolve?host=` maps a host to a company via `company_websites.slug` /
@@ -8781,3 +8783,1102 @@ backend                               all modules load clean
 7. Everything still open from §339 — the undeployed backend (§303),
    `EVENT_QR_SECRET` unset on Render, placeholder production JWT secrets,
    and the four stored-but-unapplied preferences.
+
+---
+
+## Session 29 — Billing screens finished, Messages + Notifications built, production migrated
+
+> **Date:** 2026-09-01 | **Backend:** `D:\Jamal\Event_Management_Admin_Backend`
+> **Client portal:** `D:\Jamal\event_client_single` (port 3005)
+>
+> ⚠ **The client portal is `event_client_single`, NOT
+> `Event_Management_Client_Frontend`.** That second folder is stale — it has no
+> billing, settings or messages module at all. Twenty minutes went into the
+> wrong tree at the start of this session. The live one is the `dashboard/`
+> route group with `(dashboard)` inside it.
+>
+> **PRODUCTION IS NOW MIGRATED** — five migrations applied and audited (§356).
+> This is the first session since §318 that does not carry a pending migration.
+
+### 348. Billing Overview and Invoices, redesigned against the supplied mockups
+
+Both tabs were rebuilt to match the designs. What is worth remembering is not
+the layout but the four places the design asserted something this system cannot
+support, and what went there instead:
+
+| The design says | What is there, and why |
+|---|---|
+| Billing Address, with a street and a PIN | **Billing Details** — name, company, email, phone. `website_clients` has NO address columns at all, which is also why `clientInvoice.service.js:249` writes `billing_address: null` |
+| A per-invoice **Download** icon | **View**, linking to the invoice, which carries the print action. An icon that downloads nothing is worse than no icon |
+| "Invoices are generated on the 12th of every month" | "An invoice is raised at the start of each billing term" — on a yearly plan that is once a year |
+| Donut of paid/unpaid **by count** | By MONEY. One large unpaid invoice among nine small paid ones is 10% by count and most of the money |
+
+**Export Invoices is real and needs no server route.** It pages the same endpoint
+the table uses with the current filters, builds the CSV in the browser, and
+escapes every cell — a leading `=`, `+`, `-` or `@` is apostrophe-prefixed, so an
+invoice field cannot execute as a spreadsheet formula. A BOM is prepended or
+Excel renders ₹ as mojibake.
+
+**The Invoices tab's filters already existed server-side.** `listInvoices` took
+`status/search/from/to/page/limit` all along; only `useInvoices` was dropping
+them. Nothing new was written on the backend for that tab.
+
+### 349. `?tab=` on the billing page, and why it is not a `useEffect`
+
+The invoice screen links back to a specific tab. The tab is seeded from
+`useSearchParams()` on the FIRST render, not pushed in by an effect — an effect
+paints Overview and then swaps, and `setState` in an effect body is a cascading
+render the lint rule catches. `useSearchParams` is why `BillingPage` now wraps
+`BillingScreen` in `<Suspense>`.
+
+### 350. ⚠ The invoice print bug was NOT about the print stylesheet
+
+Printing swept in the sidebar, header and breadcrumb, and came out indented and
+half-width with the items table's Qty and Amount columns clipped off.
+
+Hiding the chrome was never the problem. The invoice was still INSIDE the
+dashboard's box: `SidebarInset` is positioned and follows the sidebar in a flex
+row, and the content wrapper carries `lg:px-8`. So `position: absolute` on the
+print container resolved against `SidebarInset`, not the page.
+
+```css
+*:has(#invoice-print) {
+    display: block !important; position: static !important;
+    width: 100% !important; max-width: none !important;
+    margin: 0 !important; padding: 0 !important; overflow: visible !important;
+}
+```
+
+`*:has(#invoice-print)` selects exactly the ancestor chain and flattens every
+one of them, so the invoice can be a plain static block. Plus
+`overflow: visible` on the table's scroll box — there is nothing to scroll on
+paper and clipping it loses columns.
+
+> The `9/1/26` and `localhost:3005` lines are the BROWSER's own print header and
+> footer. No CSS removes them; it is the "Headers and footers" checkbox in the
+> print dialog.
+
+### 351. A payment now says WHICH method paid it
+
+`client_transactions` carried `gateway` and `gateway_transaction_id` but nothing
+named the instrument, so the Payment Method column could not exist.
+
+`apply-transaction-payment-method.js` adds four columns:
+
+| | |
+|---|---|
+| `client_payment_method_id` | the live link |
+| `method_brand`, `method_last4`, `method_label` | a **snapshot**, written once at payment time and never updated |
+
+**Both, not just the FK.** A receipt that changes its wording because somebody
+later renamed or removed the method is not a receipt. Proven by test: record a
+payment, remove the method, the invoice still reads "Visa ending in 4242".
+
+`method_label` exists because a card is brand + last4 and a UPI address is
+neither — reassembling a label from parts only works for one method type.
+`labelFor()` in `clientPaymentMethod.service` is the single renderer, and
+`recordPayment` snapshots its exact output.
+
+### 352. ⚠ Payment methods without a gateway — the earlier refusal was wrong
+
+§341 refused to save any payment method while no provider was connected, on the
+reasoning that *"a saved card that cannot be charged is a promise the next
+renewal breaks."*
+
+**That is true of auto-billing and wrong for this project.** Money arrives out of
+band and a payment is recorded by hand afterwards. Nothing auto-charges, so
+there is no renewal to fail — and the row is not a chargeable instrument at all
+but a RECORD OF HOW THE CLIENT PAYS, so the vendor knows what to expect and can
+match it against a bank statement.
+
+`apply-manual-payment-methods.js` makes the token NULLable and adds `upi_id`,
+`bank_name`, `account_last4`, `ifsc`, `is_verified`. The mode is decided by what
+ARRIVED, not by a flag — a body with a token takes the tokenised path (still 503
+without a provider), anything else is manual.
+
+**Offered: UPI, Bank transfer, Cash.** Not card — four unverifiable digits
+against an instrument nothing can charge would look like a saved card and behave
+like a note.
+
+> ⚠ **What neither mode may hold, and this did not change:** no card number, no
+> CVC — `assertNoRawCard()` applies to the manual path too. That rule was never
+> about the gateway. The manual path also refuses a **full bank account number**
+> rather than trimming it: trimming would mean the whole number had already
+> reached the server and could sit in a request log. The form caps input at 4
+> digits and the server insists on exactly 4.
+
+Validation is real: NPCI's UPI shape, RBI's IFSC. `is_verified` is always 0 on
+the manual path — the client typed it and nobody checked it, and the Verified
+badge only appears when it is true.
+
+### 353. Guest messaging — the Messages module
+
+`event_message_campaigns` and `event_messages` had tables and models since §320
+but no service, controller, routes or screens. All now exist.
+
+| Route | |
+|---|---|
+| `GET /client/messages/composer` | events, groups, guest count, merge fields, channel state — ONE call |
+| `POST /client/messages/preview` | resolves the audience; **the same code the send uses** |
+| `POST /client/messages/send` | records the campaign + one row per recipient |
+| `POST /client/messages/test` | renders what a guest would get |
+| `GET /client/messages` `/:id` | the record, with filters and per-campaign counts |
+
+**⚠ NOTHING IS DELIVERED.** No WhatsApp Business account and no SMTP. Three
+things are deliberate and must not be "fixed" by someone tidying up:
+
+1. **Deliveries are written `queued`, never `sent`.** Once a provider is wired,
+   real rows land in the same table — if these said `sent`, every delivery rate
+   would be permanently wrong with no way to separate them.
+2. **A delivery RATE is `null`, not 0%.** 0% reads as "it failed"; nothing was
+   attempted.
+3. **The campaign status is `sending`, labelled "Recorded".** Not "Sent".
+
+`channelState()` reads the environment (`WHATSAPP_ACCESS_TOKEN`, `SMTP_HOST`, …)
+exactly as `gatewayState()` does for payments, and every payload carries it, so
+the screens describe the real state and unlock themselves.
+
+**The composer's preview endpoint is the same code as the send.** Two
+implementations of "who is reachable" is how a review step showing 816 turns
+into 804 delivered with nobody able to explain it.
+
+**Merge fields are NOT substituted into the stored body.** The campaign keeps
+`{first_name}` intact, which is what makes it re-sendable to a different
+audience. `render()` accepts both `{token}` and `{{token}}` — the two supplied
+designs use different brace styles — and leaves an UNKNOWN token exactly as
+typed. A stray `{note}` is a visible mistake somebody fixes; deleting it leaves
+a sentence with a hole in it that reads as finished.
+
+### 354. SMS removed as a channel
+
+`VALID_CHANNELS` is `['whatsapp', 'email']`. Two things worth keeping straight:
+
+- **The picker and the rule are separate.** Hiding a button is not a rule — the
+  server refuses a crafted `channel: 'sms'` with a 400 and writes nothing. Both
+  are tested.
+- **The enum still permits `sms` and the label map still has an entry.**
+  Dropping the enum value would rewrite rows rather than stop new ones, and a
+  row whose channel had no label renders blank. Zero SMS rows exist today.
+
+Both screens now render their channel buttons, tiles and filter **from
+`channels[]` served by the API**, which is why removing a channel took one line
+on the backend and no frontend release.
+
+### 355. The notification feed
+
+New table `client_notifications` (§Messaging Phase 1), and `notify()` is the
+seam every other service uses.
+
+**⚠ `notify()` must never break its caller.** A failed feed row is not a failed
+send. It swallows and logs rather than propagating, and every caller treats it
+as fire-and-forget. That is the opposite of the usual rule and it is deliberate:
+the feed is a record OF the work, never a precondition FOR it.
+
+- **`category` and `type` are both stored.** `category` is the closed set the tab
+  bar groups by; `type` is what a preference in `client_notification_prefs`
+  switches on. One column forces a choice between a tab list that grows forever
+  and a preference that cannot be specific.
+- **The text is rendered at WRITE time.** Composing on read would join the guest
+  and event on every page — and worse, a notification would rewrite itself when
+  the guest was renamed. It is a record of what was true then. `event_id` /
+  `guest_id` survive beside it, ON DELETE SET NULL, so a row offers a link while
+  it resolves and stops offering one when it does not.
+- **There is NO create route.** A client who could write their own feed could
+  forge "Payment Successful". Tested that `POST /notifications` 404s.
+- **RSVP notifications fire on the TRANSITION**, not on every save — comparing
+  before/after is the only way to tell "just accepted" from "somebody edited
+  their table number". Without it the feed fills with duplicates.
+- **Mark-all is SCOPED to the tab in view.** Pressed on RSVP it must not clear
+  System. The server enforces it; the screen passes the category.
+- **Archive is a soft hide and also marks read.** "Dealt with" and "never
+  happened" are different answers.
+
+The header bell shipped with a comment saying "no endpoint exists, so no badge".
+That is now false — it carries the real count from
+`GET /client/notifications/count`, one indexed COUNT, and the five most recent.
+
+### 356. ⚠ PRODUCTION MIGRATED — five, and audited
+
+Applied in dependency order, then re-run to confirm idempotence:
+
+```
+apply-client-preferences.js          client_preferences, client_notification_prefs
+apply-client-payment-methods.js      client_payment_methods
+apply-transaction-payment-method.js  +4 columns on client_transactions
+apply-manual-payment-methods.js      +5 columns, token nullable
+apply-client-notifications.js        client_notifications
+```
+
+`schema-audit.js`: **0 missing tables, 0 missing columns.** A separate
+shape comparison (type, nullability, default, extra, every index) across the six
+billing tables came back identical — presence-only auditing would hide a type
+mismatch, which is the failure that has bitten this codebase before.
+
+`SequelizeMeta` exists on production only. Leftover from an old migration
+runner, unused.
+
+**§347.1 and §347.5 are cleared.** The four HTTP suites were re-run.
+
+### 357. The rich text editor, and the one channel that must not have it
+
+The admin panel's `rich-text-editor.tsx` (Quill / `react-quill-new`) is ported to
+the client portal. **Two things dropped:** image upload (it posts to
+`/media/upload`, which is behind the admin token + `media.upload` permission +
+approval middleware — it would 403 every press) and video embeds (they do not
+play in a mail client).
+
+> ⚠ **EMAIL gets the editor. WHATSAPP MUST NOT.** WhatsApp is a plain-text
+> protocol — it renders `*bold*`, not `<b>`. Feeding it HTML delivers
+> `<p>Hi Arjun</p>` to the guest, tags and all. The composer picks by channel, so
+> it cannot be used on the wrong one by accident. The WhatsApp field's toolbar
+> writes WhatsApp's OWN markers.
+
+Downstream, since an email body is now markup: the composer preview and the
+message detail inject it (`dangerouslySetInnerHTML`), the Messages list strips
+tags for its snippet (`htmlToText`), and `globals.css` gained a `.rich-html`
+block restoring list markers and links that Tailwind's preflight removes, plus
+`.quill-host` overrides — Quill's Snow theme ships hard-coded light colours and
+is a white box in dark mode without them.
+
+`htmlIsEmpty()` exists because Quill leaves `<p><br></p>` behind when you delete
+everything: not empty by `.trim()`, but empty to the person looking at it.
+
+### 358. ⚠ Two counting questions that look like bugs and are not
+
+**The composer opened on the wrong event.** `getComposer` ordered
+`start_date DESC` and took `[0]` — the event FURTHEST in the future. The default
+is now the **soonest upcoming** event (falling back to the most recent past),
+and the dropdown is soonest-first with each event's guest count on it. Landing
+on a wedding two years out with an empty guest list is what made the recipient
+picker look unwired.
+
+**"The Guests screen says 61 and the composer says 29."** Both are right:
+
+```
+61  = SUM(party_size)  — HEADS. A guest bringing three counts as three.
+37  = guest ROWS       — one message each; you have his phone, not his three guests'.
+28  = 36 rows on this event − 2 declined − 6 with no phone   (WhatsApp)
+34  = 36 rows on this event − 2 declined − 0                 (Email)
+```
+
+`POST /messages/preview` now returns a `counts` block with the whole chain, and
+the screen prints it: "28 messages · One per guest · 60 people expected", with
+the deductions itemised. The declined filter moved from the SQL `WHERE` into JS
+so the count BEFORE it survives — filtering in SQL made that figure
+unrecoverable without a second query.
+
+### 359. Demo data — local AND production
+
+`src/database/seeders/client-messages-demo.seeder.js`. 36 guests, 3 groups, 4
+campaigns, 132 deliveries, 12 notifications.
+
+> ⚠ **`--email` is REQUIRED against production.** Production has four client
+> accounts and two of them are not ours. A seeder that looped over every client
+> would put invented weddings and 36 fake guests on somebody else's login with
+> no way for them to tell which data was theirs. Seeded only
+> `jamaludheen779@gmail.com` (client #2); verified `rows on OTHER accounts: 0`.
+
+The demo rows obey the same honesty rules as the live code — `sending`, not
+`sent`; `queued`, not delivered. Demo data that proved the thing the screen is
+careful not to claim would be believed by whoever read the dashboard first.
+
+`--clear` matches on marks (`notes='msg-demo'`, `[demo]` in the campaign reason,
+`meta.demo`), never on client id, so real rows survive it.
+
+### 360. Verified
+
+```
+tests/client-messages.test.js          74/74   NEW — merge fields both brace styles ·
+                                               date built from PARTS · unknown token kept ·
+                                               reachability per channel ·
+                                               a guest with no phone EXCLUDED from WhatsApp ·
+                                               deliveries written QUEUED not sent ·
+                                               campaign SENDING not sent, and stores WHY ·
+                                               delivery rate null not 0% ·
+                                               schedule in the past REFUSED ·
+                                               SMS not offered · crafted SMS send -> 400 ·
+                                               the notification it wrote · RSVP fires on
+                                               the TRANSITION, no duplicate on re-save ·
+                                               mark-all SCOPED to the tab ·
+                                               archive is a soft hide ·
+                                               POST /notifications is not a route
+tests/client-payment-methods.test.js   65/65   +18 manual-mode cases: full account number
+                                               REFUSED not trimmed · UPI normalised ·
+                                               unverified · not chargeable · cash needs no
+                                               fields · duplicate refused · no invented token
+tests/client-billing.test.js           58/58   no regression
+tests/client-billing-api.test.js       56/56   no regression
+tests/client-settings-api.test.js      47/47   no regression
+tests/client-delete-account.test.js    20/20   no regression
+                                       ─────
+                                       320 passing
+
+initial_setup.sql        replayed TWICE into a scratch DB — 145 tables both passes
+tsc --noEmit             client portal clean
+eslint                   clean on every file touched
+production               schema-audit: 0 missing tables, 0 missing columns
+```
+
+> **Test isolation was fixed mid-session.** `client-payment-methods` failed on a
+> second run because an interrupted run left rows behind. Both suites now clear
+> down after login. A suite that fails depending on how the last one ended is a
+> suite people stop believing.
+
+### 361. Open
+
+1. **Nothing is committed**, in either repo. Carried from §318 — this is now a
+   very large uncommitted change set across two repos.
+2. **Browser testing still not done** — carried since §127. The Messages list,
+   Notifications and the Send wizard have real seeded data now and are worth
+   clicking through.
+3. **`/dashboard/rsvps` and `/dashboard/integrations` are in the sidebar with no
+   page behind them** — they hit the `[...slug]` "coming soon" placeholder.
+   RSVP is the next module.
+4. **No provider for anything.** Payments (`RAZORPAY_KEY_ID` / `STRIPE_*`),
+   WhatsApp (`WHATSAPP_ACCESS_TOKEN` + `WHATSAPP_PHONE_NUMBER_ID`), email
+   (`SMTP_HOST` / `SENDGRID_API_KEY`). Every one of them is a deploy setting,
+   not a code edit — the screens read the environment and switch themselves on.
+5. **Nothing calls `recordPayment()`.** It takes a `paymentMethodId` now, but
+   there is still no admin screen to record a received payment against an
+   invoice, so no invoice can be marked paid by anyone.
+6. **`exclude_unsubscribed` defaults to ON** and maps to `rsvp_status =
+   'declined'`. Right for an invite; wrong for a venue-change notice. Worth
+   revisiting when reminders are built.
+7. Everything still open from §347 — the undeployed backend (§303),
+   `EVENT_QR_SECRET` unset on Render, placeholder production JWT secrets, and
+   the four stored-but-unapplied preferences.
+
+---
+
+## Session 29 (continued) — RSVP module: backend complete, one screen of three built
+
+> Same day. **Local only, uncommitted.** No migration — RSVP needs no new table,
+> which is the single most important fact about this module (§362).
+>
+> Phase chosen: **1 + 2** (everything already backed by the schema). Phase 3 —
+> guest notes, custom questions, response history, accommodation — was
+> deliberately NOT started; see §368.
+
+### 362. ⚠ THERE IS NO RSVP TABLE, AND EVERYTHING FOLLOWS FROM THAT
+
+An RSVP is not a row. It is the response COLUMNS on a guest — `rsvp_status`,
+`response_type`, `responded_at`, `party_size`, `dietary_preference`, `notes`.
+`clientRsvp.service.js` is a different LENS on `event_guests`, not a new table.
+
+Three consequences, each now enforced and tested:
+
+1. **"Delete RSVP" cannot delete an RSVP.** It CLEARS the response and leaves
+   the guest on the list, in their group, in every count, able to answer again.
+   The route is `PUT /rsvps/:id/reset` — **`DELETE /rsvps/:id` is deliberately
+   not a route at all**, so a destructive button cannot be wired to the wrong
+   one by reading the verb. Deleting the PERSON is `DELETE /client/guests/:id`,
+   which already existed and says so.
+
+   > The supplied design's dialog says *"Delete RSVP · permanently remove the
+   > response record · this action cannot be undone."* That describes the
+   > destructive version. The dialog built here says what actually happens.
+
+2. **`rsvp_status` is DERIVED from `response_type`, never accepted beside it.**
+   Allowing both means a row can say "accepted" and "no" at once and nothing
+   downstream can decide which is true. A crafted `rsvp_status` in the body is
+   ignored — asserted directly.
+
+3. **There is no response HISTORY.** A row holds one current answer; changing it
+   overwrites. `linked_events` on the detail is the same PERSON at other events,
+   **matched on email** — the only link this schema has. A typo'd address
+   silently splits one person into two and nothing here can detect it.
+
+### 363. Two counting rules the tiles depend on
+
+**The five tiles ignore the STATUS filter** and count everything the other
+filters select. Clicking "Accepted" would otherwise make every other tile read
+zero, and the tile bar would stop being a summary and become a restatement of
+the tab. `getStats` is called with `{ ...query, status: 'all' }` for exactly
+this, and the test asserts the declined tile is unmoved by an accepted filter.
+
+**Four buckets over five stored statuses.** `not_responded` and `invited` both
+mean "still waiting", so `BUCKET` maps five to four and the tile, the tab and
+the filter all use the same map. The test asserts the four sum to the total —
+if they ever stop summing, a status was added without a bucket.
+
+`total_invitations` is ROWS; `heads` is `SUM(party_size)`. Same distinction as
+§358, and the tile prints both ("36 · 60 people expected") so this screen and
+the Guests screen cannot look like they disagree.
+
+### 364. Routes
+
+| | |
+|---|---|
+| `GET /client/rsvps` | list + tiles, filtered by event / group / status / search / responded-date |
+| `GET /client/rsvps/stats` | the tiles alone |
+| `GET /client/rsvps/export` | the ROWS an export would contain — not a file |
+| `GET /client/rsvps/:id` | one RSVP + derived timeline + invitation history + linked events |
+| `PUT /client/rsvps/:id` | response fields ONLY |
+| `PUT /client/rsvps/:id/reset` | clear the response |
+| `PUT /client/rsvps/:id/group` | move to another group |
+| `GET /client/rsvps/groups/:id` | group details, members, buckets, activity |
+
+`stats`, `export` and `groups` precede `/:id` or Express matches them as an id.
+
+**`update` takes response fields only.** Name, email and phone belong to the
+guest and are edited on the Guests screen — accepting them here would give two
+screens write access to the same columns under two different validation rules,
+which is how a mobile number ends up valid on one and not the other.
+
+**Moving a guest between groups does not touch their RSVP.** That is what the
+confirm dialog promises, and it is asserted.
+
+**Group details are scoped to ONE event.** A group is client-scoped but its
+members belong to events, so "8 members, 3 accepted" is only a true sentence
+about a single event — across two it double-counts anybody invited to both.
+
+### 365. The timeline is derived, and a seeder bug proved why that matters
+
+`buildTimeline()` composes from timestamps that already exist — `created_at`,
+`invited_at`, the message log, `responded_at`, the event date. Never stored: a
+stored timeline is a second place for the same facts and the first to fall out
+of step. Only what HAPPENED appears; a greyed-out "awaiting response" step, as
+the mockup draws it, reads as stuck rather than as not started.
+
+> ⚠ **The first run came out as `msg-131 > invited > … > responded > created`.**
+> The sort was right and the DATA was impossible: §359's seeder let `created_at`
+> default to NOW while writing messages dated in the past, so "added to the
+> guest list" landed after the messages sent to them.
+>
+> Fixed in the seeder (`created_at` and `invited_at` are now set explicitly, and
+> `invited_at` precedes the earliest campaign at 96h), the 36 existing rows were
+> corrected in place, and **the suite now asserts the timeline is strictly
+> chronological** so it cannot regress silently.
+
+### 366. Export is CSV, and says so
+
+The design offers CSV / XLSX / PDF and *"exports are generated in the
+background, you'll receive a download link when it's ready."* That is four
+things this system does not have: a spreadsheet library, a PDF renderer, a job
+queue and SMTP.
+
+The endpoint returns ROWS, not a file, and the browser builds the CSV — the same
+shape as the invoice export (§344), including the formula-injection guard and
+the BOM. The dialog has a column picker, Guest Name and RSVP Status are not
+un-checkable (an export without them is a list of numbers), and the 5000-row cap
+is reported rather than silently truncating.
+
+### 367. Built, and what is verified
+
+```
+src/services/clientRsvp.service.js       new
+src/controllers/clientRsvp.controller.js new
+src/routes/clientPortal.routes.js        +8 routes
+src/hooks/use-rsvps.ts                   new
+app/dashboard/(dashboard)/rsvps/page.tsx new — list, tiles, filters, clear dialog, export
+
+tests/client-rsvps.test.js   48/48   run twice back to back
+                                     the four buckets account for every invitation ·
+                                     tiles unchanged by a status filter ·
+                                     answered rows sort above unanswered ·
+                                     timeline strictly chronological ·
+                                     rsvp_status DERIVED, crafted value ignored ·
+                                     responded_at cleared when the answer is taken back ·
+                                     THE GUEST STILL EXISTS after a reset ·
+                                     status returns to invited, not "never contacted" ·
+                                     DELETE /rsvps/:id is not a route ·
+                                     moving groups leaves the RSVP unchanged ·
+                                     a group that is not yours -> 400
+                             ─────
+        all suites            368 passing (48 + 74 + 65 + 58 + 56 + 47 + 20)
+
+tsc --noEmit    clean      eslint  clean      /dashboard/rsvps  200
+```
+
+### 368. ⚠ WHAT IS STILL PENDING IN RSVP
+
+**Three screens — every endpoint already exists and is tested. Frontend only.**
+
+1. **View RSVP** (`GET /rsvps/:id` is done). Needs: the guest header, Response
+   Details, the derived timeline, Invitation History from `messages[]`, and
+   Linked Events from `linked_events[]`. The payload also carries an
+   `unavailable` block naming what this system does not record, so the screen
+   can say so instead of rendering an empty tab that looks broken.
+2. **Edit RSVP** (`PUT /rsvps/:id` is done). Response status, number of guests,
+   group, meal preference, notes. ⚠ **Not** name / email / phone — those belong
+   to the Guests form (§364).
+3. **Group Details** (`GET /rsvps/groups/:id` is done). Members table, bucket
+   stats, activity, and the member row menu — view / edit / move / remove are
+   all backed; resend and message route into the composer.
+
+**One real gap, not just an unbuilt screen:**
+
+4. ⚠ **The "Send reminder" deep-link is INERT.** The RSVP row menu links to
+   `/dashboard/messages/send?event_id=…&guest_id=…&kind=reminder`, but the
+   composer does **not** read `useSearchParams` — confirmed, zero occurrences.
+   So it lands on the composer with the DEFAULT event and nobody selected, which
+   is worse than no link: it looks like it worked. Either teach the composer to
+   seed `eventId` / `audience='guests'` / `guestIds` / `kind` from the query, or
+   drop the link until it does.
+
+**Deliberately not started — Phase 3, needs schema:**
+
+5. **Guest Notes tab.** There is one `notes VARCHAR(500)` per guest. The design
+   wants many notes with categories, pins, tags, visibility and reminders —
+   two or three tables.
+6. **Custom Questions & Answers.** `custom_answers` is a JSON column but
+   **nothing defines what the questions are**, so answers cannot be labelled.
+   The service returns the JSON raw and the detail payload says why.
+7. **RSVP History tab.** Needs a change log; today a row holds one answer.
+8. **Accommodation Required** — no column.
+9. **Guest Profile** as a distinct screen (6 tabs). Overview, Invitation History,
+   Linked Events and Activity Timeline are all derivable from what exists;
+   Notes and RSVP History are items 5 and 7 above.
+
+**Carried, unchanged from §361:** nothing is committed in either repo; no
+browser testing; no provider for payments, WhatsApp or email; nothing calls
+`recordPayment()`.
+
+---
+
+## Session 30 — RSVP edit form de-effected, and the reminder deep-link made real
+
+> Same repos, still **local only and uncommitted**. No migration, no backend
+> change — both fixes are in `event_client_single`.
+
+### 369. The RSVP edit form no longer seeds state in an effect
+
+Same lint rule the billing page hit. The form held six `useState`s at their
+empty defaults and filled them from a `useEffect` guarded by a `loaded` flag.
+That shape has three problems and the guard only hides the first:
+
+1. It paints the EMPTY form, then swaps. For one frame the response is "No
+   response" and the party size is 1 for every guest on the system.
+2. `setState` in an effect body is a second render every mount, cascading.
+3. **Reset was a lie.** `resetForm()` set `loaded = false`, which re-seeded from
+   whatever React Query already had in cache — a local revert to a stale
+   snapshot, which is precisely the bug the profile form's Reset once had and
+   the comment above it claimed to have avoided.
+
+**The fix is to stop using an effect at all — initialise from props and
+remount.** `RsvpEditScreen` now only fetches; a child `EditForm` owns the state
+and seeds every field in its `useState` initialiser from `data.rsvp`. The parent
+passes `key={`${rsvpId}-${nonce}`}`, so:
+
+- state is populated exactly once per mount, correct on the first paint;
+- a background refetch can never overwrite what somebody has typed, with no
+  `loaded` flag to get it wrong;
+- **Reset `await refetch()`s FIRST and only then bumps the nonce**, so it
+  remounts against what the server currently holds. Bumping the nonce before the
+  refetch resolves would have re-seeded from the same stale cache and reproduced
+  the original bug through the new mechanism. The button shows a spinner while
+  the refetch is in flight, because a Reset that looks instant but is not is how
+  a double-press ends up racing itself.
+
+```
+src/app/dashboard/(dashboard)/rsvps/[id]/edit/rsvp-edit.tsx   restructured
+    useEffect import dropped · tsc clean · eslint clean
+```
+
+### 370. §368.4 closed — the composer reads the deep link
+
+The "Send reminder" link was **inert**: seven call sites across the RSVP screens
+pointed at `/dashboard/messages/send?event_id=…&guest_id=…&kind=reminder` and
+the composer never called `useSearchParams`. It landed on the DEFAULT event with
+nobody selected, which is worse than no link — it looks like it worked.
+
+`readLink()` now resolves the query **once, in a `useState` initialiser** — the
+same rule as §369, and for the same reason: reading it in an effect would paint
+the default composer and then swap the recipients under the client.
+`useSearchParams` returns a new object every render, so the lazy initialiser is
+what stops it re-seeding over typed input.
+
+What it seeds: `eventId`, `audience` (`guests` / `groups` / `all`, inferred from
+which id arrived), the id itself, and `kind`.
+
+**Three details that are not incidental:**
+
+**Both parameter spellings are read.** The Guests screens link with `?guest=` /
+`?group=`; the RSVP screens with `?guest_id=` / `?group_id=`. Both were inert so
+neither was "the" convention. Reading both costs four characters and does not
+break a bookmark somebody already has.
+
+**`kind` is validated against the server's list HERE.** `KINDS` mirrors
+`VALID_KINDS` in `clientMessage.service.js`, which silently coerces anything
+unknown to `invite`. Coerced at the server, the campaign is simply filed under
+the wrong heading with nothing said; coerced here, the banner can say the link
+was only partly understood. The send now passes `kind` through — it was
+hardcoded `kind: 'invite'`, so **every reminder ever sent from this screen would
+have been recorded as an invitation.**
+
+**The banner reports the SERVER's count, not its own success.** A `?guest_id=`
+naming somebody who is not on that event resolves to nobody, and asserting
+"pre-filled for 1 guest" from the fact that a number was present in the URL
+would re-create the original failure in nicer type. It waits for
+`POST /messages/preview` and branches on `counts.selected_guests`:
+
+| | |
+|---|---|
+| no preview yet | "Opening a reminder for the selection you came from…" |
+| `selected_guests ≥ 1` | names the guest (server-resolved) and the event |
+| `selected_guests === 0` | ⚠ warning — "That link did not match anyone." |
+
+> ⚠ A DECLINED guest still resolves to zero recipients, because
+> `exclude_unsubscribed` defaults ON and maps to `rsvp_status = 'declined'`
+> (§361.6). The counts panel says `− n declined`, so it is visible rather than
+> silent — but "Send reminder" on a declined RSVP row is still a dead end by
+> design. That default is the thing to revisit, not this banner.
+
+`useSearchParams` opts the tree into CSR, so the page is now
+`SendMessagePage` → `<Suspense>` → `SendMessageComposer`; without the boundary
+the production build fails outright. The loading skeleton was extracted to
+`ComposerSkeleton` and serves as both the fallback and the `isLoading` branch.
+
+```
+src/app/dashboard/(dashboard)/messages/send/page.tsx   deep link + kind + Suspense
+    tsc --noEmit  clean       eslint  clean (0 warnings)
+```
+
+### 371. NOT verified this session
+
+- **No test run.** Both changes are frontend; the backend is untouched, so the
+  368 passing tests are unaffected — but nothing was re-run to prove it, because
+  the local API was not up and the suites need a live server.
+- **Still no browser testing** — carried since §127, and these two changes are
+  exactly the kind that only a click reveals: the Reset spinner, and the banner
+  on a guest who is not on the chosen event.
+
+### 372. Open — carried, minus §368.4
+
+Everything in §368 except item 4, which is now closed. The three RSVP screens
+are built (view, edit, group details). Still pending: Phase 3 needs schema
+(guest notes, custom questions, RSVP history, accommodation), nothing is
+committed in either repo, no provider for payments / WhatsApp / email, and
+nothing calls `recordPayment()`.
+
+### 373. The composer had no Back button at all
+
+Reported from the RSVP side ("Send Reminder has no back button"), but the
+composer had no way back from ANY of its four entry points — it was only ever
+reachable from the Messages list, where the sidebar covered for it.
+
+`?from=` now names the origin and the header renders a back link **labelled for
+the screen you came from**, not a bare "Back": a page reached from four places
+has to say where it will return you before you press it.
+
+`from` is an **allowlisted token, not a return URL**. A `?back=/…` the page
+followed verbatim is a redirect somebody else gets to write, and even kept
+internal it would need path validation this map makes unnecessary. Unknown or
+absent tokens fall through to Messages.
+
+| `?from=` | goes to | label |
+|---|---|---|
+| `rsvps` | `/dashboard/rsvps` | Back to RSVPs |
+| `guests` | `/dashboard/guests` | Back to Guests |
+| `guest-groups` | `/dashboard/guests/groups` | Back to Groups |
+| *(anything else)* | `/dashboard/messages` | Back to Messages |
+
+All seven call sites tagged: the four RSVP ones (list, detail, edit, group
+detail — including the group's "message the whole group") as `rsvps`, and the
+two Guests ones as `guests` / `guest-groups`.
+
+The link is also rendered in the **"No event to message about"** empty state,
+which was the one screen with no navigation on it at all — a guest-less account
+following a reminder link landed there with nothing but "Create an event".
+
+```
+messages/send/page.tsx  + back link, BACK_TO map, empty-state escape
+rsvps/page.tsx · rsvps/[id]/rsvp-detail.tsx · rsvps/[id]/edit/rsvp-edit.tsx
+rsvps/groups/[id]/group-detail.tsx · guests/page.tsx · guests/groups/page.tsx
+    tsc --noEmit  clean       eslint  clean on messages + rsvps
+```
+
+> ⚠ **`guests/page.tsx` and `guests/groups/page.tsx` fail the same lint rule
+> §369 was about** — four `set-state-in-effect` errors and two unused imports.
+> Verified PRE-EXISTING by linting them at HEAD: identical six problems, so the
+> `?from=` edit did not introduce them. They are the next candidates for the
+> same props-and-key treatment, and are NOT fixed here.
+
+---
+
+## Session 31 — Guest Profile Phase 3: the schema work
+
+> **Phase 3 chosen** after an audit of the supplied Guest Profile and Group
+> Details designs (§374). Backend + migration only — the SCREENS are Phases 1
+> and 2 and are not built here.
+>
+> ⚠ **Migration applied to LOCAL ONLY. Production is untouched** — see §381.
+
+### 374. The audit that came first
+
+Against the real schema, the Group Details design was ~80% already built (§367)
+and mainly wanted popups instead of page jumps. The Guest Profile design was
+half unbacked. Nothing in this list had a column: guest photo, "Invited By", the
+message "Sender", **RSVP History**, Accommodation, the entire **Notes** tab
+(pinned / categories / tags / visibility / reminders), and "Link / Unlink
+Events".
+
+Two of those are not schema problems and were NOT fixed:
+
+- **Link / Unlink Events is not an operation.** A guest row IS per-event, so
+  "linking" a person to an event means CREATING a row — that is "invite them to
+  another event", a different verb, and calling it linking would misdescribe it.
+- **Custom Questions stays unavailable.** `custom_answers` holds JSON but
+  nothing defines what the QUESTIONS are, so an answer cannot be labelled. That
+  is a missing definition, not a missing column, and no table added here fixes
+  it. It is the only entry left in `unavailable`.
+
+### 375. ⚠ THE RULE FROM §362.3 HAS CHANGED
+
+§362.3 said plainly: *there is no response HISTORY; a row holds one current
+answer and changing it overwrites.* **`event_guest_response_logs` is now that
+history**, and every response change appends to it.
+
+What has NOT changed, and must not be read as having changed: **the guest row is
+still the current answer.** Every count, tile and filter reads it.
+
+```
+"what did they say"      -> read the GUEST. Always.
+"how did it get there"   -> read the LOG.
+```
+
+Code that answers the first question from the newest log row is wrong the moment
+a log write is ever skipped. The table is **APPEND ONLY** — `paranoid: false`,
+`updatedAt: false`, and nothing updates or deletes a row, because a history you
+can edit is not a history.
+
+Three rules the suite pins down:
+
+1. **A change touching no response field writes NOTHING.** Moving a guest
+   between groups is not history. A history with an entry per save is one nobody
+   reads, because the real change is buried in noise.
+2. **Clearing a response IS history, and it is the most important entry.** It is
+   the one case where the guest row afterwards says nothing at all
+   (`response_type: 'none'`, `responded_at: null`). Without the entry, the fact
+   that they once accepted would be gone from the system — and "they never
+   replied" is a materially different sentence from "they accepted and the host
+   cleared it".
+3. **`from_response_type` is NULL on a first entry, never `'none'`.** `'none'`
+   would claim they had actively said nothing before. The screen prints the
+   first entry as "Responded" and later ones as "Changed from X", which only
+   works if the two are distinguishable.
+
+`logResponseChange()` **never throws.** A history is a record OF a change, not a
+condition for it: if the insert fails the response still legitimately changed,
+and a 500 would leave the guest edited while telling the client it failed.
+
+### 376. Four decisions in the schema worth keeping
+
+**`accommodation` is a three-state enum, not a boolean.** `unknown` = nobody
+asked, and prints as "—". A tinyint cannot tell "not required" from "never
+answered" — the difference between a guest who declined a room and one still to
+be chased.
+
+**Reminders do NOT store "upcoming".** The design's badge says it, but that is a
+fact about `due_at` versus now: stored, it is a lie the moment the date passes
+and nothing corrects it. Only `pending / done / dismissed` — what a PERSON sets
+— is stored; `EventGuestReminder.derive()` computes the badge at read time. The
+suite proves it by moving a due date into the past behind the service's back and
+asserting the row reads `overdue` while `status` is still `pending`.
+
+> ⚠ **Nothing fires reminders.** No job runner, no SMTP. It is a list the host
+> reads. Do not add a `sent_at` here until something can send — a column named
+> that would be read as a promise that it did.
+
+**Tags are rows, not JSON.** They are the thing people filter and count by, and
+a JSON column cannot be indexed for it. The UNIQUE key includes `deleted_at`, so
+`addTag` **restores** a soft-deleted row rather than inserting a second — else
+the guest carries the same label twice, both live.
+
+**Actors, not users.** `website_clients` is ONE login per account with no team
+under it, so "Rohan Mehta / System" in the design are two ACTORS. Every actor
+column is an enum plus an optional client id — an FK to a users table would
+imply a multi-user model this product does not have.
+
+### 377. `event_guests`.`notes` was NOT replaced
+
+It stays, and keeps its meaning: **what the GUEST said with their response.**
+`event_guest_notes` is **what the HOST wrote about them.** Two authors, two
+lifetimes. Both appear on the profile in different places and merging them would
+lose which of the two a sentence came from. Asserted directly.
+
+### 378. The profile links on EMAIL, and says so out loud
+
+`clientRsvp.service` answers "what did this guest say about THIS event" — one
+row. `clientGuestProfile.service` answers "who is this PERSON across every
+event" — every guest row sharing their email, which is the only link the schema
+has.
+
+That stitch can be wrong in **two** directions: a typo'd address splits one
+person into two profiles, and a shared family address merges two people into
+one. Nothing can detect either, so the payload carries an `identity` block
+naming what was matched and how many rows it used, and the screen prints it. A
+wrong profile that explains how it was assembled is recoverable; one that looks
+authoritative is not.
+
+A guest with **no email** links to nobody and their profile is exactly one row —
+correct rather than degraded. Matching on NAME would merge two different Priya
+Sharmas, so it is not done.
+
+### 379. Built
+
+```
+src/database/migrations/sql/20260902-guest-profile-phase3.sql   new, applied, then DELETED (§381)
+initial_setup.sql                        + 4 tables, + 6 columns
+src/models/EventGuestNote.js             new
+src/models/EventGuestTag.js              new
+src/models/EventGuestReminder.js         new   (+ .derive())
+src/models/EventGuestResponseLog.js      new   (append-only)
+src/models/EventGuest.js                 + photo, accommodation, relationship, added_by_client_id
+src/models/EventMessage.js               + sender, sender_client_id
+src/models/index.js                      + 4 registrations, 7 associations
+src/services/clientRsvp.service.js       + logResponseChange, accommodation, response_history
+src/services/clientGuestProfile.service.js       new
+src/controllers/clientGuestProfile.controller.js new
+src/routes/clientPortal.routes.js        + 11 routes
+tests/client-guest-profile.test.js       new
+```
+
+Routes — all under `isWebsiteClientAuthenticated`. `:id` is a guest id (an RSVP
+IS a guest; one row, two lenses). **Every nested route repeats `:id`** so
+ownership is checked on BOTH the guest and the child — a valid note id must not
+be reachable through a guest it does not belong to.
+
+| | |
+|---|---|
+| `GET/PUT /client/guests/:id/profile` | the six tabs in one payload; PUT takes photo + relationship ONLY |
+| `POST/PUT/DELETE /client/guests/:id/notes[/:noteId]` | |
+| `POST/DELETE /client/guests/:id/tags[/:tagId]` | |
+| `POST/PUT/DELETE /client/guests/:id/reminders[/:reminderId]` | |
+
+⚠ **No route here writes name / email / phone.** Those belong to `/guests/:id` —
+the same rule the RSVP edit screen follows (§364), and asserted.
+
+### 380. Verified
+
+```
+tests/client-guest-profile.test.js      74/74  NEW — run twice, clean teardown
+tests/client-rsvps.test.js              50/50  (+3; one assertion UPDATED, below)
+tests/client-messages.test.js           74/74  no regression
+tests/client-payment-methods.test.js    65/65  no regression
+tests/client-billing.test.js            58/58  no regression
+tests/client-billing-api.test.js        56/56  no regression
+tests/client-settings-api.test.js       47/47  no regression
+tests/client-delete-account.test.js     20/20  no regression
+                                       ──────
+                                        444 passing
+
+migration      run TWICE against a scratch DB — second pass a clean no-op
+initial_setup  replayed TWICE — 145 -> 149 tables, both passes
+               column-signature md5 IDENTICAL before/after running the migration
+               on a DB built from it, so the two files cannot have drifted
+seed           2 rows for 2 answered guests, 0 for the unanswered one, stable
+               across 3 runs. Local: 4 rows for 4 answered guests
+```
+
+> ⚠ **One existing assertion was CHANGED, not just added to.**
+> `client-rsvps` asserted `unavailable.rsvp_history` and `unavailable.notes`
+> were strings. Both now have tables, so naming them as unavailable would be the
+> screen apologising for a feature it has. The assertion now checks
+> `custom_questions` is still named AND that the other two have **left** the
+> list — so the list shrinking is itself pinned down.
+
+### 381. PRODUCTION IS MIGRATED — and the migration file is gone
+
+> Superseded §381's original text, which said production was pending. It is
+> done; the pre-state is kept below because it is what the audit reported.
+
+Applied to Aiven the same session. Backup of the two ALTERed tables taken
+FIRST, since additive-only is a reason for confidence and not a reason to skip
+one: `d:/Jamal/db_backups/prod-pre-phase3-20260902-103139.sql`.
+
+```
+146 -> 150 tables
+event_guests    36 rows, unchanged      event_messages  132 rows, unchanged
+6 history rows seeded  (production has 6 answered guests; local had 4)
+every seeded row: from_response_type NULL, source 'guest'
+
+schema-audit  MISSING TABLES: none    MISSING COLUMNS: none
+```
+
+**The migration file was then deleted**, following the convention CLAUDE.md
+records for the client-portal tables: `initial_setup.sql` is the ONLY definition,
+and standalone migration scripts go once production is verified. All four tables
+and all six columns are in `initial_setup.sql`.
+
+> ⚠ **What went with it.** The file also held the BACKFILL that seeds one
+> history row per already-answered guest. `initial_setup.sql` does not, and
+> should not — it builds a fresh database, where there is nothing to backfill.
+> Both environments have been seeded, so nothing is owed; but a THIRD existing
+> database, if one ever appears, would come up with the tables empty and its
+> guests' current answers absent from their history. Re-derive it from §376 if
+> that day comes.
+
+### 381a. What the audit said before it was applied
+
+`schema-audit` against production reports exactly what was added and nothing
+else:
+
+```
+MISSING TABLES     event_guest_notes · event_guest_reminders
+                   event_guest_response_logs · event_guest_tags
+MISSING COLUMNS    event_guests   photo, accommodation, relationship, added_by_client_id
+                   event_messages sender, sender_client_id
+```
+
+That file has since been applied and removed — see §381.
+
+> ⚠ Production has 36 guests, 6 of whom had answered. The seed wrote one row
+> each — a real event that really happened at `responded_at`. It did NOT invent
+> the steps in between: nobody recorded that a guest said maybe before yes, and
+> a plausible chain would make the tab look complete while being fiction. The
+> other 30 got no row, because "no history" is the true answer for them.
+
+### 382. Open
+
+> The database is DONE, on both environments. What remains is entirely
+> frontend, plus the standing carries.
+
+1. **The SCREENS are not built.** Phase 3 was the schema; Phases 1 and 2 — the
+   Guest Profile page and the Group Details modals — are now unblocked and every
+   endpoint they need exists and is tested.
+2. **Group Details "Edit Member" still conflicts with §364.** The design's modal
+   writes name / email / phone. Whoever builds it must limit it to response
+   fields and link out for contact details, as the RSVP edit form does.
+3. **Nothing is committed**, in either repo. Carried from §361.1 — now larger.
+4. **No browser testing** — carried since §127.
+5. Everything else from §368: no provider for payments / WhatsApp / email,
+   nothing calls `recordPayment()`, `EVENT_QR_SECRET` unset on Render.
+
+---
+
+## Session 32 — the screens: Guest Profile, and Group Details as dialogs
+
+> Frontend only, in `event_client_single`. No backend change, no migration —
+> Phase 3 (§374-381) built every endpoint these read.
+
+### 383. Guest Profile — six tabs over ONE payload
+
+`GET /client/guests/:id/profile` in a single request rather than six. The tabs
+share a header, and six endpoints would let the header disagree with itself as
+each resolved. Every list in the payload is capped, so it stays one round trip.
+
+```
+src/hooks/use-guest-profile.ts                             new
+guests/[id]/profile/page.tsx                               new  (NaN guard)
+guests/[id]/profile/guest-profile.tsx                      new  (5 tabs + header)
+guests/[id]/profile/notes-tab.tsx                          new  (notes/tags/reminders CRUD)
+```
+
+⚠ **`/guests/[id]/profile` is a SIBLING of `/guests/[id]`**, which is the guest
+EDIT FORM. Same id, deliberately different screens — see §364 for why contact
+details are writable on only one of them.
+
+**Reachable from three places**, all added this session: the RSVP list row menu
+("View guest profile"), the RSVP detail header ("Guest profile"), and the group
+member row menu. All three use the guest id, because an RSVP IS a guest.
+
+### 384. The four things the screen refuses to fake
+
+**The email stitch is PRINTED on the page.** `identity.note` renders in a
+bordered strip under the header, for both outcomes — "linked by email" is one
+caveat and "no email, so nothing could be linked" is a different one; a blank
+space would read as neither. A wrong profile that explains how it was assembled
+is recoverable; one that looks authoritative is not.
+
+**"Link / Unlink Events" is not a button.** A guest row IS per-event, so linking
+a person to an event means CREATING a row — that is an invitation, a different
+verb. The tab ends with a line naming the real operation and linking to it.
+
+**Delivered / Opened tiles read 0, and the card says why.** No provider is
+connected, so nothing is ever delivered or opened. Counting SENDS instead would
+make the tiles look healthy while meaning nothing. The explanation only appears
+once there are messages to explain — on a guest with none, a warning about
+providers is noise.
+
+**The Notes dialog has no Visibility select.** The design offers "Internal /
+Shared", but nothing shows a guest their own notes — there is no guest-facing
+view at all — so the control would promise something that cannot happen. A line
+of text says the notes are private instead. (The COLUMN keeps its `shared`
+value, reserved; see the model.)
+
+### 385. RSVP History reads as two different sentences
+
+The first entry says **"Responded"**; later ones say **"Maybe → Yes"**. That is
+exactly why `from_response_type` is NULL rather than `'none'` on a first entry
+(§375.3) — the screen branches on `is_first` and cannot tell the two apart
+otherwise.
+
+An EMPTY history is a real answer and says so: *"Either this guest has not
+responded, or their answer was given before response history was kept."* Both
+are true causes, and an empty table with no explanation reads as broken.
+
+### 386. The Activity tab is composed in the BROWSER
+
+From `messages[]` and `response_history[]`, both already on the payload. Never a
+stored feed: a second copy of the same facts is the first thing to fall out of
+step with the rows it describes — the same rule §365 established for the RSVP
+timeline. Only what HAPPENED appears.
+
+### 387. Group Details — the two navigations became dialogs
+
+⚠ **View Member Details** and **Edit Member** were page navigations. You reach
+them while working DOWN a member list, and leaving the page to read one row
+costs your scroll position and your place in the list. Both are now dialogs.
+
+⚠ **Edit Member does NOT write name / email / phone**, and this is the one place
+the supplied design was overruled. Its popup edits all three. Those columns
+belong to the Guests form, and two screens writing them under two sets of
+validation is how a mobile number ends up valid on one and rejected on the
+other (§364). The server refuses them regardless. They are shown READ-ONLY with
+a link to where they ARE editable — so the dialog answers the question rather
+than pretending the fields do not exist.
+
+**Send Message and Resend Invitation stay LINKS to the composer**, deliberately
+not dialogs:
+
+- the composer already owns channel state, merge fields, audience resolution and
+  the server's own "not connected" banner. A second one would be a second set of
+  rules to keep in step.
+- the design's Send Message popup has **"Attach a file"**. There is no
+  attachment storage for event messages — no table, no column. A file picker
+  that silently discards the file is worse than no file picker.
+
+State in both dialogs is seeded from PROPS with a `key` from the parent, never
+an effect — same rule as §369.
+
+### 388. Verified
+
+```
+tsc --noEmit                    clean, whole app
+eslint  new + touched files     clean, 0 errors 0 warnings
+eslint  whole app               21 problems, ALL in pre-existing files —
+                                analytics, event-categories, guest-form,
+                                group-form, guests, dashboard, global-loader,
+                                breadcrumb, charts, 2 hooks, format.test.
+                                None in anything written this session.
+
+/dashboard/guests/147/profile          200
+/dashboard/rsvps/groups/7?event_id=1   200
+/dashboard/rsvps                       200
+/dashboard/guests/abc/profile          200 and renders "not a valid guest link"
+                                       — the NaN guard fires
+```
+
+> ⚠ **NOT verified: what the page actually LOOKS like.** These are client
+> components that fetch after mount, so a curl gets the skeleton and the real
+> content never appears in the HTML. 200 means "did not crash", not "renders
+> correctly". Nobody has clicked through any of it — carried from §127 and now
+> covering three new screens.
+
+### 389. Open
+
+1. **No browser testing.** Now the most valuable thing left: six tabs, three
+   dialogs and a notes editor that have never been looked at.
+2. **Nothing is committed**, in either repo. Carried from §361.1 and now larger
+   again — this is the standing risk.
+3. **Guest photo has no uploader.** The column, the API field and the `<Avatar>`
+   are all wired; nothing puts a file in it yet, so every profile shows
+   initials. `PUT /guests/:id/profile` takes a `photo` URL whenever an upload
+   path is added.
+4. **Relationship has no editor on this screen.** Same shape — the field is
+   read and displayed, and `PUT /guests/:id/profile` accepts it, but nothing
+   sets it.
+5. Everything from §382: no provider for payments / WhatsApp / email, nothing
+   calls `recordPayment()`, `EVENT_QR_SECRET` unset on Render.
+

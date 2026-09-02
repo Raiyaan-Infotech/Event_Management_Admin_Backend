@@ -7,6 +7,7 @@ const {
 } = require('../models');
 const { Op } = Sequelize;
 const ApiError = require('../utils/apiError');
+const notifications = require('./clientNotification.service');
 
 /**
  * Guests.
@@ -378,6 +379,17 @@ const createGuest = async (clientId, companyId, body) => {
         company_id: companyId ?? null,
     });
 
+    // Fire and forget — a failed feed row must never fail a guest that saved.
+    notifications.notify(clientId, {
+        type: 'guest_added',
+        title: 'New guest added',
+        body: `${guest.name} was added to your guest list.`,
+        eventId: guest.event_id,
+        guestId: guest.id,
+        companyId: companyId ?? null,
+        link: `/dashboard/guests/${guest.id}`,
+    });
+
     return getGuestById(clientId, guest.id);
 };
 
@@ -404,7 +416,31 @@ const updateGuest = async (clientId, guestId, body) => {
         }
     }
 
+    /*
+      The RSVP notification fires on the TRANSITION, not on every save.
+      Comparing before and after is the only way to tell "they just accepted"
+      from "somebody edited their table number and they had already accepted" —
+      without it the feed fills with duplicates every time a guest row is
+      touched.
+    */
+    const before = guest.response_type;
     await guest.update(data);
+    const after = guest.response_type;
+
+    if (after !== before && ['yes', 'no', 'maybe'].includes(after)) {
+        const verb = after === 'yes' ? 'accepted' : after === 'no' ? 'declined' : 'tentatively replied to';
+        notifications.notify(clientId, {
+            type: after === 'yes' ? 'rsvp_accepted' : after === 'no' ? 'rsvp_declined' : 'rsvp_maybe',
+            title: 'New RSVP received',
+            body: `${guest.name} ${verb} your invitation.`,
+            eventId: guest.event_id,
+            guestId: guest.id,
+            companyId: guest.company_id ?? null,
+            link: `/dashboard/guests/${guest.id}`,
+            meta: { response: after, email: guest.email, mobile: guest.mobile },
+        });
+    }
+
     return getGuestById(clientId, guestId);
 };
 
