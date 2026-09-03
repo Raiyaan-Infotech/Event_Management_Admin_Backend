@@ -177,3 +177,8 @@ debug.log
 # run. The final markdown summary is useful to keep; the per-run raw dumps
 # under qa-reports/<date>/ are not meant to be committed.
 qa-reports/*/
+
+# Claude Code local session state — an ever-growing, machine-specific log of
+# permission approvals and absolute local temp paths. Not meant to be shared;
+# .claude/settings.json (the real shared config) is unaffected.
+.claude/settings.local.json
