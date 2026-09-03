@@ -172,3 +172,8 @@ uploads/
 # Test and debug
 debug.log
 *.pid.lock
+
+# QA reports — raw test evidence and scratch fuzz payloads, regenerated per
+# run. The final markdown summary is useful to keep; the per-run raw dumps
+# under qa-reports/<date>/ are not meant to be committed.
+qa-reports/*/

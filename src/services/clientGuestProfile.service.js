@@ -377,8 +377,21 @@ const getProfile = async (clientId, id) => {
 const createNote = async (clientId, guestId, body = {}) => {
     const guest = await own(clientId, guestId);
 
-    const title = String(body.title || '').trim();
-    if (!title) throw ApiError.badRequest('A note needs a title.');
+    /*
+      ⚠ typeof, not just falsy. `String({})` is the literal text
+      "[object Object]" and `String([1,2])` is "1,2" — either would have been
+      silently ACCEPTED and stored as garbage before this check existed. A
+      title has to already BE text; nothing here should be guessing what the
+      caller meant by an object.
+    */
+    if (typeof body.title !== 'string' || !body.title.trim()) {
+        throw ApiError.badRequest('A note needs a title.');
+    }
+    const title = body.title.trim().slice(0, 150);
+
+    if (body.body !== undefined && body.body !== null && typeof body.body !== 'string') {
+        throw ApiError.badRequest('Note content must be text.');
+    }
 
     const category = NOTE_CATEGORIES.includes(body.category) ? body.category : 'general';
     const visibility = NOTE_VISIBILITY.includes(body.visibility) ? body.visibility : 'internal';
@@ -386,8 +399,8 @@ const createNote = async (clientId, guestId, body = {}) => {
     const note = await EventGuestNote.create({
         website_client_id: clientId,
         guest_id: guest.id,
-        title: title.slice(0, 150),
-        body: body.body ? String(body.body) : null,
+        title,
+        body: body.body || null,
         category,
         visibility,
         is_pinned: body.is_pinned ? 1 : 0,
@@ -407,11 +420,17 @@ const updateNote = async (clientId, guestId, noteId, body = {}) => {
 
     const data = {};
     if (body.title !== undefined) {
-        const title = String(body.title || '').trim();
-        if (!title) throw ApiError.badRequest('A note needs a title.');
-        data.title = title.slice(0, 150);
+        if (typeof body.title !== 'string' || !body.title.trim()) {
+            throw ApiError.badRequest('A note needs a title.');
+        }
+        data.title = body.title.trim().slice(0, 150);
     }
-    if (body.body !== undefined) data.body = body.body ? String(body.body) : null;
+    if (body.body !== undefined) {
+        if (body.body !== null && typeof body.body !== 'string') {
+            throw ApiError.badRequest('Note content must be text.');
+        }
+        data.body = body.body || null;
+    }
     if (body.category !== undefined) {
         if (!NOTE_CATEGORIES.includes(body.category)) throw ApiError.badRequest('Invalid category.');
         data.category = body.category;
@@ -447,8 +466,14 @@ const deleteNote = async (clientId, guestId, noteId) => {
 const addTag = async (clientId, guestId, body = {}) => {
     const guest = await own(clientId, guestId);
 
-    const label = String(body.label || '').trim().slice(0, 60);
-    if (!label) throw ApiError.badRequest('A tag needs a label.');
+    if (typeof body.label !== 'string' || !body.label.trim()) {
+        throw ApiError.badRequest('A tag needs a label.');
+    }
+    const label = body.label.trim().slice(0, 60);
+
+    if (body.color !== undefined && body.color !== null && typeof body.color !== 'string') {
+        throw ApiError.badRequest('Tag colour must be text.');
+    }
 
     /*
       ⚠ Restore before insert. The unique key includes `deleted_at`, so a
@@ -469,7 +494,7 @@ const addTag = async (clientId, guestId, body = {}) => {
         website_client_id: clientId,
         guest_id: guest.id,
         label,
-        color: body.color ? String(body.color).slice(0, 9) : null,
+        color: body.color ? body.color.slice(0, 9) : null,
     });
     return { id: tag.id };
 };
@@ -491,8 +516,10 @@ const REMINDER_STATUS = ['pending', 'done', 'dismissed'];
 const createReminder = async (clientId, guestId, body = {}) => {
     const guest = await own(clientId, guestId);
 
-    const title = String(body.title || '').trim();
-    if (!title) throw ApiError.badRequest('A reminder needs a title.');
+    if (typeof body.title !== 'string' || !body.title.trim()) {
+        throw ApiError.badRequest('A reminder needs a title.');
+    }
+    const title = body.title.trim();
 
     const dueAt = body.due_at ? new Date(body.due_at) : null;
     if (!dueAt || Number.isNaN(dueAt.getTime())) throw ApiError.badRequest('A reminder needs a valid date.');
@@ -534,9 +561,10 @@ const updateReminder = async (clientId, guestId, reminderId, body = {}) => {
 
     const data = {};
     if (body.title !== undefined) {
-        const title = String(body.title || '').trim();
-        if (!title) throw ApiError.badRequest('A reminder needs a title.');
-        data.title = title.slice(0, 150);
+        if (typeof body.title !== 'string' || !body.title.trim()) {
+            throw ApiError.badRequest('A reminder needs a title.');
+        }
+        data.title = body.title.trim().slice(0, 150);
     }
     if (body.due_at !== undefined) {
         const dueAt = new Date(body.due_at);
@@ -580,9 +608,17 @@ const updateProfile = async (clientId, guestId, body = {}) => {
     const guest = await own(clientId, guestId);
 
     const data = {};
-    if (body.photo !== undefined) data.photo = body.photo ? String(body.photo).slice(0, 500) : null;
+    if (body.photo !== undefined) {
+        if (body.photo !== null && typeof body.photo !== 'string') {
+            throw ApiError.badRequest('Photo must be a URL string.');
+        }
+        data.photo = body.photo ? body.photo.slice(0, 500) : null;
+    }
     if (body.relationship !== undefined) {
-        data.relationship = body.relationship ? String(body.relationship).trim().slice(0, 60) : null;
+        if (body.relationship !== null && typeof body.relationship !== 'string') {
+            throw ApiError.badRequest('Relationship must be text.');
+        }
+        data.relationship = body.relationship ? body.relationship.trim().slice(0, 60) : null;
     }
 
     if (!Object.keys(data).length) throw ApiError.badRequest('Nothing to update.');
