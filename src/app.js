@@ -46,6 +46,12 @@ const ALLOWED_ORIGINS = (process.env.FRONTEND_URL || 'http://localhost:3000,http
 // makes unsafe.
 const COOKIE_BEARING_PUBLIC_PATHS = [
   '/api/v1/public/website-clients/login',
+  // The 2FA login challenge's second leg. It sets the SAME session cookies as
+  // `login` above the moment the code verifies — missed here, the browser's
+  // `credentials: 'include'` fetch is silently rejected against the wildcard
+  // CORS response below (`origin: '*'` cannot combine with credentials), which
+  // surfaces to the visitor as a generic "Could not reach the server."
+  '/api/v1/public/website-clients/login/2fa/verify',
   '/api/v1/public/website-clients/logout',
 ];
 
@@ -86,6 +92,7 @@ app.use('/api/v1/media', require('./routes/media.routes'));
 app.use('/api/v1/translations', require('./routes/translation.routes'));
 app.use('/api/v1/translation-keys', require('./routes/translationKey.routes'));
 app.use('/api/v1/email-configs', require('./routes/emailConfig.routes'));
+app.use('/api/v1/push-notification-configs', require('./routes/pushNotificationConfig.routes'));
 app.use('/api/v1/email-templates', require('./routes/emailTemplate.routes'));
 app.use('/api/v1/email-campaigns', require('./routes/emailCampaign.routes'));
 app.use('/api/v1/activity-logs', require('./routes/activityLog.routes'));

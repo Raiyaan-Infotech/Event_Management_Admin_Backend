@@ -9882,3 +9882,413 @@ eslint  whole app               21 problems, ALL in pre-existing files —
 5. Everything from §382: no provider for payments / WhatsApp / email, nothing
    calls `recordPayment()`, `EVENT_QR_SECRET` unset on Render.
 
+---
+
+## Session 33 — Client Portal Security: 2FA, Active Sessions, Authorized Devices
+
+> Backend `Event_Management_Admin_Backend` + frontend `event_client_single` +
+> `Event_Management_Public_Site` (login form). Migrated on **local AND
+> production**, verified with `schema-audit.js` — no missing tables/columns.
+
+### 390. The Security tab used to say this was impossible — it wasn't wrong
+
+Before this session, website-client sign-in issued pure stateless JWTs. No
+table recorded a sign-in, so there was nothing to list on "Active Sessions"
+and nothing "Log Out All Other Sessions" could revoke. The tab said so rather
+than shipping a button that cleared a cookie and left the token valid for
+seven more days.
+
+**The fix didn't need a new token format.** `generateWebsiteClientRefreshToken`
+(`src/utils/jwt.js`) has minted a `jti` uuid into every refresh token since
+before this project had a client portal at all — nothing ever read it.
+Persisting that value in a new `client_sessions` table is the entire
+mechanism.
+
+### 391. Three new tables — `apply-client-security.js`
+
+```
+client_sessions       one row per sign-in; jti, transport (web/app), device
+                       name/type/browser/os, ip_address, location (ALWAYS
+                       NULL — no GeoIP service exists), last_active_at,
+                       expires_at, revoked_at/reason, trusted_until
+client_two_factor     separate table from website_clients on purpose — that
+                       model's defaultScope already excludes password/otp_hash;
+                       a shared secret is one more thing to leak via a
+                       scopeless findByPk
+client_backup_codes   a ROW per code, bcrypt-hashed — not a JSON array, so two
+                       codes spent at once cannot overwrite each other's update
+```
+
+Migrated local + prod via `node src/database/tools/apply-client-security.js
+[--prod] --apply`, following the `apply-client-payment-methods.js` pattern:
+dry-run by default, reads `website_clients.id`'s real column type from
+`information_schema` rather than guessing the FK type.
+
+### 392. Sessions and Devices are ONE table, not two
+
+Active Sessions and Authorized Devices read the identical rows through two
+controller methods (`listSessions` / `listDevices`). Two tables would be two
+copies of "which device is this," and the first symptom of them drifting is a
+device removed on one screen still working on the other.
+
+### 393. 2FA is TOTP-only, and does not cover the mobile app
+
+No SMS provider exists or is bought — the mobile OTP login already logs
+"NOT SENT". `otplib` (v13 API — `generateSecret`/`generateURI`/`verifySync`,
+NOT the old `authenticator` object) needs no provider: Google Authenticator,
+Authy and Microsoft Authenticator all read the same `otpauth://` URI drawn
+client-side with `qrcode.react`.
+
+⚠ **Decision, not a gap that got missed:** the Flutter app's phone-OTP sign-in
+is deliberately NOT asked for a 2FA code. `GET /client/security/2fa` reports
+`covers: { web_sign_in: true, mobile_app: false, note }` from the server, so
+the portal's own UI states this rather than a component quietly assuming
+otherwise.
+
+**Replay is blocked by a stored counter**, not just the TOTP window: each
+verify records `last_used_counter` (the 30-second `timeStep` window a code
+matched, taken from `verifySync`'s own return value); the same six digits are
+refused a second time inside that window — without it, a code read over a
+shoulder is good for up to a minute.
+
+### 394. Backup codes: shown once, restorable by hash alone
+
+`8F3R-L9KD-S2PQ` format, no `0/O/1/I/L` (read off a screen, typed from a
+printout). Stored as bcrypt hashes; regenerating destroys the old set — that
+is the whole point of regenerating. The plaintext exists only in the one API
+response that creates them.
+
+### 395. The login CHALLENGE — the part that makes 2FA actually enforce
+
+Session-tracking and 2FA management (enrol/disable/backup codes) landed
+first with **enforcement deliberately off** — logging in with just a
+password still worked even with 2FA enabled, which was flagged as an open
+gap. Closed in the same session:
+
+- `POST /public/website-clients/login` now checks `isEnabledFor(client.id)`.
+  If on, it returns `{ requires_2fa: true, challenge_token }` **instead of a
+  session** — no cookie is set until the code verifies.
+- New `POST /public/website-clients/login/2fa/verify` exchanges
+  `challenge_token` + code (or a backup code) for the real session.
+- The challenge token (`website_client_2fa_challenge`, 10 min) carries no
+  `sid` and is rejected by `isWebsiteClientAuthenticated`, which only accepts
+  `type: 'website_client'` — it cannot be replayed as real access.
+- **"Trust this device for 30 days"** is a SEPARATE long-lived cookie
+  (`website_client_device_trust`, 30d, `generateDeviceTrustToken`) from the
+  session cookie, because it has to survive a full logout/login to mean
+  anything. It is pinned to `client_two_factor.confirmed_at` — disabling and
+  re-enrolling 2FA gives a new `confirmed_at`, which makes every old trust
+  token stop matching automatically. No separate revocation list needed.
+
+⚠ **OAuth (Google/Facebook) sign-in does NOT get the challenge.** It is a
+top-level browser redirect, not a JSON call that can pause for a code — a
+2FA-enrolled client can still get in via social sign-in without one. Flagged,
+not fixed, this session.
+
+### 396. The public site's login form gained a second step, in place
+
+`login-section.tsx` (Event_Management_Public_Site) — the card swaps its
+password form for a code-entry step (reusing the existing `OtpInput`) when
+`loginWebsiteClient()` answers `requiresTwoFactor`. The redirect to the
+portal only fires after `verifyTwoFactorLogin()` succeeds; the password step
+succeeding is explicitly NOT treated as signed in when a challenge is
+pending.
+
+### 397. Two real bugs caught only by testing, not by reading the code
+
+1. **CORS.** `app.js`'s `COOKIE_BEARING_PUBLIC_PATHS` allowlist decides which
+   `/public/*` routes get the credentialed CORS policy (needed because they
+   set cookies) vs. the permissive wildcard one. The new
+   `login/2fa/verify` route was missed — it fell into the wildcard bucket, so
+   `credentials: 'include'` fetches were silently killed by the browser
+   before any response came back. Surfaced as a generic "Could not reach the
+   server," identical for a right or wrong code, because the request never
+   reached the code-check logic at all. `supertest`-based tests didn't catch
+   it, because supertest doesn't enforce browser CORS.
+2. **Test scripts wiped a real enrollment.** `client-security.test.js` and
+   `client-2fa-login.test.js` both exercise `test@example.com` — the exact
+   seeded account also used for MANUAL testing with a real phone. Both
+   unconditionally wiped that account's 2FA secret/backup codes/sessions as
+   "clean slate"/"cleanup." Re-running the CORS-fix verification deleted a
+   real enrollment mid-session; the next real login attempt then failed with
+   a confusing "wrong code" instead of "2FA was silently turned off."
+   **Fixed properly**: `tests/helpers/security-snapshot.js` snapshots the
+   account's real `client_two_factor` + `client_backup_codes` (by copying
+   hashes directly — no plaintext needed) + `client_sessions` (preserving the
+   exact `jti`, so a cookie already sitting in a browser keeps resolving)
+   before either test touches anything, and restores them in a `finally` so
+   a failed assertion mid-run still leaves the account exactly as found.
+   Verified by simulating a fake "real" enrollment, running both suites, and
+   confirming the same secret/hash/flags survived byte-for-byte.
+
+### 398. "Trust this device" defaulted to checked — that caused real confusion
+
+Both the Manage 2FA setup checkbox and the public-site login challenge
+checkbox defaulted to `true`. Enrolling 2FA therefore silently set a 30-day
+trust cookie nobody meant to opt into, which is why "logout then login" did
+not re-prompt for a code — not a bug, but a surprising default. **Changed
+both to default `false`** — trust is a standing 30-day exemption that
+survives logout, so it should be something somebody notices choosing.
+
+### 399. `/dashboard/profile`'s security rail was stale, not just unbuilt
+
+Separate page from Settings > Security. Its "Two-Factor Authentication" and
+"Active Sessions" rows still hardcoded `trailing="Not available"` with
+comments dated from when neither existed anywhere in this backend — now
+false rather than merely outdated. Wired to the same `useTwoFactor` /
+`useSessions` hooks the Security tab uses, and turned into real links
+(`/dashboard/settings/security/two-factor`, `/dashboard/settings/security/sessions`)
+so the two screens cannot disagree about whether 2FA is on.
+
+### 400. Verified
+
+```
+tests/client-security.test.js       36 passed  (sessions: rotation, replay
+                                     rejection, trust surviving rotation,
+                                     revoke-all sparing the caller; 2FA:
+                                     enrol/confirm, replay rejection, backup
+                                     codes single-use, regenerate, disable)
+tests/client-2fa-login.test.js      13 passed  (supertest, in-process —
+                                     login→challenge→verify→session, wrong
+                                     code refused, challenge not replayable,
+                                     trusted device skips challenge, disabling
+                                     2FA reverts to normal login, re-enrolling
+                                     invalidates old trust cookies)
+node src/database/tools/schema-audit.js     clean, local vs production
+tsc --noEmit / eslint               clean on all touched frontend files
+next build (Event_Management_Public_Site)   succeeds, /login prerenders
+```
+
+> ⚠ **NOT verified: a full click-through of all four screens end to end with
+> the login challenge live**, beyond the manual round trip that surfaced the
+> CORS bug and the wiped-enrollment issue above. Carried forward from §389
+> and every session before it — still the largest standing gap.
+
+### 401. Open
+
+1. **OAuth sign-in bypasses 2FA entirely** (§395) — a top-level redirect, not
+   yet given a challenge step.
+2. **The Flutter app never asks for a 2FA code** — a deliberate product
+   decision (§393), not an oversight, but worth restating: a 2FA-enrolled
+   client's account is only as protected as the phone-OTP route allows.
+3. **`OTP_ACCEPT_ANY=true`** still makes the mobile login OTP accept any
+   value. An env setting, not a code change — the user's call, deferred
+   until an SMS provider is bought.
+4. **No `password_changed_at` on `website_clients`.** Changing a password now
+   revokes every other SESSION (new this session), but the device-TRUST
+   cookie is only invalidated by re-enrolling 2FA, not by a password change —
+   carried as a known gap in `generateDeviceTrustToken`'s own comment.
+5. Everything from §389/§382/§368 not touched this session: no provider for
+   payments / WhatsApp / email, `EVENT_QR_SECRET` unset on Render, no
+   browser click-through of the guest-profile/group-details screens.
+
+---
+
+## Session 34 — Splash Screen module — BUILT
+
+> Backend `Event_Management_Admin_Backend` + frontend `event_client_single`.
+> Migrated on **local AND production**. Planned first (§402-403 below, kept
+> as written), then built the same session once the open questions were
+> answered.
+
+### 402a. Decisions that closed the open questions
+
+- **Not a web page.** This is the MOBILE APP's own splash/loading screen,
+  shown when a guest opens an event inside `Event_Invite_Mobile_App` — "event
+  wrapped around this splash screen." No public web route exists or was
+  added.
+- **Standalone module, not per-event — explicitly for now.** `event_name` is
+  plain text a client types, not a foreign key. Linking a saved splash to a
+  real `events` row is a later phase; "we have to do that CRUD, that is it."
+- **Real upload endpoint, image+video+audio**, not deferred.
+- **Animation is saved, not delivered.** Stored now (`animation_enabled`,
+  `animation_config`), same pattern as this project's email/notification
+  consent flags — the mobile app has nowhere to read it yet, and the form's
+  own Animation panel says so.
+- **Available to every plan** — no gate.
+
+### 402. What the ten mockup screens show
+
+A step titled **"Add Splash (Invitation)"** — the screen a guest sees first
+when opening an event invite, before the main site. Two-column layout: form
+on the left, a live phone-frame **Splash Preview** on the right (Mobile /
+Tablet toggle).
+
+**1. Content** — Main Title\*, Sub Title, Event Name\*, Tagline (optional),
+each with a live character counter (e.g. `13/30`).
+
+**2. Background** — a type switcher, each type swapping the fields below it
+entirely:
+- **Image** — upload (PNG/JPG/MP4 up to 20MB per the copy, though MP4 under
+  an "Image" tab reads like a copy-paste from Video), Overlay % slider
+- **Video** — upload, Video Start (`From Beginning` etc.), Video Volume,
+  Video Overlay %, optional Fallback Image
+- **Solid Color** — a swatch grid + custom picker, Overlay Opacity
+- **Gradient** — Linear/Radial, direction presets (6 arrows), two colors +
+  swap button, live gradient preview bar
+- **Logo** — upload, Logo Size %, 9-position grid (top/middle/bottom ×
+  left/center/right)
+- **Couple Photo** — upload, Image Fit (Cover/etc.), Overlay %, Dark Overlay
+  toggle
+- **Sound on Splash** — upload audio, Auto Play / Loop toggles, Volume slider
+  (this one appears as a toggle-style option alongside the type buttons in
+  screen 1, then gets its own "Sound Settings" panel — needs clarifying
+  whether it's a background TYPE or an independent add-on to any type)
+- **Show Loader** — 7 loader-style icons, Loader Color, Loader Size,
+  Background Color (also reads as an add-on rather than a background type)
+- **Enable Animation** — 6 style thumbnails (Floating Particles, Rose
+  Petals, Lights & Sparkles, Bokeh Lights, Fireworks, More), Speed, Particle
+  Density, Overlay Color/Opacity, Loop toggle. Copy on this panel says
+  **"Animations will be visible in the mobile app only"** — i.e. this one
+  piece is scoped to `Event_Invite_Mobile_App`, not the web splash.
+
+**3. Logo/Couple Photo settings** appear as their own numbered section when
+Background Type is Image/Video/Solid/Gradient (optional watermark-style
+logo), distinct from Background Type = Logo (logo AS the whole background).
+
+**4. Button Settings** — Button Text (char-capped), Button Style
+(Filled/Outline/Text Only), Button Color (hex + swatch).
+
+**5. Additional Settings** — Show Couple Name, Show Event Date on Splash,
+Enable Animations, Show Tagline, Show Loader, Sound on Splash — six toggles,
+several of which look like they gate the panels above rather than duplicate
+them (needs reconciling: is "Enable Animations" here the same flag as the
+"Enable Animation" background type, or a separate on/off for it?).
+
+**Top-right, constant across all ten screens:** Save as Draft, Preview Full
+Screen. **Bottom, constant:** Reset, Save & Continue.
+
+### 403. Questions this needs answered before design, not during it
+
+1. **Where does this live?** Per-event (own splash per wedding) or
+   per-vendor-website (one splash template reused)? The breadcrumb
+   ("Back to Event Setup") suggests per-event, but that needs confirming
+   against how `event_client_single`'s event-creation wizard actually steps
+   through its stages today.
+2. **Where is this rendered to a real guest?** An event's public invite page
+   does not currently exist as a route in any audited codebase — is this
+   splash step introducing that page, or decorating one that's assumed to
+   exist?
+3. **Video/audio storage and size limits** — does the existing upload
+   pipeline (`media.service.js` / S3) accept video and audio today, or is
+   that new?
+4. **Animations are mobile-app-only per the mockup's own copy** — does
+   `Event_Invite_Mobile_App` have any splash-rendering surface at all yet to
+   receive these settings, or would they be stored with nothing reading them
+   (the §29/§59-style "consent recorded, nothing delivers yet" pattern used
+   elsewhere in this project)?
+5. **Plan gating** — "Upgrade to Premium" sidebar is visible throughout; is
+   any part of this splash builder plan-gated, or just the sidebar's
+   standing upsell?
+
+All five answered in §402a above and built the same session — see §404-407.
+
+### 404. `splash_screens` — one table, four JSON config blobs
+
+`node src/database/tools/apply-splash-screens.js [--prod] --apply`, same
+dry-run/FK-type-read pattern as every other `apply-*.js` tool. 29 columns,
+migrated local + prod, verified with `schema-audit.js`.
+
+```
+id, website_client_id, company_id, name (internal label — the list's own
+  identifier, since this isn't tied to a real event yet)
+main_title*, sub_title, event_name* (plain text), tagline
+background_type ENUM(image|video|solid_color|gradient|logo|couple_photo)
+background_url, fallback_image_url (video only), background_config JSON
+sound_enabled, sound_url, sound_config JSON
+loader_enabled, loader_config JSON
+animation_enabled, animation_config JSON   -- ⚠ saved, not delivered
+button_text, button_style ENUM(filled|outline|text), button_color
+show_couple_name, show_event_date, show_tagline
+status ENUM(draft|active)                  -- Save as Draft vs Save & Continue
+```
+
+**Why four JSON blobs instead of ~25 flat columns**: `background_type` picks
+ONE of six wildly different shapes (a video's start-point/volume share
+nothing with a gradient's two colors and a direction); `background_config`
+holds whichever shape applies. Sound, loader and animation are independent
+add-ons layered on ANY background type, not variants of it, so each gets its
+own blob. Mirrors `events.components` / `component_order` already in this
+schema.
+
+### 405. Backend — CRUD + a real upload endpoint
+
+```
+src/models/SplashScreen.js                      new
+src/services/clientSplashScreen.service.js      new  (list/get/create/update/delete + uploadMedia)
+src/controllers/clientSplashScreen.controller.js new
+src/routes/clientPortal.routes.js               + 6 routes
+```
+
+Copied the guest-groups CRUD shape exactly (`normalise(body, {partial})`,
+ownership from `req.websiteClient.id` everywhere, never a client id from the
+request). `background_config` etc. are validated as "must be a plain object,"
+not field-by-field — each background type has its own shape, and a strict
+per-field validator would need rewriting every time the form grows an option.
+
+**Upload**: `POST /client/splash-screens/media`, new multer config accepting
+image + video (MP4/WebM) + audio (MP3/WAV/OGG), 20MB cap, reusing
+`mediaService.upload()` (already format-agnostic — only the route-level
+multer filter was ever narrow). Upload-then-reference, same shape as the
+avatar uploader: one file in, one URL back, saved into the form's state
+independent of the rest of the save.
+
+### 406. Frontend — list + form + illustrative preview
+
+```
+src/hooks/use-splash-screens.ts                              new
+splash-screens/page.tsx                                      new  (card grid, not a table — a background swatch is more useful here than a row)
+splash-screens/create/page.tsx, [id]/page.tsx                new
+splash-screens/_components/splash-form.tsx                   new  (7 section cards + phone-frame preview)
+lib/navigation.ts                                             + sidebar entry
+```
+
+Preview is CSS mirroring the real fields (title, background, button) — not a
+frame from the mobile app's own renderer, because that renderer does not
+exist yet either. Loader/animation styles are button groups over named
+values (`dots`/`ring`/`spinner`/…, `floating_particles`/`rose_petals`/…)
+rather than the mock's illustrated thumbnails — same data, honest that there
+is no icon set backing them.
+
+⚠ **Caught and fixed during lint, not left in**: the prefill-on-edit effect
+and the debounce-reset-page effect were first written copying
+`group-form.tsx`'s pattern (`useEffect` + a `prefilled` guard calling
+`setState` synchronously inside it) — which turned out to be *pre-existing*
+lint debt in that very file (`react-hooks/set-state-in-effect`, confirmed by
+linting the original). The newer, blessed pattern in this codebase avoids it
+by adjusting state during render, keyed on the row's id (`settings/page.tsx`
+ProfileTab does the same thing for the same reason, per §308). Rewritten
+before committing — see the splash form's own comment for why.
+
+### 407. Verified
+
+```
+node src/database/tools/apply-splash-screens.js [--prod] --apply   both applied
+node src/database/tools/schema-audit.js                            clean, local vs production
+node -e (service-level CRUD script)     7/7 — create, list, update, config
+                                         type validation, cross-account
+                                         isolation (404 not leak), delete
+tsc --noEmit / eslint (frontend)        clean, 0 errors 0 warnings
+node tests/client-security.test.js      36/36 — no regression
+node tests/client-2fa-login.test.js     13/13 — no regression
+backend boot smoke test                 clean
+```
+
+> ⚠ **NOT verified: a browser click-through of any of the three new pages.**
+> Carried forward yet again — now covering the list, create and edit screens
+> of a fourth feature area on top of everything already flagged in §389/§401.
+
+### 408. Open
+
+1. **No browser testing** — the standing risk, now larger.
+2. **Linking a splash screen to a real event** is the explicitly deferred
+   next phase — no `event_id` column exists; adding one later is a normal
+   migration.
+3. **The mobile app has nowhere to render this yet** — `background_url`,
+   `sound_url` and every config blob are correct and saved, and nothing
+   reads them until `Event_Invite_Mobile_App` gets its own splash screen.
+4. Loader/animation style pickers are text buttons, not the mock's
+   illustrated thumbnails — functionally equivalent, visually plainer.
+5. Everything carried from §401/§389/§382: OAuth bypasses 2FA, no payment/
+   WhatsApp/email provider, `EVENT_QR_SECRET` unset on Render.
+

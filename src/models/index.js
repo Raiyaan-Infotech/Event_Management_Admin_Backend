@@ -63,6 +63,9 @@ db.EmailCampaign = require('./EmailCampaign')(sequelize, Sequelize);
 db.EmailQueue = require('./EmailQueue')(sequelize, Sequelize);
 db.EmailSentLog = require('./EmailSentLog')(sequelize, Sequelize);
 
+// Push Notification (Firebase)
+db.PushNotificationConfig = require('./PushNotificationConfig')(sequelize, Sequelize);
+
 // Vendor
 db.Vendor = require('./Vendor')(sequelize, Sequelize);
 db.VendorClient = require('./VendorClient')(sequelize, Sequelize);
@@ -126,6 +129,17 @@ db.ClientNotificationPref = require('./ClientNotificationPref')(sequelize, Seque
 
 // Saved cards — the TOKEN only. See the model header: no card number, no CVC.
 db.ClientPaymentMethod = require('./ClientPaymentMethod')(sequelize, Sequelize);
+
+// Security. `client_sessions` is what makes Active Sessions, Authorized Devices
+// and revocation possible at all — before it, website-client tokens were
+// stateless JWTs with nothing to list and nothing to revoke.
+db.ClientSession = require('./ClientSession')(sequelize, Sequelize);
+db.ClientTwoFactor = require('./ClientTwoFactor')(sequelize, Sequelize);
+db.ClientBackupCode = require('./ClientBackupCode')(sequelize, Sequelize);
+
+// Splash Screens — standalone module, NOT yet tied to an event. See the
+// model header: event_name is plain text, not a foreign key, on purpose.
+db.SplashScreen = require('./SplashScreen')(sequelize, Sequelize);
 
 // Events created by those clients in the client portal
 db.Event = require('./Event')(sequelize, Sequelize);
@@ -401,6 +415,19 @@ db.ClientPreference.belongsTo(db.WebsiteClient, { foreignKey: 'website_client_id
 db.WebsiteClient.hasOne(db.ClientPreference, { foreignKey: 'website_client_id', as: 'preferences' });
 db.ClientNotificationPref.belongsTo(db.WebsiteClient, { foreignKey: 'website_client_id', as: 'client' });
 db.WebsiteClient.hasMany(db.ClientNotificationPref, { foreignKey: 'website_client_id', as: 'notificationPrefs' });
+
+// Security. The session include is what lets the auth middleware validate a
+// session and load the client in ONE query — production is ~374ms per round
+// trip, so a second lookup would double the cost of every authenticated request.
+db.ClientSession.belongsTo(db.WebsiteClient, { foreignKey: 'website_client_id', as: 'client' });
+db.WebsiteClient.hasMany(db.ClientSession, { foreignKey: 'website_client_id', as: 'sessions' });
+db.ClientTwoFactor.belongsTo(db.WebsiteClient, { foreignKey: 'website_client_id', as: 'client' });
+db.WebsiteClient.hasOne(db.ClientTwoFactor, { foreignKey: 'website_client_id', as: 'twoFactor' });
+db.ClientBackupCode.belongsTo(db.WebsiteClient, { foreignKey: 'website_client_id', as: 'client' });
+db.WebsiteClient.hasMany(db.ClientBackupCode, { foreignKey: 'website_client_id', as: 'backupCodes' });
+
+db.SplashScreen.belongsTo(db.WebsiteClient, { foreignKey: 'website_client_id', as: 'client' });
+db.WebsiteClient.hasMany(db.SplashScreen, { foreignKey: 'website_client_id', as: 'splashScreens' });
 
 db.ClientTransaction.belongsTo(db.WebsiteClient, { foreignKey: 'website_client_id', as: 'client' });
 db.WebsiteClient.hasMany(db.ClientTransaction, { foreignKey: 'website_client_id', as: 'transactions' });

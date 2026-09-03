@@ -10636,4 +10636,182 @@ CREATE TABLE IF NOT EXISTS `client_payment_methods` (
   CONSTRAINT `fk_client_payment_methods_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ---------------------------------------------------------------------------
+-- Client portal Security — sessions, authorized devices and 2FA
+--
+-- The Security tab used to say that Active Sessions, Authorized Devices and
+-- "log out all other sessions" were not merely unbuilt but IMPOSSIBLE. That was
+-- true: a website client's tokens were stateless JWTs, signed and forgotten, so
+-- there was no row to list and nothing to revoke — a "Log Out" button would
+-- have cleared a cookie and left the token working until it expired.
+--
+-- `client_sessions` is the row that was missing, one per sign-in. The refresh
+-- token has ALWAYS carried a `jti` uuid (src/utils/jwt.js) that nothing ever
+-- read; persisting it is the whole mechanism, so revocation needed no change to
+-- the token format.
+--
+-- ONE TABLE, TWO SCREENS. Active Sessions and Authorized Devices are the same
+-- rows read two ways. Two tables would be two copies of "which device is this",
+-- and the first symptom of them drifting is a device you revoked still being
+-- able to sign in.
+--
+-- ⚠ `location` is nullable and stays NULL. The design shows "Mumbai, India" per
+-- row, which needs a GeoIP service this project does not have. The column is
+-- here so adding one later is not a migration; until then the screens print the
+-- IP address, which is true, rather than a city that was guessed.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS `client_sessions` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `website_client_id` int unsigned NOT NULL,
+  `jti` char(36) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'The refresh token''s own jti — minted by jwt.js since day one, read by nothing until this table existed',
+  `transport` enum('web','app') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'web' COMMENT 'The portal sends cookies; the Flutter app sends Bearer and cannot receive Set-Cookie, so they refresh by different paths',
+  `device_name` varchar(120) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'e.g. "Windows · Chrome". Parsed at sign-in and frozen — re-deriving on read would let an old row change its mind',
+  `device_type` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'desktop / mobile / tablet',
+  `browser` varchar(60) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `os` varchar(60) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `ip_address` varchar(45) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '45 = an IPv6 address with an IPv4 tail',
+  `user_agent` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `location` varchar(120) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'ALWAYS NULL today — no GeoIP service exists. Kept so adding one is not a migration.',
+  `last_active_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `expires_at` datetime NOT NULL,
+  `revoked_at` datetime DEFAULT NULL COMMENT 'Revoked, not deleted: "signed out at 14:02" is the only question anybody asks of a session that is gone',
+  `revoked_reason` varchar(40) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'logout / revoked / revoked_all / password_change / rotated',
+  `trusted_until` datetime DEFAULT NULL COMMENT '"Trust this device for 30 days" — a date, not a flag, so it expires on its own; no scheduled job here could ever turn a flag back off',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `client_sessions_jti` (`jti`),
+  KEY `client_sessions_client` (`website_client_id`,`revoked_at`,`last_active_at`),
+  CONSTRAINT `fk_client_sessions_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- A SEPARATE TABLE rather than columns on website_clients, on purpose: that
+-- model's defaultScope already has to exclude `password` and `otp_hash`, and a
+-- shared secret leaking because somebody wrote .findByPk() without a scope is
+-- the one failure this shape rules out entirely.
+--
+-- Enrolment is two steps. A secret exists as soon as the QR is shown, but 2FA
+-- is not ON until a code from the authenticator proves it was really scanned —
+-- otherwise closing the tab mid-setup locks somebody out with a secret they
+-- never stored.
+
+CREATE TABLE IF NOT EXISTS `client_two_factor` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `website_client_id` int unsigned NOT NULL,
+  `secret` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'base32 TOTP shared secret',
+  `is_enabled` tinyint(1) NOT NULL DEFAULT '0',
+  `confirmed_at` datetime DEFAULT NULL COMMENT 'When a code from the app first proved the QR was scanned',
+  `last_used_at` datetime DEFAULT NULL,
+  `last_used_counter` bigint DEFAULT NULL COMMENT 'The 30-second window a code was accepted for. Without it the same six digits work twice — exactly what somebody reading them over a shoulder needs.',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `client_two_factor_client` (`website_client_id`),
+  CONSTRAINT `fk_client_two_factor_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- A row per code, not a JSON array on the client: "used" is a fact about ONE
+-- code, and two codes being spent at once must not overwrite each other.
+-- Hashed like a password, because that is what a backup code is — a credential
+-- that signs somebody in without the authenticator.
+
+CREATE TABLE IF NOT EXISTS `client_backup_codes` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `website_client_id` int unsigned NOT NULL,
+  `code_hash` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `used_at` datetime DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `client_backup_codes_client` (`website_client_id`,`used_at`),
+  CONSTRAINT `fk_client_backup_codes_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `push_notification_configs` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `is_active` tinyint(1) NOT NULL DEFAULT '0',
+  `service_account_json` longtext COLLATE utf8mb4_unicode_ci,
+  `project_id` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `client_email` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `private_key` text COLLATE utf8mb4_unicode_ci,
+  `web_api_key` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `app_id` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `messaging_sender_id` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `auth_domain` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `storage_bucket` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `measurement_id` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `vapid_key` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `connection_status` enum('connected','disconnected','pending','error') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending',
+  `last_verified_at` datetime DEFAULT NULL,
+  `validation_error` text COLLATE utf8mb4_unicode_ci,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_push_config_active` (`is_active`),
+  KEY `idx_push_config_project_id` (`project_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
+-- Splash Screens — a standalone module, not yet tied to an event
+--
+-- ⚠ NOT PER-EVENT YET, DELIBERATELY. The supplied design's breadcrumb reads
+-- like a step of creating one event; it isn't, on purpose. This round builds
+-- the module and its CRUD on their own — `event_name` is plain text a client
+-- types, not a foreign key. Linking a saved splash to a real `events` row is
+-- an explicitly later phase; adding that FK later is a normal migration.
+--
+-- This is the MOBILE APP's own splash/loading screen, shown when a guest
+-- opens an event inside the Flutter app — not a web page. No public web
+-- route exists for this, and none is added here.
+--
+-- `background_type` picks ONE of six shapes (image / video / solid_color /
+-- gradient / logo / couple_photo); `background_config` holds whichever shape
+-- applies. Sound, loader and animation are independent JSON add-ons layered
+-- on top of ANY background type, not variants of it — mirrors `events`.
+-- `components` / `component_order` already in this schema.
+--
+-- ⚠ `animation_enabled` / `animation_config` are SAVED, NOT DELIVERED. The
+-- mock's own copy says "Animations will be visible in the mobile app only,"
+-- and that app has no splash-rendering screen to read this yet — same
+-- pattern as this project's email/notification consent flags.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS `splash_screens` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `website_client_id` int unsigned NOT NULL,
+  `company_id` int DEFAULT NULL,
+  `name` varchar(150) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Internal label — identifies one saved splash among several',
+  `main_title` varchar(60) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `sub_title` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `event_name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Plain text today — see header. Not a foreign key until events are wired up.',
+  `tagline` varchar(150) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `background_type` enum('image','video','solid_color','gradient','logo','couple_photo') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'image',
+  `background_url` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'The uploaded image / video / logo / couple photo, per background_type',
+  `fallback_image_url` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Video background only',
+  `background_config` json DEFAULT NULL COMMENT 'Type-specific knobs: overlay %, video start/volume, gradient colors/direction, logo size/position, photo fit/dark-overlay, solid colour hex',
+  `sound_enabled` tinyint(1) NOT NULL DEFAULT '0',
+  `sound_url` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `sound_config` json DEFAULT NULL COMMENT 'auto_play, loop, volume',
+  `loader_enabled` tinyint(1) NOT NULL DEFAULT '1',
+  `loader_config` json DEFAULT NULL COMMENT 'style, color, size, background color',
+  `animation_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'SAVED, NOT DELIVERED — see header',
+  `animation_config` json DEFAULT NULL COMMENT 'style, speed, particle density, overlay color/opacity, loop — mobile-app-only, unread until the app has a splash screen',
+  `button_text` varchar(25) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'Enter Invitation',
+  `button_style` enum('filled','outline','text') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'filled',
+  `button_color` varchar(9) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `show_couple_name` tinyint(1) NOT NULL DEFAULT '1',
+  `show_event_date` tinyint(1) NOT NULL DEFAULT '1',
+  `show_tagline` tinyint(1) NOT NULL DEFAULT '1',
+  `status` enum('draft','active') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'draft',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `splash_screens_client` (`website_client_id`,`deleted_at`),
+  CONSTRAINT `fk_splash_screens_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;
+

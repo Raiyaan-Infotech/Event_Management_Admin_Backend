@@ -9,7 +9,10 @@ const preferencesController = require('../controllers/clientPreferences.controll
 const messageController = require('../controllers/clientMessage.controller');
 const rsvpController = require('../controllers/clientRsvp.controller');
 const guestProfileController = require('../controllers/clientGuestProfile.controller');
+const securityController = require('../controllers/clientSecurity.controller');
+const splashController = require('../controllers/clientSplashScreen.controller');
 const { isWebsiteClientAuthenticated } = require('../middleware/websiteClientAuth');
+const { codeLimiter } = require('../middleware/rateLimit');
 
 /**
  * Client portal API — everything here requires a signed-in website client.
@@ -43,6 +46,34 @@ router.delete('/me', controller.deleteMyAccount);
 router.get('/settings', preferencesController.getSettings);
 router.put('/settings/preferences', preferencesController.updatePreferences);
 router.put('/settings/notifications', preferencesController.updateNotifications);
+
+/**
+ * Security — Active Sessions, Authorized Devices and two-factor authentication.
+ *
+ * ⚠ Sessions and devices are ONE table read two ways, not two tables. See the
+ * ClientSession model header: two would be two copies of "which device is this",
+ * and the first symptom of them drifting is a device you revoked still being
+ * able to sign in.
+ *
+ * None of these takes a client id — each acts on the session's own client — and
+ * a session id is matched against the caller's own rows before anything happens
+ * to it, so one client cannot revoke another's session by guessing a number.
+ *
+ * The 2FA routes are rate limited: they check a six-digit code, which is only a
+ * second factor if guessing it is slow.
+ */
+router.get('/security/sessions', securityController.listSessions);
+router.delete('/security/sessions/:id', securityController.revokeSession);
+router.post('/security/sessions/revoke-all', securityController.revokeOtherSessions);
+
+router.get('/security/devices', securityController.listDevices);
+router.delete('/security/devices/:id', securityController.removeDevice);
+
+router.get('/security/2fa', securityController.getTwoFactor);
+router.post('/security/2fa/setup', codeLimiter, securityController.setupTwoFactor);
+router.post('/security/2fa/confirm', codeLimiter, securityController.confirmTwoFactor);
+router.post('/security/2fa/disable', codeLimiter, securityController.disableTwoFactor);
+router.post('/security/2fa/backup-codes', codeLimiter, securityController.regenerateBackupCodes);
 
 /**
  * Avatar upload, client-scoped.
@@ -273,5 +304,57 @@ router.get('/billing/invoices/:id', billingController.getInvoice);
 
 // Contact Sales. Stored, not emailed — there is no SMTP in this system.
 router.post('/billing/contact-sales', billingController.contactSales);
+
+/**
+ * Splash Screens — a standalone module, NOT yet tied to an event. See the
+ * model/service headers for why `event_name` is plain text rather than a
+ * foreign key, and why this is the mobile app's own splash screen, not a web
+ * page.
+ *
+ * ⚠ The literal `/splash-screens/media` path comes BEFORE `/splash-screens/:id`
+ * — the same ordering trap `/billing/invoices/:id` already caught once:
+ * Express would otherwise match "media" as an id.
+ */
+const splashMediaUpload = multer({
+    storage: multer.memoryStorage(),
+    // 20MB covers the mock's own stated video/image limit; audio in practice
+    // never approaches it, so one generous ceiling is simpler than three.
+    limits: { fileSize: 20 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+        const allowed = [
+            'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml',
+            'video/mp4', 'video/webm',
+            'audio/mpeg', 'audio/wav', 'audio/ogg',
+        ];
+        if (allowed.includes(file.mimetype)) return cb(null, true);
+        cb(new Error('Please choose an image, video (MP4/WebM) or audio (MP3/WAV/OGG) file.'), false);
+    },
+});
+
+router.post(
+    '/splash-screens/media',
+    (req, res, next) => {
+        // Multer's own errors surfaced as a readable 400 — "File too large" is
+        // something the person can act on, a 500 is not.
+        splashMediaUpload.single('file')(req, res, (err) => {
+            if (err) {
+                return res.status(400).json({
+                    success: false,
+                    message: err.code === 'LIMIT_FILE_SIZE'
+                        ? 'That file is larger than 20MB.'
+                        : err.message || 'That file could not be uploaded.',
+                });
+            }
+            next();
+        });
+    },
+    splashController.uploadMedia,
+);
+
+router.get('/splash-screens', splashController.list);
+router.post('/splash-screens', splashController.create);
+router.get('/splash-screens/:id', splashController.getOne);
+router.put('/splash-screens/:id', splashController.update);
+router.delete('/splash-screens/:id', splashController.remove);
 
 module.exports = router;

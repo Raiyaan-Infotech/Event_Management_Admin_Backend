@@ -127,17 +127,38 @@ const generateClientRefreshToken = (client) => {
  * Portal. They are two different tables; sharing a type would let a session
  * from one portal authenticate as a row id in the other.
  */
-const generateWebsiteClientAccessToken = (client) => {
+/**
+ * @param {object} client
+ * @param {string|null} sid  The `client_sessions.jti` this token belongs to.
+ *   Carried so the auth middleware can check the session is still live — an
+ *   access token without it is only revocable by waiting out its 15 minutes.
+ *   OPTIONAL on purpose: tokens minted before sessions existed have no `sid`,
+ *   and the middleware falls back rather than signing everybody out on deploy.
+ */
+const generateWebsiteClientAccessToken = (client, sid = null) => {
   return jwt.sign(
-    { id: client.id, email: client.email, vendorId: client.vendor_id, companyId: client.company_id || null, type: 'website_client' },
+    {
+      id: client.id,
+      email: client.email,
+      vendorId: client.vendor_id,
+      companyId: client.company_id || null,
+      type: 'website_client',
+      ...(sid ? { sid } : {}),
+    },
     getAccessSecret(),
     { expiresIn: '15m' }
   );
 };
 
-const generateWebsiteClientRefreshToken = (client) => {
+/**
+ * @param {object} client
+ * @param {string|null} jti  Supplied by the caller so the token and its
+ *   `client_sessions` row can agree on one id. Generated here when absent,
+ *   which is what every caller did before sessions were stored.
+ */
+const generateWebsiteClientRefreshToken = (client, jti = null) => {
   return jwt.sign(
-    { id: client.id, type: 'website_client', jti: uuidv4() },
+    { id: client.id, type: 'website_client', jti: jti || uuidv4() },
     getRefreshSecret(),
     { expiresIn: '7d' }
   );
@@ -171,6 +192,60 @@ const verifyClientHandoffToken = (token) => {
   return decoded?.type === 'client_handoff' ? decoded : null;
 };
 
+/**
+ * The 2FA login challenge — issued in place of a session when a password
+ * check succeeds but a second factor is still owed.
+ *
+ * Short-lived on purpose (10 minutes, the same order as a login form somebody
+ * is actively filling in) and carries NOTHING a session token carries: no
+ * `sid`, so it cannot be presented to any `/client/*` route as if it were
+ * real access. It proves only "this password was correct a moment ago" — the
+ * code check still has to happen before anything is issued.
+ */
+const generateWebsiteClient2faChallengeToken = (client) => {
+  return jwt.sign(
+    { id: client.id, type: 'website_client_2fa_challenge' },
+    getAccessSecret(),
+    { expiresIn: '10m' }
+  );
+};
+
+const verifyWebsiteClient2faChallengeToken = (token) => {
+  const decoded = verifyAccessToken(token);
+  return decoded?.type === 'website_client_2fa_challenge' ? decoded : null;
+};
+
+/**
+ * "Trust this device for 30 days" — a cookie that outlives any one session, so
+ * it works across a full logout/login rather than just within one sign-in.
+ *
+ * `tfa` pins the token to the two-factor record's OWN `confirmed_at`. Turning
+ * 2FA off and back on gives a new `confirmed_at`, which makes every trust token
+ * issued under the old enrolment stop matching — so disabling and re-enabling
+ * 2FA is itself what revokes standing trust, with no separate revocation list
+ * to maintain.
+ *
+ * ⚠ NOT pinned to a password change. `website_clients` has no
+ * `password_changed_at` column (unlike every other portal's table — a gap
+ * already carried from before this work), so there is nothing to pin it to yet.
+ */
+const generateDeviceTrustToken = (client, twoFactorConfirmedAt) => {
+  return jwt.sign(
+    {
+      id: client.id,
+      type: 'website_client_device_trust',
+      tfa: twoFactorConfirmedAt ? new Date(twoFactorConfirmedAt).getTime() : null,
+    },
+    getRefreshSecret(),
+    { expiresIn: '30d' }
+  );
+};
+
+const verifyDeviceTrustToken = (token) => {
+  const decoded = verifyRefreshToken(token);
+  return decoded?.type === 'website_client_device_trust' ? decoded : null;
+};
+
 module.exports = {
   generateAccessToken,
   generateRefreshToken,
@@ -191,4 +266,8 @@ module.exports = {
   verifyVendorHandoffToken,
   generateClientHandoffToken,
   verifyClientHandoffToken,
+  generateWebsiteClient2faChallengeToken,
+  verifyWebsiteClient2faChallengeToken,
+  generateDeviceTrustToken,
+  verifyDeviceTrustToken,
 };

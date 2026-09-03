@@ -5,6 +5,7 @@ const clientPortalService = require('../services/clientPortal.service');
 const mediaService = require('../services/media.service');
 const logger = require('../utils/logger');
 const { clearWebsiteClientCookies } = require('../middleware/websiteClientAuth');
+const sessionService = require('../services/clientSession.service');
 
 /**
  * The signed-in client's own profile plus the plan assigned to them.
@@ -79,11 +80,30 @@ const updateMe = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, { client }, 'Profile updated');
 });
 
-/** Change the signed-in client's password. */
+/**
+ * Change the signed-in client's password.
+ *
+ * ⚠ EVERY OTHER SESSION IS SIGNED OUT. Changing a password is what somebody
+ * does when they think another person has it, and until sessions were stored
+ * this could not be honoured at all — the other device kept its stateless token
+ * and stayed signed in for up to seven more days. `website_clients` still has no
+ * `password_changed_at` column (unlike every other portal's table), so this is
+ * done by revoking the rows rather than by comparing token timestamps.
+ *
+ * The caller's own session is spared: signing yourself out of the form you just
+ * submitted reads as the change having failed.
+ */
 const changeMyPassword = asyncHandler(async (req, res) => {
     await clientPortalService.changeMyPassword(req.websiteClient.id, req.body);
-    logger.logRequest(req, `Client password changed: ${req.websiteClient.id}`);
-    return ApiResponse.success(res, null, 'Password updated');
+    const revoked = await sessionService.revokeAllOthers(
+        req.websiteClient.id,
+        req.sessionJti,
+        'password_change',
+    );
+    logger.logRequest(req, `Client password changed: ${req.websiteClient.id} (${revoked} sessions revoked)`);
+    return ApiResponse.success(res, { signed_out_sessions: revoked }, revoked
+        ? `Password updated. You have been signed out on ${revoked} other ${revoked === 1 ? 'device' : 'devices'}.`
+        : 'Password updated');
 });
 
 /**

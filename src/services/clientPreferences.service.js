@@ -78,6 +78,18 @@ const CATALOG = {
                 { type: 'billing_payments', label: 'Billing & Payments', description: 'Invoices, payments and refunds.', frequencies: EMAIL_FREQUENCIES, default_frequency: 'instant' },
                 { type: 'plan_subscription', label: 'Plan & Subscription', description: 'Changes to your plan, renewals and cancellations.', frequencies: EMAIL_FREQUENCIES, default_frequency: 'instant' },
                 { type: 'account_security', label: 'Account Security', description: 'Password changes and account activity.', frequencies: EMAIL_FREQUENCIES, default_frequency: 'instant' },
+                /*
+                  Real, and new: `client_sessions` records every sign-in, so
+                  "a new device signed in" is now an event this system genuinely
+                  knows about rather than one it would have had to invent.
+
+                  ⚠ The design's companion switch, "email alerts for SUSPICIOUS
+                  activity", is deliberately absent. Nothing here decides what
+                  suspicious means — there is no scoring, no impossible-travel
+                  check, no known-device history beyond the list itself — so that
+                  switch would be wired to a judgement nobody makes.
+                */
+                { type: 'new_login', label: 'New Sign-in Alerts', description: 'When your account is signed in to on a new device.', frequencies: EMAIL_FREQUENCIES, default_frequency: 'instant' },
             ],
         },
         {

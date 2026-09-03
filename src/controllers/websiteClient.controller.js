@@ -3,9 +3,18 @@ const oauthService = require('../services/websiteClientOAuth.service');
 const ApiResponse = require('../utils/apiResponse');
 const logger = require('../utils/logger');
 const { asyncHandler } = require('../utils/helpers');
-const { generateWebsiteClientAccessToken, generateWebsiteClientRefreshToken, verifyRefreshToken } = require('../utils/jwt');
+const {
+    generateWebsiteClientAccessToken, generateWebsiteClientRefreshToken, verifyRefreshToken,
+    generateWebsiteClient2faChallengeToken, verifyWebsiteClient2faChallengeToken,
+    generateDeviceTrustToken, verifyDeviceTrustToken,
+} = require('../utils/jwt');
 const { WebsiteClient } = require('../models');
-const { setWebsiteClientCookies, clearWebsiteClientCookies } = require('../middleware/websiteClientAuth');
+const {
+    setWebsiteClientCookies, clearWebsiteClientCookies,
+    setDeviceTrustCookie, COOKIE_DEVICE_TRUST,
+} = require('../middleware/websiteClientAuth');
+const sessionService = require('../services/clientSession.service');
+const twoFactorService = require('../services/clientTwoFactor.service');
 
 // ── Public: signup from the tenant website ───────────────────────────────────
 
@@ -22,12 +31,45 @@ const register = asyncHandler(async (req, res) => {
 });
 
 /**
- * No auth, and no session issued — see the service. Answers 401 for bad
- * credentials, which is what the form shows as an inline error.
+ * No auth, and no session issued until the identity check is COMPLETE.
+ * Answers 401 for bad credentials, which is what the form shows as an inline
+ * error.
+ *
+ * ── ⚠ THE PASSWORD CHECK IS NOT THE WHOLE CHECK ─────────────────────────────
+ * When 2FA is on for this client, a correct password is only step one. Rather
+ * than issue a session and ask for the code afterwards — which would mean a
+ * real, cookie-bearing session existed before the second factor was ever
+ * checked — this returns a short-lived CHALLENGE token instead, and
+ * `verifyLogin2fa` is what actually opens the session. The Flutter app's
+ * phone-OTP sign-in never reaches this branch: that is a deliberate product
+ * decision (see the 2FA status endpoint's `covers.mobile_app: false`), so a
+ * 2FA client can still get into the app without a code.
+ *
+ * "Trust this device for 30 days" skips the challenge on a browser that
+ * already proved it, via a cookie separate from the session — see
+ * `generateDeviceTrustToken` for how re-enrolling in 2FA invalidates it.
  */
 const login = asyncHandler(async (req, res) => {
     const vendorId = req.body.vendor_id || req.query.vendor_id || req.companyId || undefined;
     const client = await websiteClientService.login(req.body, vendorId);
+
+    if (await twoFactorService.isEnabledFor(client.id)) {
+        const trustToken = req.cookies?.[COOKIE_DEVICE_TRUST];
+        const trustDecoded = trustToken ? verifyDeviceTrustToken(trustToken) : null;
+        const trusted = Boolean(trustDecoded)
+            && trustDecoded.id === client.id
+            && await twoFactorService.deviceTrustMatches(client.id, trustDecoded.tfa);
+
+        if (!trusted) {
+            const challengeToken = generateWebsiteClient2faChallengeToken(client);
+            logger.logRequest(req, `Website login: 2FA challenge issued for ${client.email}`);
+            return ApiResponse.success(res, {
+                requires_2fa: true,
+                challenge_token: challengeToken,
+                expires_in: 10 * 60,
+            }, 'Enter your two-factor code to finish signing in');
+        }
+    }
 
     // Issues the portal session. This used to hand back nothing at all —
     // deliberately, because there was no client portal to land in. There is one
@@ -38,16 +80,70 @@ const login = asyncHandler(async (req, res) => {
     // `client_*` pair used by vendor_clients and the older Client Portal:
     // two different tables, and a shared name would let one portal's session
     // authenticate as a row id in the other.
-    const accessToken = generateWebsiteClientAccessToken(client);
-    const refreshToken = generateWebsiteClientRefreshToken(client);
+    // Recorded as a session row, which is what makes it appear on Active
+    // Sessions and what makes revoking it possible at all.
+    const { accessToken, refreshToken } = await sessionService.issueSession({ client, req });
     setWebsiteClientCookies(res, accessToken, refreshToken);
 
     logger.logRequest(req, `Website login: ${client.email}`);
     return ApiResponse.success(res, { client }, 'Login successful');
 });
 
-/** Ends the portal session. Safe to call when not signed in. */
+/**
+ * Step 2 of a 2FA-gated login: a challenge token plus a code, exchanged for a
+ * real session.
+ *
+ * Needs no auth middleware of its own — the challenge token IS the proof the
+ * password was already correct, a minute or two ago. It cannot be reused for
+ * anything else: `isWebsiteClientAuthenticated` only accepts
+ * `type: 'website_client'`, and this token's type is
+ * `website_client_2fa_challenge`.
+ */
+const verifyLogin2fa = asyncHandler(async (req, res) => {
+    const decoded = verifyWebsiteClient2faChallengeToken(req.body?.challenge_token);
+    if (!decoded) {
+        return ApiResponse.error(res, 'That sign-in attempt has expired. Please sign in again.', 401);
+    }
+
+    const client = await WebsiteClient.findByPk(decoded.id);
+    if (!client) return ApiResponse.error(res, 'Your account no longer exists.', 401);
+    if (Number(client.is_active) !== 1) {
+        return ApiResponse.error(res, 'Your account is not active. Please contact us.', 403);
+    }
+
+    const verified = await twoFactorService.verifyForLogin(client.id, req.body?.code);
+    if (!verified) {
+        return ApiResponse.error(res, 'That code is not right. Check your authenticator app and try again.', 401);
+    }
+
+    const { accessToken, refreshToken } = await sessionService.issueSession({ client, req });
+    setWebsiteClientCookies(res, accessToken, refreshToken);
+
+    if (req.body?.trust_device) {
+        const confirmedAt = await twoFactorService.confirmedAtFor(client.id);
+        setDeviceTrustCookie(res, generateDeviceTrustToken(client, confirmedAt));
+    }
+
+    logger.logRequest(req, `Website login: 2FA verified for ${client.email}`);
+    return ApiResponse.success(res, { client }, 'Login successful');
+});
+
+/**
+ * Ends the portal session. Safe to call when not signed in.
+ *
+ * The session row is revoked, not just the cookies cleared. Clearing a cookie
+ * asks the browser to forget a token that stays valid for another seven days;
+ * on a shared computer that is the difference between signing out and appearing
+ * to sign out.
+ */
 const logout = asyncHandler(async (req, res) => {
+    const refreshToken = req.cookies?.website_client_refresh_token || req.body?.refresh_token;
+    if (refreshToken) {
+        const decoded = verifyRefreshToken(refreshToken);
+        if (decoded?.type === 'website_client' && decoded.jti) {
+            await sessionService.revokeByJti(decoded.jti, 'logout');
+        }
+    }
     clearWebsiteClientCookies(res);
     return ApiResponse.success(res, null, 'Logged out successfully');
 });
@@ -150,9 +246,8 @@ const oauthCallback = asyncHandler(async (req, res) => {
          * completion, not authentication — and the front end keeps the visitor
          * on the page for that step regardless.
          */
-        const accessToken = generateWebsiteClientAccessToken(client);
-        const refreshToken = generateWebsiteClientRefreshToken(client);
-        setWebsiteClientCookies(res, accessToken, refreshToken);
+        const social = await sessionService.issueSession({ client, req });
+        setWebsiteClientCookies(res, social.accessToken, social.refreshToken);
 
         // A provider never tells us a phone number, so the mobile step happens
         // after the round trip. Only asked for when the account has none —
@@ -297,13 +392,16 @@ const deleteById = asyncHandler(async (req, res) => {
  * `expires_in` is stated so the app can refresh ahead of expiry instead of
  * hardcoding a number that only this backend knows.
  */
-const sessionPayload = (client) => ({
-    client,
-    access_token: generateWebsiteClientAccessToken(client),
-    refresh_token: generateWebsiteClientRefreshToken(client),
-    token_type: 'Bearer',
-    expires_in: 15 * 60,
-});
+const sessionPayload = async (client, req) => {
+    const { accessToken, refreshToken } = await sessionService.issueSession({ client, req });
+    return {
+        client,
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        token_type: 'Bearer',
+        expires_in: 15 * 60,
+    };
+};
 
 /** Step 1 — send a code to a registered mobile number. */
 const requestLoginOtp = asyncHandler(async (req, res) => {
@@ -320,7 +418,7 @@ const verifyLoginOtp = asyncHandler(async (req, res) => {
 
     // Cookies are set as well, so the SAME endpoint works if the web portal ever
     // wants OTP sign-in. Harmless to an app, which ignores them.
-    const payload = sessionPayload(client);
+    const payload = await sessionPayload(client, req);
     setWebsiteClientCookies(res, payload.access_token, payload.refresh_token);
 
     logger.logRequest(req, `Mobile OTP login: client ${client.id}`);
@@ -340,9 +438,16 @@ const verifyLoginOtp = asyncHandler(async (req, res) => {
  *
  * A NEW refresh token is returned each time, so an app that stays in use never
  * reaches the 7-day expiry — which is what "signed in until you log out" means
- * in practice. The old one keeps working until it expires; these are stateless
- * JWTs with no revocation list, so logging out clears the app's copy rather
- * than invalidating it server-side.
+ * in practice.
+ *
+ * ── ROTATION IS SINGLE-USE, AND REVOCATION IS REAL ──────────────────────────
+ * This used to end: "these are stateless JWTs with no revocation list, so
+ * logging out clears the app's copy rather than invalidating it server-side."
+ * That is no longer true. The token's `jti` names a `client_sessions` row, and
+ * rotation revokes that row as it opens the next one — inside a transaction, so
+ * a token presented twice can only win once. A revoked session cannot be
+ * refreshed, which is what makes "Log Out" on the Active Sessions screen bite
+ * on a device that is not in the room.
  */
 const refreshSession = asyncHandler(async (req, res) => {
     const token = req.body.refresh_token || req.cookies?.website_client_refresh_token;
@@ -361,7 +466,35 @@ const refreshSession = asyncHandler(async (req, res) => {
         return ApiResponse.error(res, 'Your account is not active. Please contact us.', 403);
     }
 
-    const payload = sessionPayload(client);
+    /*
+      A token from before sessions existed has no `jti` row to rotate. It is
+      exchanged for a session-backed pair rather than refused — the alternative
+      signs out every app install on the day this deploys.
+    */
+    const live = decoded.jti ? await sessionService.findLiveSession(decoded.jti) : null;
+    if (decoded.jti && !live) {
+        return ApiResponse.error(res, 'This session was signed out. Please sign in again.', 401);
+    }
+
+    let issued;
+    try {
+        issued = live
+            ? await sessionService.rotateSession({ jti: decoded.jti, client, req })
+            : await sessionService.issueSession({ client, req });
+    } catch {
+        // rotateSession throws when the row was already spent — a replayed
+        // refresh token, or two app requests racing. Neither should be handed a
+        // working session.
+        return ApiResponse.error(res, 'This session was signed out. Please sign in again.', 401);
+    }
+
+    const payload = {
+        client,
+        access_token: issued.accessToken,
+        refresh_token: issued.refreshToken,
+        token_type: 'Bearer',
+        expires_in: 15 * 60,
+    };
     setWebsiteClientCookies(res, payload.access_token, payload.refresh_token);
     return ApiResponse.success(res, payload, 'Session refreshed');
 });
@@ -369,6 +502,7 @@ const refreshSession = asyncHandler(async (req, res) => {
 module.exports = {
     register,
     login,
+    verifyLogin2fa,
     logout,
     requestLoginOtp,
     verifyLoginOtp,
