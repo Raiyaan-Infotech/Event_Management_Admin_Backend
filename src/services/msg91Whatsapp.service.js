@@ -59,7 +59,23 @@ const config = () => ({
        value; a plain utility template has no button and rejects the component.
        Defaults on, matching MSG91's OTP example. */
     withButton: (process.env.MSG91_OTP_BUTTON || 'true').toLowerCase() !== 'false',
+
+    /* The local off switch. Set MSG91_OTP_ENABLED=false to stop sending real
+       WhatsApp messages while still exercising the whole flow — the code is
+       still generated, hashed, stored and CHECKED, so nothing about
+       verification is bypassed. Only delivery is skipped. */
+    enabled: (process.env.MSG91_OTP_ENABLED || 'true').toLowerCase() !== 'false',
 });
+
+/**
+ * Whether WhatsApp delivery is switched off on purpose.
+ *
+ * Distinct from "not configured": the credentials may be perfectly good and
+ * simply not being used. The callers echo the code in that case (never in
+ * production), so turning delivery off does not lock anybody out of the app —
+ * which is what happened when the keys were merely removed.
+ */
+const isDisabled = () => !config().enabled;
 
 /** Whether OTPs can actually be delivered. Callers use this to decide whether
  *  to log the code instead — never to decide whether to store it. */
@@ -96,6 +112,9 @@ const sendOtp = async ({ dialCode, mobile, code, purpose = 'login' }) => {
     const c = config();
     const to = toWhatsAppNumber(dialCode, mobile);
 
+    // Checked BEFORE configuration: an explicit "off" is the honest reason,
+    // even on a machine that also happens to have no credentials.
+    if (!c.enabled) return { delivered: false, reason: 'disabled' };
     if (!isConfigured()) return { delivered: false, reason: 'not_configured' };
     if (!to) return { delivered: false, reason: 'no_number' };
 
@@ -155,4 +174,4 @@ const sendOtp = async ({ dialCode, mobile, code, purpose = 'login' }) => {
     }
 };
 
-module.exports = { sendOtp, isConfigured, toWhatsAppNumber, ENDPOINT };
+module.exports = { sendOtp, isConfigured, isDisabled, toWhatsAppNumber, ENDPOINT };

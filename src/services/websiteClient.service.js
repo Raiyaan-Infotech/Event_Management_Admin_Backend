@@ -605,8 +605,23 @@ const requestLoginOtp = async (data = {}, vendorId = DEFAULT_VENDOR_ID) => {
         );
     }
 
+    /*
+      The code is returned to the caller when it could not be delivered for a
+      reason we chose — WhatsApp switched off with MSG91_OTP_ENABLED=false, or
+      no credentials on this machine — as well as when OTP_DEV_ECHO asks for it.
+
+      Without this, turning delivery off would lock every account out: the code
+      is generated, hashed, stored and still CHECKED, but nothing would ever
+      show it. Verification is not weakened; only the delivery channel changes.
+
+      NEVER in production, whatever the flags say — that guard is the reason
+      this is safe to leave on locally.
+    */
     const echo =
-        process.env.OTP_DEV_ECHO === 'true' && process.env.NODE_ENV !== 'production';
+        process.env.NODE_ENV !== 'production'
+        && (process.env.OTP_DEV_ECHO === 'true'
+            || delivery.reason === 'disabled'
+            || delivery.reason === 'not_configured');
 
     return {
         expires_in: OTP_TTL_SECONDS,
