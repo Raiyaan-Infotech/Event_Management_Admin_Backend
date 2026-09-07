@@ -58,6 +58,26 @@ module.exports = (sequelize) => {
         timezone: { type: DataTypes.STRING(80), allowNull: true },
         sent_at: { type: DataTypes.DATE, allowNull: true },
         failed_reason: { type: DataTypes.STRING(255), allowNull: true },
+
+        /*
+          ── PUSH-ONLY COMPOSER FIELDS ───────────────────────────────────────
+          Always NULL for an email or WhatsApp campaign. They live here rather
+          than on a separate push table because a push IS a campaign on the
+          `push` channel — see apply-push-notification-support.js for why the
+          parallel-tables sketch was dropped.
+        */
+        image_url: { type: DataTypes.STRING(500), allowNull: true },
+        click_action: { type: DataTypes.STRING(30), allowNull: true },
+        deep_link: { type: DataTypes.STRING(500), allowNull: true },
+        /** Custom key/value pairs the app reads to route the tap. */
+        data_payload: { type: DataTypes.JSON, allowNull: true },
+        /**
+          Sound, badge, priority, TTL and the delivery toggles, as one blob.
+          FCM's vocabulary changes on Google's schedule, not ours; a column each
+          would mean a migration per field and eleven always-NULL columns on
+          every email campaign ever sent.
+        */
+        push_options: { type: DataTypes.JSON, allowNull: true },
     }, {
         tableName: 'event_message_campaigns',
         timestamps: true,

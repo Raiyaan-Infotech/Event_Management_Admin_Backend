@@ -60,7 +60,10 @@ const analytics = asyncHandler(async (req, res) => {
 });
 
 const getById = asyncHandler(async (req, res) => {
-    const event = await clientEventService.getEventById(req.websiteClient.id, req.params.id);
+    // getEventForViewer, not getEventById: a guest who joined by QR does not
+    // OWN the event, and the owner-scoped read answered 404 for them — which is
+    // what left every event screen blank after joining.
+    const event = await clientEventService.getEventForViewer(req.websiteClient.id, req.params.id);
     if (!event) throw ApiError.notFound('Event not found.');
     return ApiResponse.success(res, { event }, 'Event retrieved');
 });

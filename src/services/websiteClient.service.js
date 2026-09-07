@@ -6,6 +6,7 @@ const baseService = require('./base.service');
 const ApiError = require('../utils/apiError');
 const logger = require('../utils/logger');
 const { OTP_TTL_SECONDS, OTP_MAX_ATTEMPTS } = require('./websiteClientOAuth.service');
+const msg91 = require('./msg91Whatsapp.service');
 
 const MODEL_NAME = 'WebsiteClient';
 const MODULE_SLUG = 'website_clients';
@@ -99,6 +100,56 @@ const assertEmailFree = async (email, vendorId, excludeId = null) => {
     throw ApiError.badRequest('An account with this email already exists.');
 };
 
+/**
+ * The same guarantee for the mobile number, which had none.
+ *
+ * ── WHY THIS WAS MISSING AND WHY IT MATTERS ─────────────────────────────────
+ * Email has been unique per vendor since the beginning, in the database and in
+ * `assertEmailFree`. Mobile had NEITHER, so the signup form, the admin create
+ * and the admin edit would all happily put the same number on a second account.
+ *
+ * That is not a cosmetic duplicate. `findClientByMobile` — the whole of mobile
+ * OTP login — does `findOne` on the number, so with two matching rows it signs
+ * somebody into whichever the database happens to return FIRST. The person sees
+ * an account that is not theirs, and which one they get can change between
+ * queries. A number that identifies two accounts identifies neither.
+ *
+ * ── MATCHED THE SAME WAY THE LOGIN MATCHES ──────────────────────────────────
+ * Both stored forms are checked (`digits` and its last 10), because that is
+ * exactly what `findClientByMobile` accepts. Guarding only the typed form would
+ * let `+919884699435` create a second account that the login then confuses with
+ * the first — the collision this exists to prevent.
+ *
+ * NULL is free: mobile is optional, and an account without one collides with
+ * nothing. This mirrors MySQL, which permits many NULLs in a unique index.
+ */
+const assertMobileFree = async (mobile, vendorId, excludeId = null) => {
+    const digits = digitsOnly(mobile);
+    if (!digits) return;
+
+    const where = {
+        vendor_id: vendorId,
+        mobile: { [Op.in]: [...new Set([digits, digits.slice(-10)])] },
+    };
+    if (excludeId) where.id = { [Op.ne]: excludeId };
+
+    const existing = await WebsiteClient.findOne({
+        where,
+        attributes: ['id', 'deleted_at'],
+        paranoid: false,
+    });
+    if (!existing) return;
+
+    // Same reasoning as the email case: a removed row is not silently reused,
+    // because possession of a number is not proven at this point.
+    if (existing.deleted_at) {
+        throw ApiError.badRequest(
+            'An account with this mobile number was removed previously. Please contact us to restore it.'
+        );
+    }
+    throw ApiError.badRequest('An account with this mobile number already exists.');
+};
+
 // ── Public: self-signup from the website ─────────────────────────────────────
 
 /**
@@ -128,6 +179,7 @@ const register = async (data = {}, vendorId = DEFAULT_VENDOR_ID, companyId = nul
 
     const resolvedVendorId = Number(vendorId) || DEFAULT_VENDOR_ID;
     await assertEmailFree(payload.email, resolvedVendorId);
+    await assertMobileFree(payload.mobile, resolvedVendorId);
 
     // A public signup carries no company context, so this used to store NULL —
     // and every admin read scopes by `company_id` (base.service adds
@@ -290,6 +342,7 @@ const create = async (data, userId = null, companyId = undefined) => {
     payload.mobile = digitsOnly(payload.mobile) || null;
 
     await assertEmailFree(payload.email, payload.vendor_id);
+    await assertMobileFree(payload.mobile, payload.vendor_id);
 
     // REQUIRED, and deliberately so. This table began as a record of who signed
     // up, when an admin-created row was never expected to sign in. Since the
@@ -332,7 +385,12 @@ const update = async (id, data, userId = null, companyId = undefined) => {
         await assertEmailFree(payload.email, payload.vendor_id ?? client.vendor_id, id);
     }
 
-    if (payload.mobile !== undefined) payload.mobile = digitsOnly(payload.mobile) || null;
+    if (payload.mobile !== undefined) {
+        payload.mobile = digitsOnly(payload.mobile) || null;
+        // `id` excluded, or saving a client without changing its number would
+        // report the client's own row as a conflict.
+        await assertMobileFree(payload.mobile, payload.vendor_id ?? client.vendor_id, id);
+    }
 
     // Changing a password is an explicit act, never a side effect of an edit
     // that happened to carry the field.
@@ -529,18 +587,35 @@ const requestLoginOtp = async (data = {}, vendorId = DEFAULT_VENDOR_ID) => {
         { hooks: false }
     );
 
-    // The delivery seam. Replace this line with the SMS call and the whole flow
-    // keeps working unchanged.
-    logger.info?.(
-        `[OTP] login code for website_client ${client.id} -> ${client.dial_code || ''}${digitsOnly(data.mobile)}: ${code} (NOT SENT — no SMS provider)`
-    );
+    // Delivery. The hash is already stored above, so a send that fails costs a
+    // retry rather than an unverifiable code — see msg91Whatsapp.service.
+    const delivery = await msg91.sendOtp({
+        dialCode: client.dial_code,
+        mobile: digitsOnly(data.mobile),
+        code,
+        purpose: 'login',
+    });
+
+    if (!delivery.delivered) {
+        // Only when nothing was sent, and never in production: without this the
+        // code is unrecoverable on a machine with no MSG91 credentials.
+        logger.info?.(
+            `[OTP] login code for website_client ${client.id} -> ${client.dial_code || ''}${digitsOnly(data.mobile)}: ` +
+            `${code} (NOT SENT — ${delivery.reason})`
+        );
+    }
 
     const echo =
         process.env.OTP_DEV_ECHO === 'true' && process.env.NODE_ENV !== 'production';
 
     return {
         expires_in: OTP_TTL_SECONDS,
-        delivered: false,
+        delivered: delivery.delivered,
+        // Withheld in production: the reason describes our own configuration
+        // and is of no use to the person holding the phone.
+        ...(delivery.delivered || process.env.NODE_ENV === 'production'
+            ? {}
+            : { delivery_error: delivery.reason }),
         ...(echo ? { dev_code: code } : {}),
     };
 };

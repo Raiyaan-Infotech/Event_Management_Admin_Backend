@@ -31,6 +31,12 @@ module.exports = (sequelize) => {
         name: { type: DataTypes.STRING(200), allowNull: false },
         first_name: { type: DataTypes.STRING(100), allowNull: true },
         last_name: { type: DataTypes.STRING(100), allowNull: true },
+        /**
+         * Asked on the app's self-registration form. NULL for every guest a host
+         * typed in — that form does not collect it, and defaulting would invent
+         * a fact about a real person.
+         */
+        gender: { type: DataTypes.ENUM('male', 'female', 'other'), allowNull: true },
         title: { type: DataTypes.STRING(30), allowNull: true },
         /** Ungrouped when null. Deleting a group SET NULLs this, never the row. */
         group_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
@@ -52,6 +58,8 @@ module.exports = (sequelize) => {
         country: { type: DataTypes.STRING(100), allowNull: true, defaultValue: 'India' },
 
         dietary_preference: { type: DataTypes.STRING(255), allowNull: true },
+        /** The picked option row. Same rules as `relationship_option_id`. */
+        food_preference_option_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
         special_requirements: { type: DataTypes.STRING(500), allowNull: true },
         /** Allowed vs. count are separate, as in the CSV: "allowed but nobody
          *  named yet" is not the same as "not allowed". */
@@ -80,7 +88,8 @@ module.exports = (sequelize) => {
             defaultValue: 'none',
         },
         invite_source: {
-            type: DataTypes.ENUM('whatsapp', 'email', 'sms', 'manual', 'import'),
+            // 'qr' = they scanned the invitation code and registered themselves.
+            type: DataTypes.ENUM('whatsapp', 'email', 'sms', 'manual', 'import', 'qr'),
             allowNull: false,
             defaultValue: 'manual',
         },
@@ -115,11 +124,33 @@ module.exports = (sequelize) => {
          *  two happen to agree. */
         relationship: { type: DataTypes.STRING(60), allowNull: true },
         /**
+         * Which dropdown row they picked, when they picked one.
+         *
+         * Sits ALONGSIDE `relationship`, never instead of it: the text is what
+         * they said and must survive an admin renaming or deleting the option
+         * (hence ON DELETE SET NULL). This id is for grouping and reporting.
+         * NULL when a host typed the relationship in free text.
+         */
+        relationship_option_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+        /**
          * "Invited By". NULL forever on rows added before this existed —
          * backfilling them with the account owner would be inventing a fact,
          * so they read "—", which is correct.
          */
         added_by_client_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+        /**
+         * The guest's OWN app account, set when they register themselves by
+         * scanning the QR.
+         *
+         * ⚠ Not to be confused with `website_client_id` above, which is the
+         * HOST. Both are website_clients ids and they mean opposite things;
+         * reusing the host column would have made every guest look like their
+         * own host and widened what `/client/guests` returns.
+         *
+         * NULL forever for guests a host typed in and who never installed the
+         * app — which is most of them.
+         */
+        participant_client_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
     }, {
         tableName: 'event_guests',
         timestamps: true,

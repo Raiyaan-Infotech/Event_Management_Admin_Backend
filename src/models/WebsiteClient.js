@@ -37,7 +37,17 @@ module.exports = (sequelize) => {
             company_name: { type: DataTypes.STRING(150), allowNull: true },
 
             bio: { type: DataTypes.TEXT, allowNull: true },
-            email: { type: DataTypes.STRING(255), allowNull: false },
+            /**
+             * Optional, because a guest who registers by scanning the invitation
+             * QR proves a MOBILE NUMBER and may have no email at all — the app's
+             * form marks it "(Optional)".
+             *
+             * The website signup and the admin create still require one; they
+             * validate it in their own services. Only the QR path inserts NULL,
+             * and `uniq_website_client_email` is unaffected because MySQL allows
+             * many NULLs in a unique index.
+             */
+            email: { type: DataTypes.STRING(255), allowNull: true },
             dial_code: { type: DataTypes.STRING(8), allowNull: true, defaultValue: '+91' },
             mobile: { type: DataTypes.STRING(20), allowNull: true },
             password: { type: DataTypes.STRING(255), allowNull: true },

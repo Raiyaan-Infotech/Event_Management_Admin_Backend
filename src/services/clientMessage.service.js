@@ -1,11 +1,12 @@
 const {
     Sequelize, sequelize,
     Event, EventGuest, EventGuestGroup,
-    EventMessage, EventMessageCampaign,
+    EventMessage, EventMessageCampaign, ClientDeviceToken,
 } = require('../models');
 const { Op, fn, col, literal } = Sequelize;
 const ApiError = require('../utils/apiError');
 const notifications = require('./clientNotification.service');
+const pushSender = require('./pushSender.service');
 
 /**
  * Guest messaging — compose a message, send it to an audience, keep the record.
@@ -55,20 +56,43 @@ const CHANNELS = [
     { channel: 'email', label: 'Email', keys: ['SMTP_HOST', 'SENDGRID_API_KEY'] },
 ];
 
-const channelState = () => CHANNELS.map(({ channel, label, keys }) => {
-    // Any one of the recognised keys is enough — a project uses Twilio OR a
-    // local gateway, not both.
-    const configured = keys.some((k) => (process.env[k] || '').trim());
-    return {
-        channel,
-        label,
-        enabled: configured,
-        reason: configured
-            ? null
-            : `${label} is not connected yet. Your message is saved and recorded, but it will not `
-              + 'be delivered until a provider is configured.',
-    };
-});
+/**
+ * ⚠ ASYNC, unlike the env-var channels above, and that difference is the point.
+ *
+ * WhatsApp and Email are configured by a deploy — an env var is either set or
+ * it is not, and reading it is free. PUSH is configured by an administrator in
+ * the admin panel at runtime, so its state lives in `push_notification_configs`
+ * and answering "can we send?" means a query. Push is therefore the one channel
+ * that can go from unavailable to available without a redeploy, which is also
+ * why the composer asks on every load rather than caching the answer.
+ */
+const channelState = async () => {
+    const envChannels = CHANNELS.map(({ channel, label, keys }) => {
+        // Any one of the recognised keys is enough — a project uses Twilio OR a
+        // local gateway, not both.
+        const configured = keys.some((k) => (process.env[k] || '').trim());
+        return {
+            channel,
+            label,
+            enabled: configured,
+            reason: configured
+                ? null
+                : `${label} is not connected yet. Your message is saved and recorded, but it will not `
+                  + 'be delivered until a provider is configured.',
+        };
+    });
+
+    const push = await pushSender.availability();
+    return [
+        ...envChannels,
+        {
+            channel: 'push',
+            label: 'Push Notification',
+            enabled: push.enabled,
+            reason: push.reason,
+        },
+    ];
+};
 
 /**
  * ⚠ SMS is deliberately NOT offered.
@@ -79,8 +103,8 @@ const channelState = () => CHANNELS.map(({ channel, label, keys }) => {
  * is the list the composer offers and the send accepts, so nothing new can be
  * created on it.
  */
-const CHANNEL_LABEL = { whatsapp: 'WhatsApp', sms: 'SMS', email: 'Email' };
-const VALID_CHANNELS = ['whatsapp', 'email'];
+const CHANNEL_LABEL = { whatsapp: 'WhatsApp', sms: 'SMS', email: 'Email', push: 'Push Notification' };
+const VALID_CHANNELS = ['whatsapp', 'email', 'push'];
 const VALID_KINDS = ['invite', 'reminder', 'update', 'thank_you', 'custom'];
 
 /* ── Merge fields ────────────────────────────────────────────────────────── */
@@ -178,14 +202,117 @@ function render(text, { guest, event, hostName }) {
  * The unreachable ones are returned rather than dropped silently, so the screen
  * can say "12 guests have no email address" before anybody presses Send.
  */
-const reachable = (guest, channel) => {
+const reachable = (guest, channel, ctx = {}) => {
     if (channel === 'email') return Boolean(guest.email);
+    /*
+      PUSH is the one channel whose address is not a field on the guest.
+      A guest is reachable only if they REGISTERED AN APP — i.e. they joined
+      through the mobile app (giving them a `participant_client_id`) and that
+      account has a live device token. A phone number is irrelevant here: most
+      guests are typed in by a host and have never installed anything, and
+      counting them as reachable would put a recipient total on the composer
+      that no notification could ever match.
+
+      `ctx.pushableClientIds` is prepared once by `resolveAudience` — see there
+      for why this is not a per-guest query.
+    */
+    if (channel === 'push') {
+        const id = guest.participant_client_id;
+        return Boolean(id && ctx.pushableClientIds && ctx.pushableClientIds.has(Number(id)));
+    }
     // Kept for any historical row, even though SMS can no longer be chosen.
     if (channel === 'sms') return Boolean(guest.mobile);
     // WhatsApp falls back to the mobile: most guests have one number, and
     // `whatsapp` is stored separately only for the minority where it differs.
     return Boolean(guest.whatsapp || guest.mobile);
 };
+
+/* ── Push options ────────────────────────────────────────────────────────── */
+
+/** FCM's own ceiling: 28 days. Anything above it is rejected outright. */
+const MAX_TTL_SECONDS = 2_419_200;
+
+/**
+ * The Advanced Options screen, reduced to values FCM will actually accept.
+ *
+ * ── ⚠ THERE IS NO SOUND SETTING AT ALL ──────────────────────────────────────
+ * The mockup had Default / Custom Sound / Silent with a picker and a play
+ * button. None of it survives, and the reason is worth keeping:
+ *
+ *   Custom  impossible — the file must be COMPILED INTO the app, because the
+ *           handset plays a sound it already has. Naming one the app does not
+ *           ship makes Android fall back to the default silently.
+ *   Silent  deliverable, but overridden by the guest's own notification
+ *           settings on both platforms, so the portal would be promising an
+ *           outcome the handset decides.
+ *
+ * Every notification therefore uses the device default — the sound the guest
+ * chose for themselves. A stored `sound` on a historical row is ignored rather
+ * than migrated away, so an old campaign can still describe what it asked for.
+ *
+ * ── THE BADGE IS THE APP'S OWN LIST, NOT FIREBASE'S ─────────────────────────
+ * `badge_mode` is carried to iOS as the icon number, but the count that
+ * matters is the unread total in `client_notifications`, which the app reads
+ * from our own API. That is what makes "1" appear against the in-app list
+ * whether or not the handset ever rendered the system notification.
+ */
+function normalisePushOptions(body = {}) {
+    const raw = body.push_options || {};
+
+    const clickAction = ['open_app', 'deep_link', 'custom'].includes(body.click_action)
+        ? body.click_action
+        : 'open_app';
+
+    /* Only meaningful for the mode that uses it — a deep link stored against
+       "Open App" would be dead data that a later reader mistakes for intent. */
+    const deepLink = clickAction === 'open_app'
+        ? null
+        : String(body.deep_link || '').trim().slice(0, 500) || null;
+
+    /* Additional Data: the repeatable key/value rows. Arrives either as an
+       object or as [{key, value}] depending on the form; both are accepted
+       because refusing one shape would be a 400 the screen cannot explain. */
+    const dataPayload = {};
+    const source = Array.isArray(body.data_payload)
+        ? Object.fromEntries(body.data_payload.map((r) => [r?.key, r?.value]))
+        : (body.data_payload || {});
+    for (const [k, v] of Object.entries(source)) {
+        const key = String(k || '').trim();
+        if (!key || v === undefined || v === null || v === '') continue;
+        // `from` and `notification` are reserved by FCM and rejected.
+        if (['from', 'notification', 'message_type'].includes(key)) continue;
+        dataPayload[key.slice(0, 60)] = String(v).slice(0, 500);
+    }
+
+    const badgeMode = ['increment', 'set', 'clear'].includes(raw.badge_mode)
+        ? raw.badge_mode
+        : 'increment';
+
+    const ttl = Number(raw.ttl_seconds);
+
+    return {
+        image_url: String(body.image_url || '').trim().slice(0, 500) || null,
+        click_action: clickAction,
+        deep_link: deepLink,
+        data_payload: Object.keys(dataPayload).length ? dataPayload : null,
+        options: {
+            badge_enabled: raw.badge_enabled !== false,
+            badge_mode: badgeMode,
+            badge_value: badgeMode === 'set'
+                ? Math.max(0, Math.min(9999, Number(raw.badge_value) || 0))
+                : null,
+            priority: raw.priority === 'normal' ? 'normal' : 'high',
+            ttl_seconds: Number.isFinite(ttl) && ttl > 0
+                ? Math.min(MAX_TTL_SECONDS, Math.floor(ttl))
+                : 86_400,
+            send_to_offline: raw.send_to_offline !== false,
+            collapse_key: String(raw.collapse_key || '').trim().slice(0, 60) || null,
+            content_available: Boolean(raw.content_available),
+            restricted_package_name:
+                String(raw.restricted_package_name || '').trim().slice(0, 120) || null,
+        },
+    };
+}
 
 /**
  * Who a send reaches, and — just as important — who it does not, and why.
@@ -229,6 +356,9 @@ async function resolveAudience(clientId, { eventId, audience, groupIds, guestIds
             'id', 'name', 'first_name', 'last_name', 'email',
             'dial_code', 'mobile', 'whatsapp', 'table_number', 'group_id',
             'rsvp_status', 'party_size',
+            // The guest's own app account — the only route to a device token,
+            // and therefore the only thing that makes them push-reachable.
+            'participant_client_id',
         ],
         include: [{ association: 'group', attributes: ['id', 'name'], required: false }],
         order: [['name', 'ASC']],
@@ -241,8 +371,30 @@ async function resolveAudience(clientId, { eventId, audience, groupIds, guestIds
         ? guests.filter((g) => g.rsvp_status !== 'declined')
         : guests;
 
-    const eligible = considered.filter((g) => reachable(g, channel));
-    const unreachable = considered.filter((g) => !reachable(g, channel));
+    /*
+      For push, "has an address" is a question about ANOTHER table, so the
+      answer is fetched once for the whole audience rather than per guest.
+      A per-guest query would be one round trip each — production is ~374ms,
+      so a 500-guest event would spend three minutes deciding who to send to.
+    */
+    const ctx = {};
+    if (channel === 'push') {
+        const participantIds = [...new Set(
+            considered.map((g) => Number(g.participant_client_id)).filter(Boolean),
+        )];
+        ctx.pushableClientIds = new Set();
+        if (participantIds.length) {
+            const live = await ClientDeviceToken.findAll({
+                where: { website_client_id: { [Op.in]: participantIds }, is_active: true },
+                attributes: ['website_client_id'],
+                group: ['website_client_id'],
+            });
+            for (const row of live) ctx.pushableClientIds.add(Number(row.website_client_id));
+        }
+    }
+
+    const eligible = considered.filter((g) => reachable(g, channel, ctx));
+    const unreachable = considered.filter((g) => !reachable(g, channel, ctx));
 
     /*
       HEADS, not rows. The Guests screen counts people — a guest bringing three
@@ -357,7 +509,7 @@ const getComposer = async (client, { eventId } = {}) => {
         })),
         guest_count: guestCount,
         merge_fields: MERGE_FIELDS,
-        channels: channelState(),
+        channels: await channelState(),
     };
 };
 
@@ -422,8 +574,18 @@ const previewAudience = async (client, body = {}) => {
             // Named, not just counted: "12 guests have no email" is actionable
             // only if you can find out which twelve.
             reason: unreachable.length
-                ? `${unreachable.length} guest${unreachable.length === 1 ? ' has' : 's have'} no `
-                  + `${channel === 'email' ? 'email address' : 'phone number'} on file and will be skipped.`
+                ? (channel === 'push'
+                    /*
+                      Push is missing an APP, not a field. Saying "no phone
+                      number" here would send a host into the guest list to fix
+                      something that is already filled in and has no bearing on
+                      whether a notification can be delivered.
+                    */
+                    ? `${unreachable.length} guest${unreachable.length === 1 ? ' has' : 's have'} `
+                      + 'not installed the app and will be skipped. A guest becomes reachable once '
+                      + 'they join through the mobile app and allow notifications.'
+                    : `${unreachable.length} guest${unreachable.length === 1 ? ' has' : 's have'} no `
+                      + `${channel === 'email' ? 'email address' : 'phone number'} on file and will be skipped.`)
                 : null,
             guests: unreachable.slice(0, 25).map((g) => ({ id: g.id, name: g.name })),
         },
@@ -437,7 +599,7 @@ const previewAudience = async (client, body = {}) => {
             body: render(body.body, { guest: sample, event, hostName }),
             rendered_for: sample ? { id: sample.id, name: sample.name } : null,
         },
-        channels: channelState(),
+        channels: await channelState(),
     };
 };
 
@@ -489,13 +651,24 @@ const send = async (client, body = {}) => {
     if (!eligible.length) {
         throw ApiError.badRequest(
             unreachable.length
-                ? `None of the ${unreachable.length} selected guests has a `
-                  + `${channel === 'email' ? 'email address' : 'phone number'} on file.`
+                ? (channel === 'push'
+                    /*
+                      Said in full, because this is the one channel whose empty
+                      result is not a data-entry oversight. "No phone number"
+                      is fixable by editing a guest; this is not — the guest has
+                      to install the app and join, and nothing the host does on
+                      this screen will change it.
+                    */
+                    ? `None of the ${unreachable.length} selected guests has the app installed. `
+                      + 'A guest becomes reachable by push once they join the event through the '
+                      + 'mobile app and allow notifications.'
+                    : `None of the ${unreachable.length} selected guests has a `
+                      + `${channel === 'email' ? 'email address' : 'phone number'} on file.`)
                 : 'No guests match that selection.',
         );
     }
 
-    const state = channelState().find((c) => c.channel === channel);
+    const state = (await channelState()).find((c) => c.channel === channel);
     const scheduledAt = body.scheduled_at ? new Date(body.scheduled_at) : null;
     if (scheduledAt && Number.isNaN(scheduledAt.getTime())) {
         throw ApiError.badRequest('That is not a valid date and time.');
@@ -509,11 +682,25 @@ const send = async (client, body = {}) => {
         throw ApiError.badRequest('That time has already passed. Choose a later time.');
     }
 
+    /*
+      Push carries a payload no other channel has. It is normalised HERE rather
+      than trusted from the form, because these values end up inside an FCM
+      request: a TTL of "abc" or a badge of -1 is rejected by Google with an
+      error naming the field but not the cause, long after the person who typed
+      it has moved on.
+    */
+    const push = channel === 'push' ? normalisePushOptions(body) : null;
+
     const campaign = await sequelize.transaction(async (t) => {
         const created = await EventMessageCampaign.create({
             website_client_id: client.id,
             event_id: event.id,
             subject: subject.slice(0, 255),
+            image_url: push?.image_url ?? null,
+            click_action: push?.click_action ?? null,
+            deep_link: push?.deep_link ?? null,
+            data_payload: push?.data_payload ?? null,
+            push_options: push?.options ?? null,
             // Stored with the merge fields INTACT — see the header.
             body: messageBody,
             channel,
@@ -576,6 +763,28 @@ const send = async (client, body = {}) => {
         return created;
     });
 
+    /*
+      ── THE ONLY CHANNEL THAT ACTUALLY DELIVERS ─────────────────────────────
+      WhatsApp and Email stop at the recorded row: there is no provider behind
+      them, and pretending otherwise would put invented delivery rates on the
+      dashboard. Push has a real provider — Firebase — the moment an
+      administrator activates a config, so it goes the rest of the way.
+
+      Awaited rather than fired-and-forgotten, because the response carries the
+      delivered/failed split the composer shows straight after Send. A
+      background send would have to answer "0 delivered" and correct itself
+      later, which reads as a failure.
+    */
+    let deliveryOutcome = null;
+    if (channel === 'push' && !scheduledAt && state?.enabled) {
+        deliveryOutcome = await deliverPush(campaign, eligible, {
+            title: subject,
+            body: messageBody,
+            event,
+            client,
+        });
+    }
+
     // Fire and forget — a failed feed row must not fail a send that happened.
     notifications.notify(client.id, {
         type: scheduledAt ? 'campaign_scheduled' : 'campaign_sent',
@@ -600,8 +809,156 @@ const send = async (client, body = {}) => {
               not decide what to promise — this does.
             */
             reason: state?.enabled ? null : state?.reason ?? null,
+            // Present only for push, the one channel that really went out.
+            ...(deliveryOutcome ? {
+                delivered: deliveryOutcome.delivered,
+                failed: deliveryOutcome.failed,
+            } : {}),
         },
     };
+};
+
+/**
+ * Push a campaign that has already been recorded, and write back what happened.
+ *
+ * ── WHY THIS RUNS AFTER THE TRANSACTION, NOT INSIDE IT ─────────────────────
+ * It makes one HTTPS call per device. Holding a MySQL transaction open across
+ * a network round trip to Google — several seconds on a large audience — locks
+ * rows for the duration and times the connection out. The campaign and its
+ * recipient rows are committed first, as 'queued'; this promotes them.
+ *
+ * ── ONE GUEST CAN OWN SEVERAL DEVICES ──────────────────────────────────────
+ * A phone and a tablet are two tokens, one guest, one `event_messages` row.
+ * The row is Delivered if ANY of their devices accepted it — the person got
+ * the notification, which is the question the row answers. It is Failed only
+ * when every device refused.
+ */
+async function deliverPush(campaign, eligible, { title, body, event, client }) {
+    const participantIds = [...new Set(
+        eligible.map((g) => Number(g.participant_client_id)).filter(Boolean),
+    )];
+
+    const tokens = await ClientDeviceToken.findAll({
+        where: { website_client_id: { [Op.in]: participantIds }, is_active: true },
+        attributes: ['id', 'website_client_id', 'token'],
+    });
+
+    /* client id -> its tokens, so one guest's devices can be judged together. */
+    const byClient = new Map();
+    for (const t of tokens) {
+        const key = Number(t.website_client_id);
+        if (!byClient.has(key)) byClient.set(key, []);
+        byClient.get(key).push(t);
+    }
+
+    const results = await pushSender.sendToTokens(tokens, {
+        title,
+        body,
+        imageUrl: campaign.image_url,
+        clickAction: campaign.click_action,
+        deepLink: campaign.deep_link,
+        data: {
+            ...(campaign.data_payload || {}),
+            campaign_id: campaign.id,
+            event_id: event.id,
+        },
+        options: campaign.push_options,
+    });
+
+    const byToken = new Map(results.map((r) => [r.deviceTokenId, r]));
+
+    const deliveredGuestIds = [];
+    const failures = [];
+    for (const guest of eligible) {
+        const own = byClient.get(Number(guest.participant_client_id)) || [];
+        const outcomes = own.map((t) => byToken.get(t.id)).filter(Boolean);
+        if (outcomes.some((o) => o.ok)) {
+            deliveredGuestIds.push(guest.id);
+        } else {
+            failures.push({
+                guestId: guest.id,
+                reason: outcomes[0]?.reason || 'No active device for this guest',
+            });
+        }
+    }
+
+    /*
+      Two bulk updates, not one per guest. Production is ~374ms a query; a loop
+      over 800 recipients would take five minutes AFTER the notifications had
+      already been delivered.
+    */
+    const now = new Date();
+    if (deliveredGuestIds.length) {
+        await EventMessage.update(
+            { status: 'sent', sent_at: now, delivered_at: now },
+            { where: { campaign_id: campaign.id, guest_id: { [Op.in]: deliveredGuestIds } } },
+        );
+    }
+
+    /* Failures are grouped by REASON so each row keeps its own explanation
+       without becoming one UPDATE per guest. */
+    if (failures.length) {
+        const byReason = new Map();
+        for (const f of failures) {
+            const key = String(f.reason).slice(0, 255);
+            if (!byReason.has(key)) byReason.set(key, []);
+            byReason.get(key).push(f.guestId);
+        }
+        for (const [reason, ids] of byReason) {
+            // eslint-disable-next-line no-await-in-loop
+            await EventMessage.update(
+                { status: 'failed', failed_reason: reason },
+                { where: { campaign_id: campaign.id, guest_id: { [Op.in]: ids } } },
+            );
+        }
+    }
+
+    await campaign.update({
+        status: deliveredGuestIds.length ? 'sent' : 'failed',
+        sent_at: now,
+        failed_reason: deliveredGuestIds.length
+            ? null
+            : (failures[0]?.reason || 'No notification could be delivered').slice(0, 255),
+    });
+
+    /*
+      The in-app list the badge counts. Written for every guest the push was
+      ADDRESSED to, not only those whose handset accepted it: the person asked
+      for read/unread to come from our database rather than Firebase, and a
+      notification missing from the list because a socket timed out would be
+      the one case where the app and the History screen disagree.
+    */
+    for (const guest of eligible) {
+        if (!guest.participant_client_id) continue;
+        notifications.notify(Number(guest.participant_client_id), {
+            type: 'push_notification',
+            title,
+            body,
+            eventId: event.id,
+            companyId: client.company_id ?? null,
+            link: campaign.deep_link || `/dashboard/events/${event.id}`,
+            meta: { campaign_id: campaign.id, channel: 'push' },
+        });
+    }
+
+    return { delivered: deliveredGuestIds.length, failed: failures.length };
+}
+
+/**
+ * The scheduler's way in — a campaign written earlier, delivered now.
+ *
+ * Thin on purpose: it exists so `campaignScheduler` does not have to know how
+ * a push is assembled, and so an immediate send and a scheduled send cannot
+ * drift apart. Both end up in the same `deliverPush`.
+ */
+const deliverScheduledPush = async (campaign, eligible, client) => {
+    const event = campaign.event || await Event.findByPk(campaign.event_id);
+    return deliverPush(campaign, eligible, {
+        title: campaign.subject,
+        body: campaign.body,
+        event,
+        client,
+    });
 };
 
 /**
@@ -614,7 +971,7 @@ const send = async (client, body = {}) => {
 const sendTest = async (client, body = {}) => {
     const event = await ownEvent(client.id, body.event_id);
     const channel = VALID_CHANNELS.includes(body.channel) ? body.channel : 'email';
-    const state = channelState().find((c) => c.channel === channel);
+    const state = (await channelState()).find((c) => c.channel === channel);
 
     const destination = channel === 'email' ? client.email : client.mobile;
     if (!destination) {
@@ -752,7 +1109,7 @@ const listCampaigns = async (client, {
         campaigns: shaped,
         pagination: { page: p, limit: l, totalItems: count, totalPages: Math.ceil(count / l) || 1 },
         stats: await getStats(client.id),
-        channels: channelState(),
+        channels: await channelState(),
     };
 };
 
@@ -767,6 +1124,14 @@ const getStats = async (clientId) => {
             [fn('SUM', literal("CASE WHEN status = 'delivered' THEN 1 ELSE 0 END")), 'delivered'],
             [fn('SUM', literal("CASE WHEN status = 'failed' THEN 1 ELSE 0 END")), 'failed'],
             [fn('SUM', literal("CASE WHEN status = 'queued' THEN 1 ELSE 0 END")), 'queued'],
+            /*
+              Engagement, counted from the TIMESTAMP rather than the status: a
+              guest who opened a notification and then had it fail to re-deliver
+              still opened it, and status only ever holds the latest word.
+              These are ours — Firebase reports neither back to a server.
+            */
+            [fn('SUM', literal('CASE WHEN opened_at IS NOT NULL THEN 1 ELSE 0 END')), 'opened'],
+            [fn('SUM', literal('CASE WHEN clicked_at IS NOT NULL THEN 1 ELSE 0 END')), 'clicked'],
         ],
         group: ['channel'],
         raw: true,
@@ -783,6 +1148,8 @@ const getStats = async (clientId) => {
             delivered: Number(r.delivered) || 0,
             failed: Number(r.failed) || 0,
             queued: Number(r.queued) || 0,
+            opened: Number(r.opened) || 0,
+            clicked: Number(r.clicked) || 0,
         };
     }
     /*
@@ -791,7 +1158,9 @@ const getStats = async (clientId) => {
       not drop out of the totals just because SMS is no longer offered.
     */
     for (const c of new Set([...VALID_CHANNELS, ...Object.keys(byChannel)])) {
-        byChannel[c] = byChannel[c] || { total: 0, sent: 0, delivered: 0, failed: 0, queued: 0 };
+        byChannel[c] = byChannel[c] || {
+            total: 0, sent: 0, delivered: 0, failed: 0, queued: 0, opened: 0, clicked: 0,
+        };
         byChannel[c].share = grand ? Math.round((byChannel[c].total / grand) * 1000) / 10 : 0;
     }
 
@@ -830,7 +1199,7 @@ const getCampaign = async (client, id) => {
         queued: deliveries.filter((d) => d.status === 'queued').length,
     };
 
-    const state = channelState().find((c) => c.channel === campaign.channel);
+    const state = (await channelState()).find((c) => c.channel === campaign.channel);
 
     return {
         campaign: shaped,
@@ -858,6 +1227,7 @@ const getCampaign = async (client, id) => {
 
 module.exports = {
     getComposer,
+    deliverScheduledPush,
     previewAudience,
     send,
     sendTest,

@@ -4,6 +4,7 @@ const {
     Event,
     WebsiteClient,
     SubscriptionPlan,
+    EventGuest,
     EventCategory,
     EventType,
     Religion,
@@ -442,7 +443,62 @@ const getEventById = async (clientId, eventId) => {
         include: EVENT_INCLUDE,
     });
     if (!event) return null;
+    return presentOne(event);
+};
 
+/**
+ * What a guest may NOT read on an event they were invited to.
+ *
+ * `website_client_id` and `subscription_plan_id` are the two fields
+ * `clientEvent.controller.js` already names as the reason its `decodeQr` sits
+ * behind a session; `plan` is the host's billing tier by another name, and
+ * `qr_token` is the capability that admits somebody to the event — a guest
+ * holds their own copy already, but the server should not be the thing that
+ * hands out a second one.
+ */
+const HOST_ONLY_FIELDS = [
+    'website_client_id',
+    'subscription_plan_id',
+    'plan',
+    'qr_token',
+    'qr_issued_at',
+];
+
+/**
+ * One event as a PARTICIPANT may read it, falling back to the owner read.
+ *
+ * `getEventById` alone answers 404 for a guest, because the event belongs to
+ * the host and `website_client_id` is the host's id — so every event-scoped
+ * screen was blank for anyone who joined by QR rather than creating the event.
+ *
+ * Membership is the guest row itself: `participant_client_id` is set only by
+ * the join flow, which is gated on an OTP-verified number and a QR token that
+ * decrypts. It is NOT `website_client_id` — that column names the host, and
+ * reading it here would let every guest read every event of their own host.
+ */
+const getEventForViewer = async (clientId, eventId) => {
+    const owned = await getEventById(clientId, eventId);
+    if (owned) return owned;
+
+    const membership = await EventGuest.findOne({
+        where: { event_id: eventId, participant_client_id: clientId },
+        attributes: ['id'],
+    });
+    if (!membership) return null;
+
+    const event = await Event.findOne({
+        where: { id: eventId },
+        include: EVENT_INCLUDE,
+    });
+    if (!event) return null;
+
+    const presented = await presentOne(event);
+    for (const field of HOST_ONLY_FIELDS) delete presented[field];
+    return presented;
+};
+
+/** The shared tail of both reads: menus resolved and the design attached. */
+const presentOne = async (event) => {
     const presented = present(event);
 
     // Resolve the menu names for the ids stored on the row. Done here rather
@@ -971,6 +1027,7 @@ module.exports = {
     deriveStatus,
     createEvent,
     getEventById,
+    getEventForViewer,
     listEvents,
     getDashboardStats,
     getAnalytics,

@@ -552,6 +552,19 @@ const deleteMyAccount = async (clientId, { password, confirm_email: confirmEmail
         // normalizeEmail is what the model's beforeValidate hook already applied
         // to the stored address, so comparing lowercased+trimmed on both sides
         // compares like with like.
+        /**
+         * An account registered by QR + OTP has neither a password NOR an email,
+         * so there is nothing here to confirm against. Say that plainly instead
+         * of asking for an email address that does not exist — the check below
+         * would otherwise reject every possible answer, including the right one.
+         */
+        if (!client.email) {
+            throw ApiError.badRequest(
+                'This account has no password or email address to confirm with. '
+                + 'Please set one in your profile first, or contact us.',
+            );
+        }
+
         const typed = String(confirmEmail || '').trim().toLowerCase();
         if (!typed) {
             throw ApiError.badRequest('Please type your email address to confirm.');
@@ -562,7 +575,10 @@ const deleteMyAccount = async (clientId, { password, confirm_email: confirmEmail
     }
 
     await client.update({
-        email: `${client.email}.deleted.${Date.now()}`,
+        // Only stamp an address that exists. A NULL email does not hold the
+        // unique index hostage — MySQL permits many NULLs — so freeing it is
+        // unnecessary, and `${null}.deleted.…` would write the literal "null".
+        ...(client.email ? { email: `${client.email}.deleted.${Date.now()}` } : {}),
         is_active: 0,
     });
     await client.destroy();

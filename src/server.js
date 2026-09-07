@@ -42,6 +42,14 @@ async function startServer() {
     attachChatSocket(io);
     app.set('io', io);
 
+    /*
+      Scheduled campaigns. Started HERE and nowhere else: a scheduler running
+      in more than one place sends the same notification twice, and one that is
+      never started makes "Schedule for Later" a button that silently does
+      nothing — which is the state `emailScheduler.service` is in.
+    */
+    require('./services/campaignScheduler.service').start();
+
     server.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
       console.log(`Environment: ${process.env.NODE_ENV}`);

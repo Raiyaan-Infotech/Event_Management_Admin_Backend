@@ -13,6 +13,7 @@ const {
 } = require('../controllers/companyPublicSite.controller');
 const websiteClientController = require('../controllers/websiteClient.controller');
 const { authLimiter, codeLimiter, refreshLimiter } = require('../middleware/rateLimit');
+const guestRegistrationController = require('../controllers/guestRegistration.controller');
 
 // ── Company website builder: host-addressed public read model ───────────────
 // Consumed by the standalone public site app, which knows the visitor's Host
@@ -69,5 +70,22 @@ router.get('/website-clients/oauth/:provider/callback', websiteClientController.
 // not have one.
 router.post('/website-clients/mobile/send-otp', authLimiter, websiteClientController.sendMobileOtp);
 router.post('/website-clients/mobile/verify', codeLimiter, websiteClientController.verifyMobileOtp);
+
+/**
+ * Guest self-registration — the mobile app's "New Participant" flow.
+ *
+ * Unauthenticated by necessity: the person scanning has no account yet. What
+ * gates them is the QR token, which every step re-verifies — an invitation you
+ * physically hold is the capability, and a token that does not decrypt gets no
+ * further. `/events/qr/resolve` returns a NARROWED event payload for exactly
+ * this reason; the session-protected decode in clientPortal.routes.js carries
+ * the host's client id and plan id and must stay behind a login.
+ *
+ * `join` is NOT here — it is authenticated, under /client, because by then the
+ * number has been verified and the row must be written under a real identity.
+ */
+router.post('/events/qr/resolve', guestRegistrationController.resolve);
+router.post('/events/join/otp/request', authLimiter, guestRegistrationController.requestOtp);
+router.post('/events/join/otp/verify', codeLimiter, guestRegistrationController.verifyOtp);
 
 module.exports = router;

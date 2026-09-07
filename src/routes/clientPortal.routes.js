@@ -10,7 +10,9 @@ const messageController = require('../controllers/clientMessage.controller');
 const rsvpController = require('../controllers/clientRsvp.controller');
 const guestProfileController = require('../controllers/clientGuestProfile.controller');
 const securityController = require('../controllers/clientSecurity.controller');
+const deviceController = require('../controllers/clientDevice.controller');
 const splashController = require('../controllers/clientSplashScreen.controller');
+const guestRegistrationController = require('../controllers/guestRegistration.controller');
 const { isWebsiteClientAuthenticated } = require('../middleware/websiteClientAuth');
 const { codeLimiter } = require('../middleware/rateLimit');
 
@@ -68,6 +70,18 @@ router.post('/security/sessions/revoke-all', securityController.revokeOtherSessi
 
 router.get('/security/devices', securityController.listDevices);
 router.delete('/security/devices/:id', securityController.removeDevice);
+
+/*
+ * Push device tokens — the mobile app's FCM address.
+ *
+ * ⚠ NOT the same thing as `/security/devices` just above, despite the word.
+ * That lists SESSIONS for a person reviewing where they are signed in. These
+ * are FCM registration tokens, which exist per app INSTALL and outlive any
+ * session — see ClientDeviceToken for why the two cannot share a table.
+ */
+router.get('/devices', deviceController.list);
+router.post('/devices', deviceController.register);
+router.delete('/devices', deviceController.unregister);
 
 router.get('/security/2fa', securityController.getTwoFactor);
 router.post('/security/2fa/setup', codeLimiter, securityController.setupTwoFactor);
@@ -135,6 +149,21 @@ router.get('/media/proxy', controller.proxyImage);
 router.get('/events/stats', eventController.stats);
 router.get('/events/analytics', eventController.analytics);
 router.post('/events/qr/decode', eventController.decodeQr);
+
+/**
+ * Joining an event by QR — the Confirm step of the app's registration flow, and
+ * the whole of the "Existing Participant" flow (which posts only the token).
+ *
+ * Authenticated on purpose: the mobile number was verified during the OTP step,
+ * so the guest row is written against `req.websiteClient` rather than whatever
+ * the form claims. Reading the number from the body instead would let somebody
+ * verify their own phone and then register as another person.
+ *
+ * `/events/joined` is My Events for a GUEST — events they were invited to,
+ * which is a different question from `/events`, the events they own.
+ */
+router.post('/events/join', guestRegistrationController.join);
+router.get('/events/joined', guestRegistrationController.myEvents);
 
 router.get('/events', eventController.list);
 router.post('/events', eventController.create);

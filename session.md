@@ -10292,3 +10292,811 @@ backend boot smoke test                 clean
 5. Everything carried from §401/§389/§382: OAuth bypasses 2FA, no payment/
    WhatsApp/email provider, `EVENT_QR_SECRET` unset on Render.
 
+### 409. Demo data, checked rather than guessed — and a View option
+
+"Add some better data" turned the seeder's random `picsum.photos` placeholders
+into specific images, each **downloaded and visually inspected before being
+picked** — not assumed correct from an Unsplash photo id, which is exactly
+the kind of guess that once put a landscape photo under a row labelled
+"birthday" in an earlier draft of this same seeder. Final mapping:
+
+```
+Rohan & Sneha — Reception    solid_color -> image  (a set banquet hall — the
+                              name "Reception" now matches what is shown)
+Karan's Birthday Bash        image: colourful balloons
+Meera & Dev — Wedding        video: a REAL playable MP4 (MDN's public cc0
+                              sample clip — generic, not wedding footage,
+                              chosen for being a stable always-reachable URL)
+                              with a thematically-chosen fallback image
+                              (bride and groom with a bouquet)
+Aisha's Engagement            logo: joined hands wearing rings, square-cropped
+Ananya & Vikram — Save the Date   couple_photo: ceremony chairs reading
+                              "Forever" / "Always"
+```
+
+Verification method: `curl -sI` to confirm each URL is reachable and the
+right content-type, THEN download and view every image with the Read tool
+before writing the URL into the seeder — not inferred from the filename or
+photo id, both of which have been wrong before.
+
+**"View option also needed"** — added a read-only preview to the list, next
+to Edit and Delete:
+
+```
+splash-screens/_components/splash-preview.tsx      new — SplashPreviewFrame
+                                                    (bare phone mockup) +
+                                                    SplashPreviewCard (+ chrome)
+splash-screens/_components/splash-form.tsx         refactored to use the
+                                                    shared frame via a
+                                                    toPreviewData() mapper,
+                                                    inline copy deleted
+splash-screens/page.tsx                            + View in the dropdown,
+                                                    + hover-eye on the card's
+                                                    swatch, + a Dialog
+```
+
+One rendering, not two: the editor's live preview and the list's read-only
+view both call `SplashPreviewFrame` now, so a change to how a background type
+renders cannot fix one and silently leave the other stale — the exact
+drift-prevention reasoning used everywhere else in this codebase (guest
+groups' list/form colour swatch, the client portal's shared session rows).
+
+The video row's preview is not just a swatch here: `SplashPreviewFrame`
+renders an actual `<video autoPlay muted loop>` when `background_type` is
+`video` and a URL exists, so "View" on that row genuinely plays the clip.
+
+### 410. `.gitignore` — a tracked file that should not be
+
+`.claude/settings.local.json` was TRACKED in git — an ever-growing,
+machine-specific log of permission approvals and absolute local temp paths
+(`C:\Users\LKMEDI~1\...`), not `.claude/settings.json` (the real shared
+config, left alone). Added to `.gitignore`; NOT yet untracked
+(`git rm --cached`) — that changes what git is following and was left for
+the user to confirm rather than done unprompted.
+
+### 411. Verified
+
+```
+5 Unsplash image URLs + 1 MDN video URL   HTTP 200, correct content-type,
+                                           each image additionally downloaded
+                                           and viewed before use
+node src/database/seeders/splash-screens-demo.seeder.js --clear / (reseed)
+                                           6 rows re-created with the new URLs
+node -e (direct DB read)                  confirms exact URLs landed correctly
+tsc --noEmit / eslint                     clean, 0 errors 0 warnings
+backend boot + both test suites           36 + 13 passed, no regression
+```
+
+
+---
+
+## Session 35 — Push Notifications: the audit, and the master data underneath it
+
+> **Date:** 2026-09-06 | **Backend:** `Event_Management_Admin_Backend`
+> **Mobile app:** `Event_Invite_Mobile_App` · **Client portal:** `event_client_single`
+> Four Push Notification screens were supplied. **Nothing of the send feature is
+> built.** What got built is the master data the guest registration flow needs
+> first, plus this record of what the audit found.
+> **Local only. Production NOT migrated.** The backend API is complete and
+> permissioned; the admin screens on top of it are not built.
+
+### 412. `push_notification_configs` — built in an earlier session, never logged
+
+Committed as `a2856f5` and live on Render, but absent from this file, which is
+why it is written down here before anything new is added.
+
+It is the **admin's Firebase connection settings**, not a send feature: one
+global row (admin JWT, `settings.*` permissions), holding `project_id`,
+`client_email`, `private_key`, `service_account_json`, the web SDK fields, and a
+`connection_status` ENUM. `toJSON` masks the private key and drops the service
+account JSON, so neither leaves the service. A `beforeSave` hook clears
+`is_active` on every other row, so exactly one config can be live.
+
+**The part worth knowing** — `performHandshake()` in
+`pushNotificationConfig.service.js` already mints a **real Google OAuth2 access
+token**: it RS256-signs a JWT with the service account key, posts it to
+`oauth2.googleapis.com/token` with scope
+`https://www.googleapis.com/auth/firebase.messaging`, and reads back a live
+`access_token`.
+
+> **So `firebase-admin` is not needed and must not be added.** Sending is
+> `axios.post` to `fcm.googleapis.com/v1/projects/{project_id}/messages:send`
+> with that bearer token. The one change `performHandshake` needs is to CACHE
+> and return the token instead of discarding it — Google's are valid 3600s.
+
+### 413. What the four supplied screens promise that FCM cannot deliver
+
+Read against the API before anything was designed, and four of the tiles turned
+out to be unbuildable as drawn:
+
+| Screen element | Verdict |
+|---|---|
+| **Custom Sound** — upload a file, pick it from a dropdown | ❌ Impossible. A sound must already be bundled in the app binary (`res/raw`); FCM only references it by filename. An uploaded MP3 would silently fall back to the default. **Dropped from scope.** |
+| **Badge count** (Increment / Set / Clear) | ❌ Not via FCM. iOS-only at the OS level, Android has no API, and "increment" implies a per-device count FCM never reports. **Reframed:** the app's own unread count, read from `client_notifications`. |
+| **Delivered 1,048 (83.4%)** | ❌ Unknowable. The Admin SDK reports *accepted by FCM* or *rejected*, never that a device displayed it. Firebase Console's own delivery numbers are a separate, 24–48h-delayed Analytics product with no per-notification API. |
+| **Opened / Clicked** | ❌ Nothing automatic. Requires the app to call back on tap. |
+| Priority, TTL, Collapse Key, Content-Available, Restricted Package Name, deep link, data payload, silent push | ✅ All real HTTP v1 fields. |
+| **Failed** | ✅ Real, but only as a send-time result (bad or unregistered token). |
+
+**The tiles become `Sent · Accepted · Opened · Failed`.** "Accepted" is what FCM
+actually told us; "Opened" is our own read flag. This is the §5177 lesson
+applied — a dashboard reading "Delivered 83.4%" for messages nobody can prove
+arrived is a number that is expensive to unpick once real rows exist beside it.
+
+### 414. Who can even receive one — the gap that blocks the whole feature
+
+`events.website_client_id` is a single non-null FK: **an event has exactly one
+client.** `event_guests` rows have no login, no account and no device. So today
+the only pushable person for an event is its owner.
+
+The flow that closes the gap is the supplied **Guest / Participant Login Flow**:
+a guest opens the invitation link, installs the app, scans the event QR, fills a
+3-step form and becomes a participant. That registration IS the missing "who is
+inside this event" record.
+
+**What exists already, and it is more than expected:**
+
+| | |
+|---|---|
+| `client_sessions` | One row per sign-in, `transport` ENUM(`web`,`app`) already separating Flutter sessions, with device name/type/OS. **This is where `fcm_token` belongs** — a session already IS a device, and revoking one then kills push to it for free. The model header explicitly warns against a second table holding "which device is this". |
+| `client_notifications` + `client_notification_prefs` + `notify()` | The in-app feed, with read/archive flags and per-type prefs. Gives the badge count and the "Opened" number without inventing anything. |
+| `event_guests` | Already carries `relationship` (STRING 60, deliberately free text), `dietary_preference`, `special_requirements`, `plus_one_count`, `party_size`, `response_type` ENUM(`none`,`yes`,`no`,`maybe`) — an exact match for the RSVP radio — and `notes`, documented as *"what the GUEST said with their response"*, which is the form's Additional Message. |
+| `eventQr` + `resolveQrToken` | AES-256-GCM encrypted event payload, already decoding. |
+
+**Still missing:** the FCM token never reaches the backend (`// TODO` at
+`notification_service.dart:97`); `resolveQrToken` is **read-only** and creates no
+membership; `/events/:id/participants` is coded for in the app but has no route
+here, so the app runs on bundled sample data.
+
+Of the whole 3-step registration form, **`gender` is the only genuinely missing
+column.** Plus the participant's own account link (`event_guests.website_client_id`
+is the *host's* id, not the guest's) and a `qr` value on `invite_source`.
+
+### 415. Decisions taken
+
+- **OTP verification, inline in step 1** — a Verify button at the end of the
+  mobile row reveals an OTP field below it, confirmed in place. Steps stay
+  "1 of 3"; the supplied design does not change. Reuses the mobile OTP login
+  already working (§310).
+- **Same mobile inside one event updates the existing guest row**, so a guest
+  the host already added by hand does not appear twice in the Participant List.
+- **"No. of Guests with you" means people IN ADDITION to them** → `plus_one_count`
+  is the entered number, `party_size` is 1 + it.
+- **Scheduling via a real `node-cron` job.** ⚠ `startScheduler()` in
+  `emailScheduler.service.js:405` exists and **is never called from anywhere** —
+  so §314's "the only scheduled work is the email worker" is optimistic: nothing
+  scheduled runs at all today. The push scheduler must actually be started, and
+  Render sleeping a free instance remains the standing caveat.
+- **App changes agreed:** send the FCM token, ask notification permission, wire
+  the Notifications screen to real data, mark-as-read on open, rename
+  Login/Register to **New Participant / Existing Participant**, and the post-QR
+  guest form.
+
+### 416. `guest_relationship_options` + `guest_food_preference_options` — BUILT
+
+`node src/database/tools/apply-guest-option-tables.js [--prod] --apply`. Two
+tables, same shape as `religions` minus `event_type_id`, FK type read from
+`event_categories.id` rather than assumed (INT UNSIGNED).
+
+**Why tables at all:** these dropdowns render in a **Flutter app**. A hardcoded
+list changes only by shipping a build through app-store review — days, to add
+one food option. This was the deciding argument, not tidiness.
+
+`event_category_id` is **NULLABLE here where religions' is not**:
+`events.event_category_id` is itself nullable, so NULL rows are the fallback
+list. Without them a guest opens the form to an empty dropdown.
+
+**One row per (category, value), not a shared value pool plus a link table.**
+Costed and chosen: the admin screen is then one page — pick a category, edit its
+list — instead of managing a pool and mapping it. The trade is that renaming a
+word shared by 15 categories means editing it 15 times, which is rare; adding
+and hiding values per category is not. No unique index on (category, name),
+matching `religions`: these are paranoid tables and a soft-deleted row would
+refuse the re-insert. The services enforce it against live rows instead.
+
+**Seeded** by `guest-options.seeder.js`, re-runnable and **non-destructive** — a
+plain run only adds what is missing, because these rows are admin-editable and a
+seeder that "restored" the original list would silently undo somebody's edits on
+every run. `--clear` is the deliberate opposite.
+
+```
+13 event categories created   Engagement, Baby Shower, Housewarming, Graduation,
+                              Conference, Festival, Religious, Sports,
+                              School & College, Concert, Memorial,
+                              Social & Community, Exhibition
+                              (Wedding / Corporate / Birthday / Anniversary
+                              already existed and were REUSED, not duplicated —
+                              events already point at those ids)
+196 relationship rows         17 category lists + a 7-value fallback
+160 food rows                 17 category lists + a 7-value fallback
+```
+
+⚠ **This adds 13 categories to what a client sees when creating an event** — a
+product change, agreed explicitly, not a side effect.
+
+### 417. The admin CRUD — BUILT, but not yet reachable
+
+```
+src/models/GuestRelationshipOption.js          new
+src/models/GuestFoodPreferenceOption.js        new
+src/models/index.js                            + registration + belongsTo category
+src/services/guestOption.service.js            new — the shared body
+src/services/guestRelationshipOption.service.js    new — thin binding
+src/services/guestFoodPreferenceOption.service.js  new — thin binding
+src/controllers/guestOption.controller.js      new — the shared HTTP layer
+src/controllers/guest*Option.controller.js     new — thin bindings
+src/routes/guest*Option.routes.js              new — CRUD, shaped like eventCategory.routes.js
+src/app.js                                     + 2 mounts
+```
+
+The two lists are the same table twice over, so the logic is written **once** and
+bound per list. Two hand-maintained copies drift, and the first symptom would be
+a validation firing on one dropdown and not the other. The thin wrappers exist
+only to carry their own module slug (permissions, approval queue) and error
+wording.
+
+`listForCategory()` is the resolver the app will call: active rows for the
+category, falling back to the NULL-category list when the category has none or
+the event has no category.
+
+**Permissions seeded** by `guest-option-permissions.seeder.js` — without them the
+routes 403 for EVERYONE including the Super Admin, because `hasPermission()`
+checks the row and not the role name.
+
+The grants copy `event_categories` exactly, read from the live rows rather than
+invented, because the two roles are deliberately not alike:
+
+```
+role 2  Super Admin   all four, requires_approval = 0
+role 3  Admin         view = 0, create/edit/delete = 1 -> approval queue
+```
+
+A new module that quietly skipped the approval queue would be a hole, not a
+convenience. 2 modules, 8 permissions, 16 grants; a second run reports 0/0/0.
+
+### 418. Verified
+
+```
+node --check (every new file)                  clean
+apply-guest-option-tables.js (dry run)         reads FK type INT UNSIGNED
+apply-guest-option-tables.js --apply           2 tables, 14 columns each — LOCAL
+guest-options.seeder.js                        13 categories, 196 + 160 rows
+guest-options.seeder.js (re-run)               0 added, 356 already present — idempotent
+spot check                                     apostrophes intact ("Bride's Father"),
+                                               order preserved, Religious food list
+                                               correct incl. "Prasadam / Temple Meal"
+require('./src/app')                           loads, routes mount, models register
+listForCategory(1) / (5) / (null)              16 wedding values; "Other" and
+                                               no-category both fall back to 7
+guest-option-permissions.seeder.js             2 modules, 8 permissions, 16 grants
+guest-option-permissions.seeder.js (re-run)    0 / 0 / 0 — idempotent
+grant shape vs event_categories                identical: role 2 all-zero,
+                                               role 3 approval on write only
+```
+
+### 419. Open
+
+1. **Admin frontend screens not built** (agreed as part of this phase, not reached).
+   The API behind them is complete and permissioned; only the pages are missing.
+3. **Production not migrated** — neither table, neither the 13 categories.
+4. **No browser testing**, carried from §408/§401/§389.
+5. **Nothing of the push notification feature itself exists** — no membership
+   record, no `fcm_token` column, no send/history/schedule tables, no scheduler.
+6. `EVENT_QR_SECRET` **still unset on Render**, so QR codes are being issued
+   under the `ACCESS_TOKEN_SECRET` fallback. Setting it later **breaks every code
+   already printed** — and QR is about to become the main way guests join.
+7. Everything carried from §408: OAuth bypasses 2FA, no payment/WhatsApp/email
+   provider.
+
+### 420. The admin screens — BUILT (closes §419.1)
+
+```
+src/hooks/use-menu-management.ts                    + GuestOption type + 2 hook sets
+src/app/admin/menu-management/guest-relationships/page.tsx        new
+src/app/admin/menu-management/guest-food-preferences/page.tsx     new
+src/app/admin/menu-management/_components/taxonomy-manager.tsx    + 2 opt-in props
+src/components/admin/app-sidebar.tsx                + 2 entries, + UtensilsCrossed
+src/database/seeders/guest-option-nav-keys.seeder.js               new
+```
+
+Filed under **Menu Management**, beside Event Categories / Types / Religions,
+because they are category-scoped taxonomies of exactly the same shape and are
+edited the same way. `createTaxonomyHooks` and `TaxonomyManager` were reused
+whole — no new list, form, table or delete dialog was written.
+
+**`TaxonomyManager` needed two things it did not have**, and both are opt-in so
+the three existing screens are untouched:
+
+| Prop | Why |
+|---|---|
+| `scopeSelects[].optional` | Every scope select was mandatory. Correct for Event Types and Religions — a record with no scope can never be reached by the Menu form's cascade — but here a NULL category **is the fallback list**, and without this there was no way to author one. |
+| `hiddenFields` | Description, icon and colour were all required. These lists are ~356 plain labels ("Vegetarian", "Bride's Father"); demanding artwork for each is busywork nothing renders. |
+
+Two details worth keeping:
+
+- **Radix Select cannot hold `''` as an item value** — it reserves it for the
+  placeholder — so the empty choice uses a `__none__` sentinel that is mapped
+  back to `null` on save and never leaves the component.
+- The payload sends `null`, not `0`, for an empty scope. `Number('')` is `0`,
+  which would have written a foreign key pointing at category id zero.
+
+In the table, a row with no category reads **"All categories (general)"** rather
+than the usual dash: on an optional scope, absence is a meaning, not a gap.
+
+### 421. ⚠ A bug introduced and caught in the same session
+
+The permissions seeder was rewritten mid-session and the rewrite hardcoded
+`requires_approval = 0` on every grant, dropping the per-action copy §417
+describes. The rows already in the database were correct, so **nothing failed and
+nothing looked wrong** — the damage would only have appeared the first time it
+ran against production, handing role 3 (Admin) unreviewed create/edit/delete on
+a module its sibling gates.
+
+Found by reading §417 back against the file rather than by any test. Now reads
+the flag per action from the live `event_categories` grants and copies it.
+
+Proved rather than assumed: role 3's grant for
+`guest_food_preference_options.create` was deleted, the seeder re-run, and the
+row came back with `requires_approval = 1`.
+
+> The general shape of this: a seeder that "already reports 0 added" is not
+> evidence that it is correct, only that it has nothing to do.
+
+### 422. Verified
+
+```
+tsc --noEmit (admin frontend)               clean, 0 errors
+node --check (every new/changed backend file)   clean
+require('./src/app')                        loads with both routes mounted
+service tests (12)                          12/12 — category scoping, fallback for
+                                            "Other" and for no-category, food list
+                                            separate from relationships, duplicate
+                                            refused in same category, SAME name
+                                            allowed in a different one, inactive
+                                            hidden from the form list, bad category
+                                            id refused, admin filter by category,
+                                            admin filter for the fallback rows
+guest-option-nav-keys.seeder.js             2 keys + 2 values; re-run 0/0
+guest-option-permissions.seeder.js          re-run 0/0/0 after the fix
+grant shape vs event_categories             identical, per action, incl. approval
+seeded data spot check                      196 relationship + 160 food rows,
+                                            18 active categories
+```
+
+**NOT verified — and this is the standing gap, now four features deep:**
+
+- **No browser click-through.** The two new admin pages have never been opened.
+  `tsc` proves they compile, not that the form saves or the category filter
+  filters.
+- **No live HTTP call.** The local server was not running and this session does
+  not start servers, so every route was exercised through its service, not
+  through Express, its middleware or its permission checks.
+
+### 423. Open
+
+1. **Production not migrated** — neither table, neither the 13 categories,
+   neither the nav keys, neither the permissions. Four seeders/tools to run with
+   `--prod --apply`, in order: tables, options, permissions, nav keys.
+2. **Nav labels are English-only.** `nav.religions` was checked first and carries
+   exactly one row, so the two new keys match it. Other languages will show the
+   English string until the Translations screen fills them.
+3. **ESLint is not configured in the admin frontend** — `next lint` prompts to
+   set it up, so there is no lint gate on any of these files. Pre-existing, not
+   introduced here, but it means `tsc` is the only automated check.
+4. **Nothing of the push notification feature itself exists yet** — no membership
+   record, no `fcm_token`, no send/history/schedule tables, no scheduler. The
+   agreed order from here is: app flow changes, then push notifications.
+5. Everything carried from §419: `EVENT_QR_SECRET` unset on Render (setting it
+   later breaks codes already printed), no browser testing, OAuth bypasses 2FA,
+   no payment/WhatsApp/email provider.
+
+---
+
+## Session 36 — Guest self-registration (the QR join flow) — BUILT
+
+> **Backend:** `Event_Management_Admin_Backend` · **App this serves:** `Event_Invite_Mobile_App`
+> Step 2 of the agreed order (admin screens -> app flow -> push notifications).
+> **Local only. Production NOT migrated. Uncommitted.**
+
+### 424. No `event_members` table — participants ARE guests
+
+An earlier sketch had a join table for "who is inside this event". It was dropped
+after reading the app's own model: `participant_data.dart` says the
+"**Participants** module (also reused by the **Guests** module)". They are one
+concept under two names, and `event_guests` already carried every field the
+registration form collects **except gender**.
+
+A second table would have meant two rows per person, a join to answer "who is
+coming", and a standing question of which one the RSVP donut counts.
+
+So `event_guests` grew four columns instead
+(`apply-guest-participant-columns.js`, local applied):
+
+```
+gender                     ENUM(male|female|other) NULL   the one missing field
+participant_client_id      -> website_clients  SET NULL   the guest's OWN account
+relationship_option_id     -> guest_relationship_options      SET NULL
+food_preference_option_id  -> guest_food_preference_options   SET NULL
+invite_source              + 'qr'
+idx_event_guests_participant (participant_client_id, deleted_at)
+```
+
+> ⚠ **`participant_client_id` is NOT `website_client_id`.** Both are
+> website_clients ids and they mean opposite things — the latter is the HOST,
+> denormalised from the event. Reusing it would have made every guest look like
+> their own host and silently widened what `/client/guests` returns.
+
+**The option FKs sit ALONGSIDE the labels, never instead of them.** What a guest
+answered is a historical fact: if an admin renames "Vegetarian" or deletes it,
+Mohammed Ali must still have said "Vegetarian". Hence `ON DELETE SET NULL` and
+the text column staying authoritative.
+
+### 425. The endpoints, and why three of them are public
+
+```
+POST /public/events/qr/resolve         narrowed event + both dropdowns
+POST /public/events/join/otp/request   the "Verify" button
+POST /public/events/join/otp/verify    -> issues the session
+POST /client/events/join               the Confirm step        (authenticated)
+GET  /client/events/joined             My Events, guest side   (authenticated)
+```
+
+The first three are unauthenticated **by necessity** — the person scanning has
+no account yet. What stops this being an open account factory is that every one
+of them re-verifies the QR token: **an invitation you physically hold is the
+capability**, and a token that does not decrypt gets no further. This is the
+one route in the system that creates a `website_client` without an admin or a
+signup form, and that guard is the whole reason it is safe.
+
+`/public/events/qr/resolve` returns a **narrowed** payload. This is not caution
+for its own sake — `clientEvent.controller.js`'s `decodeQr` is behind a session
+precisely because its payload carries `website_client_id` and
+`subscription_plan_id`, and its comment says a public scanner "wants its own
+endpoint returning a narrowed payload, not this one made public." This is that
+endpoint, written to that instruction.
+
+**`join` is authenticated on purpose.** The number was OTP-verified during step
+2, so the guest row is written against `req.websiteClient` and **the mobile in
+the request body is ignored entirely**. Reading it from the form would let
+somebody verify their own phone and then register as another person. There is a
+test that posts a different number and asserts it is discarded.
+
+Three more rules the flow encodes:
+
+- **Re-joining updates, never duplicates.** Matching is by mobile within THIS
+  event, so a host who already imported Mohammed Ali gets one row, with his
+  answers attached to the row the host made.
+- **`invite_source` is not overwritten on that path.** The model defines it as
+  how a person FIRST came in, so a guest the host added by WhatsApp stays
+  `whatsapp` even though they completed the form by QR.
+- **"No. of Guests with you" counts people BROUGHT.** So `plus_one_count = n`
+  and `party_size = n + 1`. Storing the field directly as `party_size` would
+  undercount every booking by one head.
+
+### 426. ⚠ `website_clients.email` had to become NULLABLE
+
+The first registration failed outright:
+
+```
+SequelizeValidationError: WebsiteClient.email cannot be null
+```
+
+The form marks Email "(Optional)" and means it — a guest scanning a QR proves a
+MOBILE NUMBER. Both alternatives were worse: requiring an email contradicts the
+design and blocks guests who have none, and inventing one
+(`9998887771@no-email.invalid`) writes a fake address into a UNIQUE column that
+other code is entitled to believe is real, and something would eventually mail
+it.
+
+`apply-website-client-optional-email.js`, local applied. **The unique index is
+untouched and still safe** — MySQL permits many NULLs in a unique index, so
+phone-only accounts do not collide, and an account that later adds an email is
+still held to being the only one with it. Nothing else starts accepting a blank
+email: the website signup and the admin create validate it in their own
+services.
+
+**Two existing lines became newly reachable and were fixed in the same change**
+(`clientPortal.service.js` `deleteMyAccount`):
+
+1. The soft-delete stamp would have written the literal string
+   `"null.deleted.1788…"` into the email column. It now only stamps an address
+   that exists — a NULL does not hold the unique index hostage, so there is
+   nothing to free.
+2. An account with neither password nor email hit the email-confirmation branch,
+   which rejects every possible answer including the right one. It now says so
+   plainly instead of asking for an address that does not exist.
+
+### 427. Verified — over real HTTP, not just in-process
+
+The app was booted on its own port (5199) and driven with `fetch` exactly as the
+Flutter app will, then every assertion re-read from the DATABASE rather than
+from the response body.
+
+```
+guest registration E2E                47/47   resolve -> otp -> verify -> join
+  narrowed payload                    leaks no website_client_id / plan id
+  invalid QR                          400, and cannot mint an OTP (no account factory)
+  join without a session              401
+  every field                         gender, both labels AND both FKs, special
+                                      request, guest message -> notes,
+                                      response yes -> rsvp_status accepted,
+                                      responded_at stamped
+  guest counting                      guest_count 1 -> plus_one_count 1, party_size 2
+  spoofed mobile in the body          IGNORED, row keeps the verified number
+  re-join                             200 not 201, still exactly ONE row
+  host-added guest scans              host row UPDATED not duplicated, account
+                                      linked, invite_source stays 'whatsapp'
+  My Events (guest side)              lists it, and leaks no host id
+
+regressions
+  client-security                     36/36
+  client-2fa-login                    13/13
+  client-delete-account               20/20  incl. "email FREED" — the guard did
+                                             not break stamping for real emails
+  client-guest-profile                74/74
+  client-billing                      58/58
+  push-notification-config            14/14
+  guest options service               12/12
+```
+
+**Three suites fail, and none of them from this work:**
+
+| Suite | Why |
+|---|---|
+| `client-rsvps`, `client-messages`, `client-settings-api` | `test@example.com` has **2FA enrolled**, so login returns `requires_2fa` + `challenge_token` and no `client`. These tests do not handle that branch, so `clientId` is undefined. **The failure happens at the login step, before any code changed here runs** — confirmed by calling the endpoint directly and reading the response. |
+| `guest-import` | Depends on a fixture event called "Our Special Wedding". `SELECT` confirms **0 matching events** in this database. |
+
+> Worth fixing separately: a shared interactive account with 2FA on it silently
+> breaks any test that logs in with a password. Either the tests handle the
+> challenge or they get their own account.
+
+**NOT verified:** no Flutter app exists against these endpoints yet, and no
+browser touched anything. The contract is proven; the client is not written.
+
+### 428. Open
+
+1. **Production not migrated** — now SIX things, in order:
+   `apply-guest-option-tables` -> `guest-options.seeder` ->
+   `guest-option-permissions.seeder` -> `guest-option-nav-keys.seeder` ->
+   `apply-guest-participant-columns` -> `apply-website-client-optional-email`.
+2. **The app itself is unchanged** — every screen in §425's flow is still the old
+   Login/Register. The API is ready and waiting.
+3. **OTP is decorative**: `OTP_ACCEPT_ANY=true` locally and there is no SMS
+   provider, so possession of the number is NOT actually proved yet. Turn it off
+   the day an SMS provider exists; nothing else in the flow changes.
+4. **Push notifications** are the next step and nothing of them exists.
+5. `EVENT_QR_SECRET` **still unset on Render** — and QR is now genuinely the
+   front door, so setting it later breaks every code already printed.
+6. Everything carried from §423.
+
+---
+
+## Session 37 — Push Notifications: BUILT, and delivering for real
+
+> **Backend:** `Event_Management_Admin_Backend` · **Portal:** `event_client_single`
+> **App:** `Event_Invite_Mobile_App` · **Admin:** `Event_Management_Admin_Frontend`
+> Step 3 of the agreed order, and the last of it. Also finished the app half of
+> Session 36's join flow.
+> **Local only. Production NOT migrated. Uncommitted.**
+
+### 429. Push is a CHANNEL, not a second product
+
+The obvious sketch was `push_notifications` + `push_notification_recipients`.
+It was dropped after reading what already existed:
+
+```
+event_message_campaigns   audience / group_ids / guest_ids / recipients_count /
+                          status / scheduled_at / sent_at — and its `channel`
+                          ENUM ALREADY LISTED 'push'. Somebody planned for this.
+event_messages            one row per recipient, with sent_at / delivered_at /
+                          opened_at / clicked_at — which IS the mockup's
+                          Sent / Delivered / Opened / Clicked / Failed card row
+clientMessage.service     already resolves All / Groups / Specific guests,
+                          already refuses a schedule in the past, already lists
+                          campaigns and computes stats
+```
+
+Parallel tables would have duplicated all of it and then split "messages sent to
+this guest" across two places Analytics would union forever.
+
+`apply-push-notification-support.js` (local applied, idempotent) therefore adds:
+
+```
+client_device_tokens              the ADDRESS to send to (new table)
+event_messages.channel += 'push'
+event_message_campaigns  += image_url, click_action, deep_link,
+                             data_payload JSON, push_options JSON
+```
+
+**A device token is not a session.** It nearly became a column on
+`client_sessions`. Wrong in both directions: signing out and in again makes a
+second session for the same handset (a duplicate address), and a session
+expiring while the app stays installed makes a live device with no address.
+FCM's identity for a device is the token, so it is `UNIQUE` in its own table.
+
+`push_options` is one JSON column rather than eleven scalars: badge, priority,
+TTL, collapse key and the delivery toggles are **FCM's** vocabulary, not ours.
+A column each means a migration whenever Google adds a field, plus eleven
+always-NULL columns on every email campaign ever sent.
+
+### 430. No `firebase-admin`, because the hard half already existed
+
+`pushNotificationConfig.service` already signs an RS256 JWT and exchanges it at
+`oauth2.googleapis.com` for a `firebase.messaging` token — that is what the
+admin panel's **Test Connection** button does. Everything after it is one HTTPS
+POST per device. `pushSender.service.js` reuses that rather than adding a 50MB
+SDK to repeat it.
+
+Two things that are not optional:
+
+- **The access token is cached** (1h, keyed by config id). A 1,000-guest send
+  would otherwise be 1,000 extra round trips to Google, which rate-limits them.
+- **FCM HTTP v1 sends to exactly ONE token per call.** `registration_ids` was
+  the legacy API, removed 2024. So 1,000 devices IS 1,000 requests — batched 25
+  at a time, because `Promise.all` over a thousand sockets gives ECONNRESET.
+
+A token FCM rejects as UNREGISTERED/INVALID is **deactivated with the reason,
+not deleted** — that reason is the honest explanation behind a Failed row.
+
+### 431. Reachability is a different question for push
+
+`reachable(guest, 'push')` does not look at any field on the guest. A guest is
+reachable only if they **installed the app** — i.e. they have a
+`participant_client_id` (they joined via §425's QR flow) and that account has a
+live device token.
+
+The lookup is done **once per audience**, not per guest: production is ~374ms a
+query, so a 500-guest event would spend three minutes deciding who to send to.
+
+The wording matters and is asserted in the tests. "No phone number on file"
+would send a host into the guest list to fix something already filled in and
+irrelevant. It says instead:
+
+> *N guests have not installed the app and will be skipped. A guest becomes
+> reachable once they join through the mobile app and allow notifications.*
+
+### 432. What the four screens became
+
+`event_client_single`, under **Messages**:
+
+```
+/dashboard/messages/notifications           Push Notifications (compose + stats)
+/dashboard/messages/notifications/history   Notification History (filters)
+/dashboard/messages/notifications/schedule  Schedule for Later (queue)
+```
+
+Send and Schedule share ONE `PushComposer` — the same form with a different
+default on one radio. Two copies drift the first time a field is added to one.
+
+Three deliberate departures from the mockups:
+
+1. **No sound control at all.** Custom sound must be compiled into the app
+   bundle (the handset plays a file it already has), so it cannot be chosen at
+   send time; and Default-vs-Silent is overridden by the guest's own
+   notification settings on both platforms. Every notification uses the device
+   default. *Removed in two passes — Custom first, then the whole section.*
+2. **"Users by Segment / by Role" -> "By Group / Specific Guests".** Segments
+   and roles do not exist in this schema; guest **groups** do, and
+   `resolveAudience` already handled them. Specific Guests got a real
+   server-side searchable picker whose selection survives searching.
+3. **The numbers are real.** The mockup shows 1,256 sent / 83.4% delivered.
+   These start at zero and explain any gap.
+
+**Advanced Options was rebuilt after a design bug:** its toggle sat at the
+bottom of the Content card (left column) while the panel rendered in the MIDDLE
+column. Clicking bottom-left and having something appear mid-right reads as
+nothing happening. It is now a full-width bar numbered **4**, expanding in place
+beneath itself, with an *"N changed"* badge so a customised setting is visible
+without opening it.
+
+### 433. The scheduler is STARTED — that was the whole point
+
+`campaignScheduler.service.js`, ticking every minute, **called from
+`server.js`**. The project already contained `emailScheduler.service` that
+nothing ever calls, which is exactly how "Schedule for Later" becomes a button
+that saves a row and silently does nothing forever.
+
+A due campaign is claimed by `UPDATE ... WHERE id = ? AND status = 'scheduled'`
+before any work happens. Read-then-write leaves a window where two workers both
+believe they own it and the guests get the notification twice.
+
+### 434. The app: the missing link, and three bugs behind it
+
+`notification_service.dart` fetched the FCM token and **`print`ed it**. Nothing
+sent it anywhere. Firebase was configured, the backend could sign requests, the
+composer could pick an audience — and every send found zero devices.
+
+```
+device_repository.dart   NEW — POSTs to /client/devices
+session_provider.dart    registers on sign-in AND on every launch (FCM rotates
+                         tokens); RELEASES on sign-out, or the next person to
+                         sign in on that handset gets the previous account's
+                         notifications
+main.dart                onTokenRefresh -> re-register, via a ProviderContainer
+                         built by hand so a rotation outside the widget tree
+                         still reaches the server
+```
+
+Registration is never awaited and never throws: a failure here must not break a
+sign-in that otherwise worked.
+
+Then, in order, three things that each looked like "push is broken":
+
+1. **Foreground messages were invisible.** Android does not draw a system
+   notification while the app is in the foreground; it calls `onMessage`, which
+   only printed. Fixed with `flutter_local_notifications`.
+   WARNING: that plugin needs `isCoreLibraryDesugaringEnabled = true` +
+   `desugar_jdk_libs` in `android/app/build.gradle.kts` or the build fails
+   outright.
+2. **Tap routing ignored the portal's links.** It read `data['route']`; the
+   composer writes `deep_link` as `eventinvit://event/22`. Every notification
+   sent from the portal would have landed on the fallback screen. Now reads
+   both and strips the scheme.
+3. **`/event/22` matched no route.** The event screens carry no id — they read
+   `selectedEventIdProvider`, which a list tap sets. A deep link has no list
+   tap. Added `/event/:id`, **declared LAST** among `/event/...` routes: first
+   match wins in go_router, so placed earlier it would swallow `/event/wedding`
+   as an id of "wedding".
+
+### 435. Also fixed on the way past
+
+- **Admin push config crashed on save.** The server answers
+  `{ data: { pushNotificationConfig } }`; three calls in
+  `use-push-notification-configs.ts` read `data.config` — always undefined, so
+  `saved.id` threw. The save had ALREADY SUCCEEDED and the toast said so, which
+  made a working save look broken. One `unwrapConfig()` now accepts either key.
+- **`getStats` had no Opened/Clicked.** Added from `opened_at`/`clicked_at`
+  rather than faking percentages in the UI. Counted from the TIMESTAMP, not the
+  status: a guest who opened a notification that later failed to re-deliver
+  still opened it.
+- **go_router join-flow fix** (Session 36's app half): the gate evaluates the
+  BASE match list, so during `/login -> push -> /scan-qr -> push -> /register`
+  it still read `/login`. Verifying the OTP signed the person in and the gate
+  threw them to `/home` mid-form. Fixed with a `joinFlowActive` flag AND by
+  suppressing the router refresh during the flow — a refresh rebuilds the stack
+  and loses the `extra`, which is what produced the empty "Join Event" screen.
+- **Home showed no joined events.** `/client/events` is owner-scoped; a
+  participant owns nothing. `myEventsProvider` now merges `/client/events/joined`.
+
+### 436. Verified — it actually delivers
+
+`tests/push-notification-send.test.js` — new client, plain send, advanced send,
+self-cleaning: **35 passed, 0 failed.**
+
+Then live, to a real handset (Test Client 9884699435, guest 145 on event 22):
+
+```
+firebase   : active  (config "GpsCam", project eventinvite-61656)
+recipients : 1   skipped: 0
+delivery   : {"attempted":true,"delivered":1,"failed":0}
+row        : guest=145 status=sent
+unread     : 6      <- the badge count, from OUR db
+```
+
+and on the phone:
+
+```
+[push] device registered (eWE08EfhQUKo...)
+Received a foreground message: Wedding Invitation
+FCM: navigating to /event/22
+```
+
+Guards proven by test: TTL 999,999,999 clamped to 2,419,200 (FCM's 28-day
+ceiling); the reserved key `from` dropped (it 400s the whole send); a rejected
+token retired with its reason; and **the in-app row written even though FCM
+refused a token** — which is the point of keeping read/unread in our own DB.
+
+### 437. Open
+
+1. **Production not migrated** — now SEVEN, §428's six plus
+   `apply-push-notification-support`.
+2. **Opened / Clicked are always 0.** The columns exist, the History screen
+   shows them, the send path is complete — but the app never reports back that
+   a notification was opened or tapped. Nothing writes them.
+3. **Web push cannot work**: `web/firebase-messaging-sw.js` still missing.
+4. **Only ONE guest is push-reachable** in local data, because reachability
+   requires an app install. Nothing is wrong; the number is honest.
+5. `mobile_scanner` uses the old Kotlin Gradle Plugin — builds today, a future
+   Flutter will refuse it.
+6. Everything carried from §428, including `EVENT_QR_SECRET` unset on Render
+   and `OTP_ACCEPT_ANY` still on.

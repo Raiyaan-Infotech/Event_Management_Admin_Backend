@@ -94,6 +94,11 @@ db.EventType = require('./EventType')(sequelize, Sequelize);
 db.Religion = require('./Religion')(sequelize, Sequelize);
 db.EventMenu = require('./EventMenu')(sequelize, Sequelize);
 
+// The two dropdowns the mobile app's guest registration form offers, each
+// scoped per event category with a NULL-category fallback list.
+db.GuestRelationshipOption = require('./GuestRelationshipOption')(sequelize, Sequelize);
+db.GuestFoodPreferenceOption = require('./GuestFoodPreferenceOption')(sequelize, Sequelize);
+
 // Invitation templates — the catalogue the Create Template wizard authors.
 // Distinct from the Website Builder's `company_templates` (a website theme).
 db.EventTemplate = require('./EventTemplate')(sequelize, Sequelize);
@@ -134,6 +139,7 @@ db.ClientPaymentMethod = require('./ClientPaymentMethod')(sequelize, Sequelize);
 // and revocation possible at all — before it, website-client tokens were
 // stateless JWTs with nothing to list and nothing to revoke.
 db.ClientSession = require('./ClientSession')(sequelize, Sequelize);
+db.ClientDeviceToken = require('./ClientDeviceToken')(sequelize, Sequelize);
 db.ClientTwoFactor = require('./ClientTwoFactor')(sequelize, Sequelize);
 db.ClientBackupCode = require('./ClientBackupCode')(sequelize, Sequelize);
 
@@ -346,6 +352,12 @@ db.Religion.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: '
 db.Religion.belongsTo(db.EventType, { foreignKey: 'event_type_id', as: 'eventType' });
 db.EventType.hasMany(db.Religion, { foreignKey: 'event_type_id', as: 'religions' });
 
+// Guest registration dropdowns. No matching hasMany on EventCategory: these are
+// read one category at a time by the form, never eager-loaded onto a category
+// listing, and a hasMany would invite exactly that.
+db.GuestRelationshipOption.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'category' });
+db.GuestFoodPreferenceOption.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'category' });
+
 db.EventMenu.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'category' });
 db.EventMenu.belongsTo(db.EventType, { foreignKey: 'event_type_id', as: 'eventType' });
 db.EventMenu.belongsTo(db.Religion, { foreignKey: 'religion_id', as: 'religion' });
@@ -420,6 +432,8 @@ db.WebsiteClient.hasMany(db.ClientNotificationPref, { foreignKey: 'website_clien
 // session and load the client in ONE query — production is ~374ms per round
 // trip, so a second lookup would double the cost of every authenticated request.
 db.ClientSession.belongsTo(db.WebsiteClient, { foreignKey: 'website_client_id', as: 'client' });
+db.ClientDeviceToken.belongsTo(db.WebsiteClient, { foreignKey: 'website_client_id', as: 'client' });
+db.WebsiteClient.hasMany(db.ClientDeviceToken, { foreignKey: 'website_client_id', as: 'deviceTokens' });
 db.WebsiteClient.hasMany(db.ClientSession, { foreignKey: 'website_client_id', as: 'sessions' });
 db.ClientTwoFactor.belongsTo(db.WebsiteClient, { foreignKey: 'website_client_id', as: 'client' });
 db.WebsiteClient.hasOne(db.ClientTwoFactor, { foreignKey: 'website_client_id', as: 'twoFactor' });

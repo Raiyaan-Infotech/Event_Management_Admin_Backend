@@ -108,6 +108,11 @@ app.use('/api/v1/event-categories', require('./routes/eventCategory.routes'));
 app.use('/api/v1/event-types', require('./routes/eventType.routes'));
 app.use('/api/v1/religions', require('./routes/religion.routes'));
 app.use('/api/v1/event-menus', require('./routes/eventMenu.routes'));
+// The two dropdowns on the mobile app's guest registration form, per category.
+// Admin-managed rather than hardcoded: a hardcoded list in a Flutter build can
+// only be changed by shipping through app-store review.
+app.use('/api/v1/guest-relationship-options', require('./routes/guestRelationshipOption.routes'));
+app.use('/api/v1/guest-food-preference-options', require('./routes/guestFoodPreferenceOption.routes'));
 // Invitation templates — the super admin's Create Template wizard
 app.use('/api/v1/event-templates', require('./routes/eventTemplate.routes'));
 // The DESIGN family a template or frame belongs to (Elegant, Floral, Minimal).
