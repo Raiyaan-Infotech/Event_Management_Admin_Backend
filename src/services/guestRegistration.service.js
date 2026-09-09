@@ -15,6 +15,7 @@ const relationshipOptions = require('./guestRelationshipOption.service');
 const foodOptions = require('./guestFoodPreferenceOption.service');
 const { OTP_TTL_SECONDS, OTP_MAX_ATTEMPTS } = require('./websiteClientOAuth.service');
 const msg91 = require('./msg91Whatsapp.service');
+const notificationTrigger = require('./notificationTrigger.service');
 
 /**
  * Self-registration: a guest scans the invitation QR and joins the event.
@@ -419,6 +420,16 @@ const join = async (client, payload = {}) => {
     if (fields.name && (!accountName || accountName === clientDigits)) {
         await WebsiteClient.update({ name: fields.name }, { where: { id: client.id }, hooks: false });
     }
+
+    // Trigger Welcome Invitation (checks client portal on/off pref)
+    notificationTrigger.triggerWelcomeInvitation({
+        event,
+        guest,
+        client,
+        companyId: event.company_id,
+    }).catch((err) => {
+        logger.error?.('[guestRegistration.join] Welcome invitation trigger error:', err.message);
+    });
 
     return { event: publicEvent(event), guest, created: !existing };
 };

@@ -93,6 +93,8 @@ db.EventCategory = require('./EventCategory')(sequelize, Sequelize);
 db.EventType = require('./EventType')(sequelize, Sequelize);
 db.Religion = require('./Religion')(sequelize, Sequelize);
 db.EventMenu = require('./EventMenu')(sequelize, Sequelize);
+db.NotificationCategory = require('./NotificationCategory')(sequelize, Sequelize);
+db.NotificationTemplate = require('./NotificationTemplate')(sequelize, Sequelize);
 
 // The two dropdowns the mobile app's guest registration form offers, each
 // scoped per event category with a NULL-category fallback list.
@@ -131,6 +133,8 @@ db.ClientSalesEnquiry = require('./ClientSalesEnquiry')(sequelize, Sequelize);
 // to be notified about. Neither drives delivery yet; see the model headers.
 db.ClientPreference = require('./ClientPreference')(sequelize, Sequelize);
 db.ClientNotificationPref = require('./ClientNotificationPref')(sequelize, Sequelize);
+// Per-event override of an admin notification template — see model header.
+db.EventNotificationTemplatePref = require('./EventNotificationTemplatePref')(sequelize, Sequelize);
 
 // Saved cards — the TOKEN only. See the model header: no card number, no CVC.
 db.ClientPaymentMethod = require('./ClientPaymentMethod')(sequelize, Sequelize);
@@ -351,6 +355,14 @@ db.EventType.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 
 db.Religion.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'category' });
 db.Religion.belongsTo(db.EventType, { foreignKey: 'event_type_id', as: 'eventType' });
 db.EventType.hasMany(db.Religion, { foreignKey: 'event_type_id', as: 'religions' });
+
+db.NotificationTemplate.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'category' });
+db.NotificationTemplate.belongsTo(db.EventType, { foreignKey: 'event_type_id', as: 'eventType' });
+db.NotificationTemplate.belongsTo(db.NotificationCategory, { foreignKey: 'notification_category_id', as: 'notificationCategory' });
+
+db.EventNotificationTemplatePref.belongsTo(db.Event, { foreignKey: 'event_id', as: 'event' });
+db.EventNotificationTemplatePref.belongsTo(db.NotificationTemplate, { foreignKey: 'notification_template_id', as: 'template' });
+db.EventNotificationTemplatePref.belongsTo(db.WebsiteClient, { foreignKey: 'website_client_id', as: 'client' });
 
 // Guest registration dropdowns. No matching hasMany on EventCategory: these are
 // read one category at a time by the form, never eager-loaded onto a category

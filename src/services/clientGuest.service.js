@@ -8,6 +8,7 @@ const {
 const { Op } = Sequelize;
 const ApiError = require('../utils/apiError');
 const notifications = require('./clientNotification.service');
+const notificationTrigger = require('./notificationTrigger.service');
 
 /**
  * Guests.
@@ -388,6 +389,15 @@ const createGuest = async (clientId, companyId, body) => {
         guestId: guest.id,
         companyId: companyId ?? null,
         link: `/dashboard/guests/${guest.id}`,
+    });
+
+    // Trigger Welcome Invitation (respects client portal on/off toggle)
+    notificationTrigger.triggerWelcomeInvitation({
+        eventId: guest.event_id,
+        guest,
+        companyId: companyId ?? null,
+    }).catch((err) => {
+        console.error('[createGuest] Welcome invitation trigger error:', err.message);
     });
 
     return getGuestById(clientId, guest.id);

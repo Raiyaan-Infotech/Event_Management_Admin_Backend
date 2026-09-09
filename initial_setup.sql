@@ -1638,6 +1638,60 @@ CREATE TABLE IF NOT EXISTS `event_types` (
   CONSTRAINT `fk_event_types_category` FOREIGN KEY (`event_category_id`) REFERENCES `event_categories` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB AUTO_INCREMENT=13 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Table structure for `notification_categories`
+CREATE TABLE IF NOT EXISTS `notification_categories` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `description` text COLLATE utf8mb4_unicode_ci,
+  `icon` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT '',
+  `color` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `sort_order` int NOT NULL DEFAULT '0',
+  `is_active` tinyint NOT NULL DEFAULT '1',
+  `company_id` int unsigned DEFAULT NULL,
+  `created_by` int unsigned DEFAULT NULL,
+  `updated_by` int unsigned DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_notification_categories_listing` (`company_id`,`deleted_at`,`is_active`,`sort_order`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO `notification_categories` (`name`, `description`, `sort_order`, `is_active`, `created_at`, `updated_at`) VALUES
+('Event & Invitation', 'Welcome messages, invitations, venue and schedule updates', 1, 1, NOW(), NOW()),
+('RSVP & Participation', 'RSVP confirmations, updates and cancellations', 2, 1, NOW(), NOW()),
+('Schedule & Reminder', 'Event reminders and anniversary/occasion reminders', 3, 1, NOW(), NOW()),
+('System', 'System-generated messages such as new message alerts', 4, 1, NOW(), NOW());
+
+-- Table structure for `notification_templates`
+CREATE TABLE IF NOT EXISTS `notification_templates` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `name` varchar(150) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `notification_category_id` int unsigned NOT NULL,
+  `event_category_id` int unsigned DEFAULT NULL,
+  `event_type_id` int unsigned DEFAULT NULL,
+  `title` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `content` text COLLATE utf8mb4_unicode_ci NOT NULL,
+  `variables_used` json DEFAULT NULL,
+  `image_url` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `channels` json NOT NULL,
+  `is_active` tinyint NOT NULL DEFAULT '1',
+  `sort_order` int NOT NULL DEFAULT '0',
+  `company_id` int unsigned DEFAULT NULL,
+  `created_by` int unsigned DEFAULT NULL,
+  `updated_by` int unsigned DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_notification_templates_category` (`notification_category_id`,`is_active`),
+  KEY `idx_notification_templates_event_category` (`event_category_id`),
+  KEY `idx_notification_templates_event_type` (`event_type_id`),
+  CONSTRAINT `fk_notification_templates_notification_category` FOREIGN KEY (`notification_category_id`) REFERENCES `notification_categories` (`id`),
+  CONSTRAINT `fk_notification_templates_event_category` FOREIGN KEY (`event_category_id`) REFERENCES `event_categories` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_notification_templates_event_type` FOREIGN KEY (`event_type_id`) REFERENCES `event_types` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Table structure for `events`
 CREATE TABLE IF NOT EXISTS `events` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
@@ -1685,6 +1739,23 @@ CREATE TABLE IF NOT EXISTS `events` (
   CONSTRAINT `fk_events_religion` FOREIGN KEY (`religion_id`) REFERENCES `religions` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_events_type` FOREIGN KEY (`event_type_id`) REFERENCES `event_types` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB AUTO_INCREMENT=22 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table structure for `event_notification_template_prefs`
+CREATE TABLE IF NOT EXISTS `event_notification_template_prefs` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `website_client_id` int unsigned NOT NULL,
+  `event_id` int unsigned NOT NULL,
+  `notification_template_id` int unsigned NOT NULL,
+  `enabled` tinyint(1) NOT NULL DEFAULT '1',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_event_template_pref` (`event_id`,`notification_template_id`),
+  KEY `idx_event_template_pref_client` (`website_client_id`),
+  CONSTRAINT `fk_event_template_pref_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_event_template_pref_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_event_template_pref_template` FOREIGN KEY (`notification_template_id`) REFERENCES `notification_templates` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table structure for `faq_categories`
 CREATE TABLE IF NOT EXISTS `faq_categories` (

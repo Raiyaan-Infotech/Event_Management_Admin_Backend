@@ -11100,3 +11100,483 @@ refused a token** — which is the point of keeping read/unread in our own DB.
    Flutter will refuse it.
 6. Everything carried from §428, including `EVENT_QR_SECRET` unset on Render
    and `OTP_ACCEPT_ANY` still on.
+
+---
+
+## Session 38 — Event screen wired to real data, mobile uniqueness closed, WhatsApp OTP delivery, production migrated
+
+> **Backend:** `Event_Management_Admin_Backend` · **App:** `Event_Invite_Mobile_App`
+> **Portal:** `event_client_single`
+> Continuation of Sessions 36–37's guest join / push work. **Backend migrated to
+> PRODUCTION this session** — see §443. App fixes are on the device; not yet a
+> signed release.
+
+### 438. `WeddingHomeScreen` was a hard-coded mockup — every event looked the same
+
+The screen behind "View Event" read no provider at all: a `StatefulWidget` with
+`'Rahul\n& Priya'`, a stock Unsplash photo, and a countdown to `now + 15 days`
+as literal fields. Tapping ANY event card, from ANY event, opened the same
+fake wedding. This is what "view event not going to that particular event"
+turned out to be, once traced.
+
+Converted to `ConsumerStatefulWidget` reading `selectedEventProvider`: hero
+image, `event.hostLine`, date, live countdown derived from the event's own
+`start_date`/`start_time`, and the ceremony card now show the real event.
+Placeholders are em-dashes, not sample data, so a still-loading or unselected
+state doesn't assert a couple that belongs to no one.
+
+**A second, harder bug sat underneath it.** `getEventById` is strictly
+`WHERE website_client_id = clientId` — the HOST's id. A guest who joined by QR
+owns nothing, so the fetch 404s and fixing the UI alone would have swapped one
+wrong wedding for a screen of em-dashes. Added `getEventForViewer` in
+`clientEvent.service.js`: falls back to a participant read via the
+`EventGuest.participant_client_id` row (deliberately NOT `website_client_id`,
+which would let a guest read every event of their own host), stripping
+`website_client_id` / `subscription_plan_id` / `plan` / `qr_token` /
+`qr_issued_at` before returning. `clientEvent.controller.js`'s `getById` now
+calls it instead of the owner-only read.
+
+Verified against real data (not a fixture): a genuine guest/host pair,
+non-owner read returns the full event with zero host-only fields leaked, a
+stranger (non-guest) still gets `null` → 404, and the owner path is unchanged.
+
+### 439. The id never survived to "View Event" — three independent fixes, because one alone kept failing
+
+Root causes, in the order found:
+
+1. `registration_success_screen.dart` called `context.go('/event/wedding')` —
+   an id-less route. Nothing in the join flow set `selectedEventIdProvider`.
+2. §438's mockup screen (above) — fixing (1) alone would have landed on a
+   screen that still ignored the id.
+3. **The QR's own copy of the event id is the right source, not the join
+   response.** `InviteHandoff.details.event.id` is known from `resolve`,
+   before a single form field is filled in — earlier and less fragile than
+   waiting on `result.event.id` from `join`. Selecting from the join response
+   depends on a specific response shape arriving; selecting from the scan does
+   not.
+
+Fixed by (a) threading `eventId` through the success URL, (b) — the load-bearing
+one — calling `ref.read(selectedEventIdProvider.notifier).state = _eventId`
+the MOMENT join succeeds, so the event is already chosen before the Thank You
+screen even renders, independent of the URL. The returning-guest path in
+`scan_qr_screen.dart` (`alreadyJoined` branch, straight to `/home`) had the
+same gap and got the same fix.
+
+**⚠ A shell-escaping mistake while editing (b) turned `/event/$eventId` into
+literal `/event/`.** `/event/` normalises to `/event`, matching no route:
+`GoException: no routes for location: /event` — reported by Jamal pasting the
+exact exception text, which is what pinned it after several rounds of
+re-verifying already-correct code (routing declaration order, backend
+responses) instead of the one broken line. Every other interpolation touched
+this session was swept and confirmed intact. Lesson: **when a user pastes an
+exact error string, that string is the fastest path to the bug — verify against
+it before re-checking things already proven correct.**
+
+Also added a status strip to `WeddingHomeScreen` (`_status`) that shows
+"Loading…" / "Could not load this event: `<error>`" / "No event selected" /
+"Event N not found for your account" — because `.valueOrNull` had been
+collapsing all three states (loading, failed, unselected) into one identical
+blank screen, which is exactly why a real fetch failure would have looked the
+same as "nothing happened."
+
+Full flow re-verified over real HTTP with a genuine QR token from the live
+scanner (not a fixture) against the LOCAL server: resolve → otp/request →
+otp/verify → join → `GET /client/events/:id` as the new participant, 200 with
+full detail and zero host-field leaks, `GET /client/events/joined` lists it.
+Guest row confirmed correct: `gender`, `plus_one_count`/`party_size` (+1 rule
+from §424 held), `rsvp_status`, `participant_client_id` all set.
+
+### 440. `website_clients.mobile` had no uniqueness — email did, mobile never did
+
+Jamal: *"phone number must be unique right but i create same number with two
+account"*. Checked the actual local DB first — **zero duplicates existed**, but
+nothing prevented one. Email has been unique per vendor since the start, in
+both the DB (`uniq_website_client_email`) and the service
+(`assertEmailFree`). Mobile had NEITHER — signup, admin create, and admin edit
+all guarded email and never looked at the number.
+
+This is not cosmetic. `findClientByMobile` — the whole of mobile OTP login —
+does `findOne` on the number; with two rows it signs in whichever the DB
+returns first, and that answer can change between queries.
+
+Fixed in both layers, mirroring the email precedent exactly:
+
+- `assertMobileFree` in `websiteClient.service.js`, wired into `register`,
+  `create`, and `update`. Matches BOTH stored forms (bare digits and last-10),
+  same as `findClientByMobile` itself — guarding only the typed form would let
+  `+919884699435` create a second account the login then confuses with the
+  first.
+- `uniq_website_client_mobile (vendor_id, mobile)` via
+  `apply-website-client-unique-mobile.js` (new tool, same shape as
+  `apply-website-client-optional-email.js`). NULL stays free (mobile is
+  optional). The service guard alone is check-then-write and cannot close a
+  race between two simultaneous requests; the index is what actually can.
+
+**⚠ The index broke a case that wasn't tested before applying it.** A
+soft-deleted account's number still occupies the unique index (it covers the
+whole table, not the paranoid view), so the QR registration path — which looks
+up LIVE rows only, correctly, so a removed account isn't handed to a stranger —
+hit a raw `SequelizeUniqueConstraintError` on create: a 500 instead of a
+message. Fixed by checking for a removed holder first in
+`guestRegistration.service.js`'s `requestOtp`, answering with the same
+"removed previously, contact us" sentence the signup/admin paths already use.
+Reproduced and confirmed fixed with a real soft-deleted row before and after.
+
+Verified against live local data with `9884699435` (an existing account, id
+23): duplicate signup refused, refused even in the `+91 98846 99435` form the
+login also matches, admin create refused, a genuinely new number still
+registers, and editing a client with its OWN unchanged number does not
+self-conflict.
+
+### 441. What "sends the OTP without checking" actually is
+
+Jamal's report: a number that already has an account still gets an OTP from
+the QR screen. Checked and confirmed — the account **is** unique (§440), this
+is a different, deliberate behaviour: `requestOtp` REUSES an existing account
+rather than creating a second one, exactly as designed — "An existing account
+is reused untouched" is how a returning guest can join a second event by
+scanning again.
+
+This is not a hole: the code goes to the real owner's WhatsApp, so a stranger
+typing someone else's number cannot read it and cannot get in. Refusing at the
+QR screen instead ("already registered, log in") gains nothing — the login
+screen sends the identical OTP to the identical number for the identical cost
+— and it actively breaks the one thing QR-join exists for: a signed-out
+returning guest could no longer join a second event by scanning.
+
+Agreed direction, not yet built: keep the reuse, surface it. `account_created`
+already comes back from the endpoint and nothing reads it; the fix is showing
+"This number already has an account — we've sent a code to confirm it's you"
+plus a "Log in instead" link, rather than looking identical to a fresh
+registration. Backend behaviour stays as-is.
+
+### 442. WhatsApp OTP delivery — `msg91Whatsapp.service.js`, and the lockout it can cause
+
+Built per Jamal's instruction: MSG91 WhatsApp only, mobile OTP only, using
+`MSG91_WA_AUTHKEY` / `MSG91_OTP_TEMPLATE` / `MSG91_WA_NUMBER`. One sender
+module, called from the two existing "delivery seam" comments in
+`guestRegistration.service.js` (registration) and `websiteClient.service.js`
+(login) — nothing else touched.
+
+Contract confirmed against MSG91's own docs
+(`https://msg91.com/help/whatsapp/whatsapp-otp`):
+`POST /api/v5/whatsapp/whatsapp-outbound-message/bulk/`, `authkey` header, code
+in `body_1` + `button_1` (copy-code button, on authentication templates only).
+**Never throws** — the OTP hash is stored before the send, so a delivery
+failure costs a retry, not an unverifiable code. **Inspects the response body,
+not just the status** — MSG91 answers 200 with `type:"error"` for an
+unapproved template, which a status-code-only check would misreport as sent.
+
+`tests/msg91-whatsapp-otp.test.js` — 32/32, fully offline (`axios.post`
+stubbed): exact payload shape, authkey never in the body, namespace
+omitted/sent, button on/off via `MSG91_OTP_BUTTON`, number joining
+(`dial_code` + stored 10-digit, no doubling when already prefixed), and every
+failure path (200+error, 401, timeout, DNS failure, empty number) resolving
+rather than throwing.
+
+**⚠ The lockout, hit for real this session.** Jamal added the three keys to
+`.env`, then briefly REMOVED them ("i remove that msg91 key") while
+`OTP_ACCEPT_ANY=false` and `OTP_DEV_ECHO=false` were both already set. Result:
+the code is generated, hashed, stored — and never leaves the server, and no
+guess passes. **Nobody could log in or register**, confirmed by direct test.
+Added `MSG91_OTP_ENABLED` (default true) as the deliberate local off-switch,
+distinct from "not configured": setting it `false` sends nothing, but the code
+is now automatically echoed in the response (same as `OTP_DEV_ECHO`, same
+production hard-block) — so turning delivery off can never again lock every
+account out. This is what Jamal is currently running with locally.
+
+Also fixed while wiring this in: `registration_screen.dart` and
+`login_mobile_screen.dart` both said "enter any 6 digits" — true only while
+`OTP_ACCEPT_ANY` was on, and actively wrong (invites failed attempts against a
+real limit) once it's off. Now says the code wasn't delivered and to retry.
+
+**⚠ Separately, a real WhatsApp message was sent by accident** during a
+diagnostic HTTP probe run against a made-up test number, before it was known
+the keys had been re-added. Caught immediately; every check after that was
+done by seeding the OTP hash directly in the DB rather than through the live
+endpoint.
+
+### 443. `AppToast.show()` defaults to GREEN — every silent error path in registration was mis-coloured
+
+Jamal: *"new register in app that otp is not right show in green"*. Root cause:
+`AppToast.show(context, message, {type = AppToastType.success})` — green is
+the DEFAULT type. Every `on ApiException catch (e) { AppToast.show(context,
+e.message); }` in `registration_screen.dart` therefore announced a FAILURE
+(wrong/expired OTP, failed OTP request, failed Confirm) in the same colour as
+"Mobile number verified" — reading as success and inviting the person to
+proceed to the next step on a code that was rejected.
+
+Fixed all five miscoloured calls in `registration_screen.dart` to state their
+type explicitly (`error` for the three exception paths, `warning` for
+mobile-too-short / verify-first / not-delivered, `success` stays explicit for
+the two genuine successes). Checked the rest of the app for the same pattern:
+`login_mobile_screen.dart` was already correct; `scan_qr_screen.dart`'s one
+`show()` call is a genuine success and was left alone (though also made
+explicit); no other `AppToast.show(context, e.message)` exists anywhere else.
+
+### 444. Production migrated — all seven items from §428/§437, confirmed via schema-audit
+
+Jamal pushed the branch and hit
+`SequelizeDatabaseError: Unknown column 'EventMessageCampaign.image_url'` in
+the live Render log — the exact symptom of running new code against
+old schema. Applied in order (each dry-run verified against production before
+writing, several were already-idempotent no-ops from an earlier partial run
+that got stopped by the permission classifier mid-session):
+
+```
+apply-push-notification-support     --prod --apply   (client_device_tokens,
+                                                        channel += 'push', 5
+                                                        campaign columns)
+apply-guest-participant-columns     --prod --apply   (gender, participant_
+                                                        client_id, 2 option FKs)
+guest-options.seeder                --prod           (already applied: 0 added)
+guest-option-permissions.seeder     --prod           (already applied: 0 added)
+guest-option-nav-keys.seeder        --prod           (already applied: 0 added)
+apply-website-client-optional-email --prod --apply   (already nullable)
+apply-website-client-unique-mobile  --prod --apply   (already present)
+```
+
+`node src/database/tools/schema-audit.js` afterward: **MISSING TABLES: none.
+MISSING COLUMNS: none.** Production and local schemas now match exactly (only
+difference: `SequelizeMeta`, which local doesn't have).
+
+### 445. `EVENT_QR_SECRET` — THREE different keys were live at once, and Jamal's own live env pasted in chat
+
+Jamal asked for a wedding event created live for `jamaludheen779@gmail.com`
+(client id 2, plan 1 — scoped to exactly Wedding → Nikah → Islam, which
+determined the category/type/religion values used). Created directly via
+`clientEvent.service.createEvent`, id 2, "Jamal & Aisha", 18 Dec 2026, Taj
+Coromandel — first attempt rejected on `status: 'published'` (not a real
+value; `STATUS_VALUES` is `draft`/`upcoming`/`cancelled`, `past` is derived and
+deliberately unsettable), corrected to `upcoming`, second attempt succeeded.
+Nothing partial was written from the first attempt — validation runs before
+the transaction.
+
+Scanning it failed: "QR code is not valid." The event-creation script had
+loaded `.env.production` (which HAS its own `EVENT_QR_SECRET`) to reach the
+prod DB — but Render's actual live env, which Jamal then pasted directly into
+chat, has NO `EVENT_QR_SECRET` set at all and falls back to
+`ACCESS_TOKEN_SECRET`. Three different effective keys existed simultaneously:
+
+```
+local .env             EVENT_QR_SECRET set   → key A
+local .env.production   EVENT_QR_SECRET set   → key B  (used to create the event)
+Render (live)           unset, falls back      → key C  (ACCESS_TOKEN_SECRET)
+```
+
+No running server held key B, so both Render and local answered "not valid" —
+correctly, for a token neither could decrypt. Fix identified: add
+`EVENT_QR_SECRET` to Render using the value already in `.env.production`, so
+that env file (which is supposed to mirror Render and currently doesn't)
+becomes true, and the existing token becomes readable. **NOT YET APPLIED** —
+Jamal has not confirmed doing this.
+
+⚠ **`.env.production` having a DIFFERENT key than Render is itself the bug
+worth remembering**: any event created by a script that loads `.env.production`
+is issued a QR code no live server can read, regardless of what Render's own
+`EVENT_QR_SECRET` eventually gets set to, unless the two are made to agree.
+
+**⚠ Jamal pasted his live Render env directly into the conversation**,
+including `DB_PASSWORD`, `GOOGLE_CLIENT_SECRET`, `FACEBOOK_APP_SECRET`,
+`ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET`. Flagged to him; not yet rotated
+as of this writing. Also newly confirmed live in that paste:
+**`OTP_ACCEPT_ANY=true` on PRODUCTION** — any 6 digits pass, right now, and
+combined with mobile OTP login means anyone who knows a registered phone
+number can sign in as that person. Cannot be turned off without MSG91 keys
+also being added to Render first, or every production login breaks instead —
+this is a real open decision, not a settled one.
+
+### 446. Release build command, and why the KGP warning is a red herring
+
+`.env.prod` already existed with the right shape; the release command is
+`flutter build apk --release --dart-define-from-file=.env.prod` (or
+`--split-per-abi` / `appbundle`). Two blockers found and left OPEN rather than
+fixed, since neither was asked for yet:
+
+1. **Debug-signed.** `android/app/build.gradle.kts` release block explicitly
+   uses the debug signing config with a `// TODO: Add your own signing config`
+   comment. Builds and installs, but Play Store will reject it and it can't be
+   upgraded in place by a properly-signed build later.
+2. Production wasn't migrated when this was first asked — now IS (§444), so
+   this blocker is cleared.
+
+The KGP warning (`mobile_scanner` applies Kotlin Gradle Plugin) reappears on
+every release build and is EXPECTED — see §437.5 lineage: `mobile_scanner`
+7.4.0 already guards on `android.builtInKotlin`, but enabling that flag
+requires Flutter 3.47+ per Flutter's own migration guide, and this project is
+on 3.44.5. Confirmed by actually trying it: flipping the flag broke
+`:firebase_core`'s configuration outright. Reverted; the warning is cosmetic
+until the Flutter upgrade happens, not a defect in this build.
+
+### 447. `NotificationsScreen` is a static mockup — pushes route there, but show nothing real
+
+While answering "does a received push show up in the notification list": traced
+`lib/features/home/notifications_screen.dart` and found THREE hard-coded
+`AppCard` items ("Rahul & Priya Wedding", "Mehendi Ceremony", ...) — no API
+call, no provider, no data source of any kind. Session 37's fix (every
+notification tap → `/home?tab=2`) routes correctly TO this screen, but the
+screen itself is blind to whether a notification arrived; it shows the same
+three fake cards regardless.
+
+The backend already has everything needed and unused by the app:
+`GET /client/notifications`, `PUT /client/notifications/:id/read`,
+`PUT /client/notifications/read-all`, `GET /client/notifications/count`
+(`clientPortal.routes.js`, `messageController`) — same auth, same
+`website_clients` account the app already signs into. Not yet wired.
+**Genuinely blocks §432/§437's push feature from reading as complete on
+device**, since the one screen a tap can land on shows nothing real.
+
+### 448. Open
+
+1. **`EVENT_QR_SECRET` still not set on Render** (§445) — now the single most
+   urgent item: it's the reason the just-created live event's QR does not
+   scan, `.env.production` disagrees with Render's actual value, and setting
+   it later invalidates whatever gets printed in the meantime. Only 2 events
+   exist on production, so this is the cheapest it will ever be to fix.
+2. **`OTP_ACCEPT_ANY=true` on PRODUCTION, right now** (§445) — an open
+   security decision, not an oversight: cannot be turned off without MSG91
+   credentials also being added to Render, or logins break entirely.
+3. **Secrets pasted into this chat are unrotated** (§445): DB password, Google
+   and Facebook OAuth secrets, both JWT signing secrets.
+4. **`NotificationsScreen` is still a mockup** (§447) — the app-side half of
+   push notifications is not actually done until this reads real data.
+5. **Account-reuse-on-QR-registration is silent** (§441) — agreed fix
+   (surface `account_created` + "Log in instead") not yet built.
+6. **Release APK is debug-signed** (§446) — fine for testing, not for
+   distribution.
+7. Local currently runs with **`MSG91_OTP_ENABLED=false`** (§442) — deliberate,
+   Jamal's own choice, not a bug; codes are echoed instead of sent.
+8. Carried from §437: Opened/Clicked always 0, web push service worker
+   missing, `mobile_scanner`/KGP warning cosmetic until Flutter 3.47+
+   (confirmed this session, see §446), only one push-reachable guest locally.
+
+---
+
+## Session 39 — Notification Categories and Notification Templates: admin + client portal screens BUILT
+
+> **Date:** 2026-09-08 | **Backend:** Event_Management_Admin_Backend · **Admin:** Event_Management_Admin_Frontend · **Client portal:** event_client_single
+> The backend layer (models, services, controllers, routes, DB migration tools, seeders) was built in an earlier session but never logged. This session built ALL four frontend screens on top of it.
+> **Local only. Production migration status — see §449.**
+
+### 449. Backend recap — built in an earlier session, now documented
+
+The following backend files all exist and are complete. They were never entered into this log before.
+
+**Database tables (created by the tools in src/database/tools/):**
+
+| Table | Tool | Purpose |
+|---|---|---|
+| 
+otification_categories | pply-notification-categories.js | Master data for the Category dropdown. Seeded with 4 rows: Event & Invitation, RSVP & Participation, Schedule & Reminder, System |
+| 
+otification_templates | pply-notification-templates.js | Admin-authored reusable message blueprints; scoped by notification_category, event_category, event_type |
+| event_notification_template_prefs | pply-event-notification-template-prefs.js | Per-event client override (on/off). **No row = ON** — a row is written only when the client actually toggles something |
+
+**Seeders:**
+
+| File | What it seeds |
+|---|---|
+| 
+otification-categories-permissions.seeder.js | Module + permissions + role grants for 
+otification_categories |
+| 
+otification-templates-permissions.seeder.js | Module + permissions + role grants for 
+otification_templates |
+
+**Data-sync tool:**
+
+sync-notification-data-to-prod.js — copies local categories/templates to production, re-resolving all foreign ids by NAME (not by number) because local event_categories.id and prod event_categories.id differ. A dry-run by default; safe to re-run (already-present rows are skipped).
+
+**Backend files:**
+
+| File | Purpose |
+|---|---|
+| src/models/NotificationCategory.js | Sequelize model — 
+otification_categories |
+| src/models/NotificationTemplate.js | Sequelize model — 
+otification_templates. Channels stored as JSON (['in_app','push']); ariables_used derived on save |
+| src/models/EventNotificationTemplatePref.js | Sequelize model — event_notification_template_prefs. No-row = ON contract documented in header |
+| src/services/notificationCategory.service.js | CRUD + duplicate-name check, MODULE_SLUG = 'notification_categories' |
+| src/services/notificationTemplate.service.js | CRUD + extractVariablesUsed() (fixed variable set, not free-form), 
+ormalizeChannels(), category/type cross-validation, duplicate() |
+| src/services/clientEventNotificationTemplate.service.js | Client-portal read+toggle layer. Three queries total for summaryForClient() regardless of event count. Re-checks ownership AND applicability on every toggle |
+| src/controllers/notificationCategory.controller.js | HTTP handlers |
+| src/controllers/notificationTemplate.controller.js | HTTP handlers incl. getVariables (returns fixed AVAILABLE_VARIABLES list) |
+| src/controllers/clientEventNotificationTemplate.controller.js | HTTP handlers: summary, listApplicable, 	oggle |
+| src/routes/notificationCategory.routes.js | Mounted at /api/v1/notification-categories. Full CRUD + status toggle. All behind isAuthenticated + extractCompanyContext + hasPermission |
+| src/routes/notificationTemplate.routes.js | Mounted at /api/v1/notification-templates. Full CRUD + status toggle + duplicate + /variables endpoint |
+| src/app.js | Both routes mounted at lines 111–112 |
+| src/routes/clientPortal.routes.js | Client routes at lines 159, 182–183: GET /client/events/notification-templates/summary, GET /client/events/:id/notification-templates, PATCH /client/events/:id/notification-templates/:templateId |
+| src/models/index.js | Associations wired at lines 359–365: NotificationTemplate → EventCategory, → EventType, → NotificationCategory; EventNotificationTemplatePref → Event, → NotificationTemplate, → WebsiteClient |
+
+**Key design decisions:**
+
+- **AVAILABLE_VARIABLES is a fixed set**, not DB-driven. A free-form variable would render as literal {{whatever}} because no trigger knows how to fill it. The six fixed keys are the only ones the system can actually substitute.
+- **channels is JSON, not ENUM.** A template can target both in_app and push; an ENUM column can only hold one value. 
+ormalizeChannels() rejects anything outside ['in_app', 'push'].
+- **No-row = ON** in event_notification_template_prefs. Every applicable template is enabled by default; a row is created only when a client actually flips a switch. This mirrors ClientNotificationPref's same convention.
+- **Nothing reads EventNotificationTemplatePref to gate a send yet.** The table records the preference so the choice is already correct the day a trigger fires. The model header says so explicitly.
+- **summaryForClient uses 3 queries total** — events, all active templates, all overrides for that client — then resolves counts in-process. Doing it per-event (N+1) would be ~374ms × number-of-events on production.
+
+### 450. Frontend screens BUILT — Admin Portal
+
+**Notification Categories page** (Event_Management_Admin_Frontend):
+
+- Listed under the **Push Notifications** section of the sidebar (same grouping as Push Notification Config).
+- Table: Name, Icon, Color, Sort Order, Status, Actions (Edit / Toggle / Delete).
+- Form card: Name (required), Description, Icon picker (Iconify), Color picker, Sort Order, Is Active toggle.
+- Design pattern reused from Template Categories / Event Categories — same TaxonomyManager-style layout (form card on top, table below).
+- Duplicate-name validation shown inline. Status can be toggled from the list without opening the form.
+
+**Notification Templates page** (Event_Management_Admin_Frontend):
+
+- Listed under **Push Notifications** in the sidebar, beside Notification Categories.
+- Table: Name, Category badge (icon + color), Event Category, Event Type, Channels chips, Status, Actions.
+- Filters: search (name/title/content), notification category, event category, event type, active/inactive.
+- Form card: Name, Notification Category (required dropdown), Event Category (optional), Event Type (cascades from Event Category), Title (with variable inserter), Content (textarea with variable inserter), Channels (multi-select: In-App, Push), Image URL, Sort Order, Is Active.
+- **Variable inserter** — a popover listing the 6 available variables. Clicking one inserts {{key}} at the cursor. Uses the GET /notification-templates/variables endpoint so the list cannot drift from what the backend actually supports.
+- **Duplicate button** — copies a template with  (Copy) suffix, deactivated, same category/type scope.
+- Event Type dropdown is disabled and cleared when Event Category is empty (same cascade logic as Event Menus / Religions).
+
+### 451. Frontend screens BUILT — Client Portal
+
+**Notification Templates Summary screen** (event_client_single, /dashboard/settings/notifications/templates):
+
+- Entry point: every event the client owns, shown as a card/row with the template count split (N active / M total).
+- Clicking an event row navigates to the per-event detail screen.
+- Stats from GET /client/events/notification-templates/summary.
+
+**Per-event notification template toggle screen** (event_client_single, /dashboard/settings/notifications/templates/:eventId):
+
+- Lists all templates applicable to this event's category/type, grouped by Notification Category.
+- Each row: template name, title preview, channel chips, enabled toggle.
+- Toggle calls PATCH /client/events/:id/notification-templates/:templateId with { enabled: bool }.
+- Optimistic UI update — the toggle flips immediately, reverts if the call fails.
+- A banner at the top explains that these choices will apply when automatic notifications are activated (because no trigger fires yet — §452.2 below).
+
+### 452. Open
+
+1. **Production not migrated.** Three tools + two seeders to run, in order:
+   `
+   apply-notification-categories.js   --prod --apply
+   apply-notification-templates.js    --prod --apply
+   apply-event-notification-template-prefs.js  --prod --apply
+   notification-categories-permissions.seeder.js  --prod
+   notification-templates-permissions.seeder.js   --prod
+   `
+   Then run sync-notification-data-to-prod.js --apply to copy any locally-authored categories/templates up.
+
+2. **Nothing reads event_notification_template_prefs to gate a send yet.** The toggle is saved correctly but has no effect on the campaign send path. The campaignScheduler.service.js and pushSender.service.js do not yet consult these prefs. They must check: does this template apply to this event, and is enabled true (or no row, which means true)?
+
+3. **No browser click-through verified.** 	sc --noEmit was not reported as clean for the new frontend files. Run it before pushing.
+
+4. **No templates authored yet.** Both 
+otification_templates and 
+otification_categories tables are empty on local (only the 4 seeded categories). The client portal screens will show "No templates" until an admin creates some.
+
+5. **No nav permission slug gates.** The sidebar entries for Notification Categories and Notification Templates rely on permissions (
+otification_categories.view / 
+otification_templates.view), but those are only present after the seeders run in §452.1 above. Until production is migrated, every user sees a 403 on those pages.
+
+6. Carried from §448: EVENT_QR_SECRET still not set on Render, OTP_ACCEPT_ANY=true on production, secrets pasted into chat unrotated, NotificationsScreen in the app is still a mockup, Opened/Clicked always 0.
+

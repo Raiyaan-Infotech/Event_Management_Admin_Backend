@@ -43,6 +43,7 @@ const TYPE_CATEGORY = {
     // Guests
     guest_added: 'guest',
     guest_imported: 'guest',
+    welcome_invitation: 'guest',
     // Reminders
     event_reminder: 'reminder',
     draft_reminder: 'reminder',

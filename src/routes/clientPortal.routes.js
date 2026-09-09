@@ -13,6 +13,7 @@ const securityController = require('../controllers/clientSecurity.controller');
 const deviceController = require('../controllers/clientDevice.controller');
 const splashController = require('../controllers/clientSplashScreen.controller');
 const guestRegistrationController = require('../controllers/guestRegistration.controller');
+const eventNotificationTemplateController = require('../controllers/clientEventNotificationTemplate.controller');
 const { isWebsiteClientAuthenticated } = require('../middleware/websiteClientAuth');
 const { codeLimiter } = require('../middleware/rateLimit');
 
@@ -150,6 +151,13 @@ router.get('/events/stats', eventController.stats);
 router.get('/events/analytics', eventController.analytics);
 router.post('/events/qr/decode', eventController.decodeQr);
 
+// Per-event notification template toggles — a client's control over which
+// of the admin's applicable templates are on for ONE of their own events.
+// '/events/notification-templates/summary' sits at a different depth than
+// '/events/:id', so it can't collide, but is kept up here with the other
+// literal event routes for the same reason they are.
+router.get('/events/notification-templates/summary', eventNotificationTemplateController.summary);
+
 /**
  * Joining an event by QR — the Confirm step of the app's registration flow, and
  * the whole of the "Existing Participant" flow (which posts only the token).
@@ -170,6 +178,10 @@ router.post('/events', eventController.create);
 router.get('/events/:id', eventController.getById);
 router.put('/events/:id', eventController.update);
 router.delete('/events/:id', eventController.remove);
+
+router.get('/events/:id/notification-templates', eventNotificationTemplateController.listApplicable);
+router.patch('/events/:id/notification-templates/:templateId', eventNotificationTemplateController.toggle);
+router.post('/events/:id/notification-templates/:templateId/test', eventNotificationTemplateController.testTrigger);
 
 /**
  * Guests.
