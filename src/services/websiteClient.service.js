@@ -7,6 +7,7 @@ const ApiError = require('../utils/apiError');
 const logger = require('../utils/logger');
 const { OTP_TTL_SECONDS, OTP_MAX_ATTEMPTS } = require('./websiteClientOAuth.service');
 const msg91 = require('./msg91Whatsapp.service');
+const msg91Sms = require('./msg91Sms.service');
 
 const MODEL_NAME = 'WebsiteClient';
 const MODULE_SLUG = 'website_clients';
@@ -589,12 +590,17 @@ const requestLoginOtp = async (data = {}, vendorId = DEFAULT_VENDOR_ID) => {
 
     // Delivery. The hash is already stored above, so a send that fails costs a
     // retry rather than an unverifiable code — see msg91Whatsapp.service.
-    const delivery = await msg91.sendOtp({
-        dialCode: client.dial_code,
-        mobile: digitsOnly(data.mobile),
-        code,
-        purpose: 'login',
-    });
+    //
+    // Both channels are tried when both are enabled — MSG91_SMS_OTP_ENABLED
+    // defaults to false, so this is a no-op (WhatsApp-only, today's behaviour)
+    // until it is explicitly turned on. SMS is what makes the code box
+    // autofill-able on Android; WhatsApp cannot be autofilled by the OS at all.
+    const mobileDigits = digitsOnly(data.mobile);
+    const [delivery, smsDelivery] = await Promise.all([
+        msg91.sendOtp({ dialCode: client.dial_code, mobile: mobileDigits, code, purpose: 'login' }),
+        msg91Sms.sendOtp({ dialCode: client.dial_code, mobile: mobileDigits, code, purpose: 'login' }),
+    ]);
+    delivery.delivered = delivery.delivered || smsDelivery.delivered;
 
     if (!delivery.delivered) {
         // Only when nothing was sent, and never in production: without this the

@@ -11580,3 +11580,261 @@ otification_templates.view), but those are only present after the seeders run in
 
 6. Carried from §448: EVENT_QR_SECRET still not set on Render, OTP_ACCEPT_ANY=true on production, secrets pasted into chat unrotated, NotificationsScreen in the app is still a mockup, Opened/Clicked always 0.
 
+---
+
+## Session 40 — Trigger hardening, production migrated, and the app's offline + OTP-autofill work
+
+> **Date:** 2026-09-09 | **Backend:** Event_Management_Admin_Backend · **Admin:** Event_Management_Admin_Frontend · **Mobile:** Event_Invite_Mobile_App
+> Production IS migrated this time, verified by schema-audit — §455 replaces §452.1.
+> The backend half was committed by Jamal as `b7401c4`. **The mobile half is uncommitted and untested on a device** — see §462.
+
+### 453. `testTrigger` would fire a Welcome Invitation on ANYBODY's event
+
+Reviewing `notificationTrigger.service.js` (built last session, never reviewed)
+turned up one real hole, and it was not in the trigger itself.
+
+Every other handler in `clientEventNotificationTemplate.controller.js` —
+`summary`, `listApplicable`, `toggle` — reaches the DB through
+`findOwnedEvent(clientId, eventId)`, which filters on id AND owner together so
+"not found" and "not yours" are the same answer. `testTrigger` did not. It
+passed `req.params.id` straight into `triggerWelcomeInvitation`, so any
+signed-in website client could name any event id — including another
+customer's — and the endpoint would:
+
+- send a real in-app notification AND a real push to that stranger's host and
+  guests (the name says "test"; it calls the production trigger directly),
+- leak whether an arbitrary event id exists, via `event_not_found` vs other
+  reasons in the response,
+- put an attacker-supplied `req.body.guest.name` into the title/body those
+  strangers read.
+
+Fixed by calling `service.listApplicable(req.websiteClient.id, req.params.id)`
+first and 404-ing when it returns null — reusing the ownership check that was
+already there rather than writing a second one that could drift from it.
+
+⚠ The endpoint has no frontend caller at all (`POST /client/events/:id/
+notification-templates/:templateId/test`, nothing in `event_client_single`
+references it). It is a Postman-era debugging convenience. Deleting it is
+still the better answer if nobody wants it.
+
+### 454. Templates were found by NAME. One rename would have silently killed them
+
+`findApplicableTemplate` matched `name: { [Op.like]: 'Welcome Invitation%' }`.
+`notification_templates.name` is free text an admin edits in a form, and the
+form gives no hint that its value is load-bearing. Renaming the template to
+"Welcome Invite" — an entirely reasonable edit — made the lookup return null,
+`triggered: false, reason: 'template_not_found'`, and guests silently stopped
+receiving anything. No error, nowhere to see it. The `%` also meant two
+templates starting with the same words were both candidates, resolved by
+whichever sorted first.
+
+Replaced with an explicit `trigger_key` column:
+
+| Piece | What changed |
+|---|---|
+| `apply-notification-template-trigger-key.js` | NEW. Adds `trigger_key VARCHAR(50) NULL` + a UNIQUE index, and backfills the existing `Welcome Invitation%` row with `welcome_invitation` so nothing already wired broke |
+| `NotificationTemplate.js` | `trigger_key` field |
+| `notificationTemplate.service.js` | `SYSTEM_TRIGGERS` (fixed list, same reasoning as `AVAILABLE_VARIABLES`), `normalizeTriggerKey`, `assertTriggerKeyAvailable`, `trigger_key` in `WRITABLE_FIELDS`; `duplicate()` nulls it on the clone |
+| `notificationTemplate.controller.js` / `.routes.js` | `GET /notification-templates/system-triggers`, declared BEFORE `/:id` |
+| `notificationTrigger.service.js` | `TEMPLATE_TRIGGER_NAMES` → `TEMPLATE_TRIGGER_KEYS`, exact match on `trigger_key` |
+| `sync-notification-data-to-prod.js` | Carries `trigger_key`, and skips rather than steals when prod already has that trigger |
+| Admin frontend | "System Trigger" dropdown in the template wizard + review row; `useSystemTriggers` hook; `trigger_key` on the TS types |
+
+UNIQUE is deliberate: only one template may own a trigger, so there is never a
+question of which one fires. `SYSTEM_TRIGGERS` lists only
+`welcome_invitation`, because that is the only trigger with an implementing
+function — `rsvp_confirmation`, `rsvp_declined` and `reminder_24h` are
+reserved keys in `TEMPLATE_TRIGGER_KEYS` with nothing listening for them.
+Creating an "RSVP Confirmation" template still does nothing automatically.
+
+⚠ The dry-run of the new tool crashed the first time against production: the
+backfill SELECT referenced `trigger_key` unconditionally, which does not exist
+yet on a DB the dry run deliberately did not alter. Guarded behind
+`columnExists` and re-run.
+
+### 455. Production migrated — and it was further along than §452 claimed
+
+§452.1 said production had none of it. It had most of it: the three tables and
+all 8 permissions were already present (both seeders reported `0, 0, 0` on a
+re-run, which is what idempotent means here). What was genuinely missing was
+the DATA — prod had exactly one template, "OTP Alret".
+
+Applied:
+
+```
+apply-notification-template-trigger-key.js --prod --apply   (column + unique index)
+sync-notification-data-to-prod.js --apply                    (4 categories, 18 templates)
+```
+
+Two templates skipped by design — "Hindu Wedding Ceremony Details" and
+"Conference Agenda Ready" — because their event TYPES do not exist on
+production, and the tool re-resolves every foreign id by name rather than
+copying a number that would attach them to the wrong type.
+
+`schema-audit.js` afterward: **MISSING TABLES: none. MISSING COLUMNS: none.**
+Prod's Welcome Invitation is id 2 and carries `trigger_key = welcome_invitation`
+(local is id 7). The trigger resolves live.
+
+⚠ Jamal chose "sync everything" over "only Welcome Invitation" when asked, so
+production now carries the demo-ish templates too (Birthday Party Invitation,
+Baby Shower Invitation, Housewarming Invitation, ...). They are inactive-safe
+— nothing fires them, since only `welcome_invitation` has a trigger — but they
+are visible in the admin list.
+
+### 456. Mobile: `const` around a runtime value
+
+`flutter run` failed on `notification_service.dart:182` with "Not a constant
+expression". `_showLocal` declared `const NotificationDetails(...)`, and inside
+it `BigTextStyleInformation(n.body ?? '', contentTitle: n.title)` reads the
+incoming message. Dropped the `const`. The KGP warning printed alongside it is
+still the §437.5/§446 cosmetic one — unrelated, and not what failed the build.
+
+### 457. The Welcome screen flashed before Home, because the router opened on it
+
+Reported as "one time user login then it show directly home page but it show
+welcome home screen". Not a session-restore failure — `restore()` works. The
+router's `initialLocation` was `/login`, so `LoginScreen` (banner image, both
+participant cards) genuinely BUILT on frame one, and only once
+`restore()` resolved did the gate redirect to `/home`. While
+`session.restoring` is true the gate returns null by design, so nothing
+prevented that first paint.
+
+Added `SplashScreen` at `/splash` and made it `initialLocation`. The gate
+grew one rule, placed immediately after the `restoring` check:
+
+```dart
+if (isSplash) return session.isSignedIn ? '/home' : '/login';
+```
+
+`/splash` is deliberately NOT in `_publicRoutes` — it needs its own branch
+either way (in the public set, a signed-OUT user would have sat on it
+forever; out of it, a signed-IN user would have).
+
+### 458. Offline data — cache the ROWS, not the models
+
+No local storage existed beyond `shared_preferences` for appearance settings.
+Added `OfflineCache` on top of that rather than Hive/sqflite: the payload is
+one person's events, a few KB.
+
+The important decision is WHAT is cached. `EventItem.accent` is a `Color` and
+several models are not JSON-encodable, so the cache stores the raw API rows —
+the same shape `_toItem`/`fromJson` already read. The identical mapping runs
+whether the data came off the network or out of storage; there is no second
+code path to keep correct.
+
+`EventRepository.list()`, `.joined()` and `.byId()` now write the cache on
+success and read it on `ApiException.isNetwork`. A 4xx/5xx still throws:
+the server DID answer, and serving cache over that hides a real fault rather
+than a dead connection.
+
+### 459. The global connection strip — and the white band it caused on the way
+
+Asked for "all page show one banner offline or online indicator", so it went
+into `MaterialApp.router`'s `builder` in app.dart, wrapping every screen at
+once.
+
+⚠ **Two things went wrong here, both worth remembering.**
+
+**First, the flag was not good enough to be global.** `isOfflineProvider` was
+originally set only by `EventRepository`'s success/failure callbacks. On a
+screen that fetches nothing (Settings, Theme) it never updated, and after the
+connection returned it stayed stuck on "offline" until something happened to
+refetch. Added `connectivity_plus` and made `ConnectionStatus` fold TWO
+signals together: the interface stream (instant, but only knows whether wifi
+exists — hotel wifi with no upstream reads as online) and real API failures
+(prove unreachability, but only arrive when something called). An interface
+coming back optimistically clears the API flag, or one earlier failure would
+pin the banner open forever.
+
+**Second, wrapping unconditionally repainted the status bar.** The first
+version always wrapped, showing a zero-height strip while connected. A
+zero-height strip is not the same as absent: the wrapper's own
+`Material(color: AppColors.background)` painted the status-bar inset white on
+EVERY screen, and its `SafeArea` consumed the top inset so `Settings`' coloured
+AppBar was pushed down below that white band. Jamal reported it as "topbar has
+full white". The tint now sits BEHIND the inset so that area belongs to the
+strip.
+
+Final behaviour, after Jamal picked it explicitly: **always visible, both
+states** — green "Online", orange "You're offline — showing saved data".
+Compact on purpose (4px padding, 13px icon, `AppTypography.tiny`), because it
+is now permanent furniture on every screen. Hiding it while connected was
+tried first and rejected: it reads as a broken feature when somebody goes
+looking for the indicator and finds nothing.
+
+### 460. Top bar, logout, QR loader
+
+- **Profile icon removed** from the Home header; it duplicated the Settings
+  tab. The bell is now the last item, given a trailing inset, and navigates to
+  `/home?tab=2` (the same route `notification_service.dart` already uses).
+  The 👋 emoji was dropped from the greeting.
+- **Logout felt frozen.** `signOut()` is two sequential round trips (device
+  release, then logout) with nothing on screen. Wrapped in `AppSaveLoader` —
+  the app's existing pattern — with "Logging out…".
+- **QR scan** already dimmed and spun; it now says "Fetching event details…"
+  under the spinner.
+
+### 461. OTP autofill — the SMS path was built, then superseded
+
+Asked whether MSG91 OTP could autofill. Answered "not over WhatsApp, Android's
+SMS Retriever only reads the native inbox" and built the SMS channel to suit:
+`msg91Sms.service.js` (MSG91 Flow API, own `MSG91_SMS_OTP_ENABLED` switch
+defaulting false, dual-send alongside WhatsApp in both
+`guestRegistration.service.js` and `websiteClient.service.js`), plus
+`sms_autofill` wired into `AppOtpField` via the `CodeAutoFill` mixin, plus a
+debug-only app-hash print on the splash screen.
+
+⚠ **That answer was wrong, and Jamal's own screenshot of the MSG91 template
+editor is what caught it.** Meta has its own autofill for Authentication
+templates — the "Zero-tap / One-tap auto-fill" radios — which does not involve
+SMS, DLT registration or TRAI approval at all, and rides the WhatsApp channel
+already configured and paid for. It is strictly the better path here.
+
+What it needs, confirmed against Meta's docs:
+
+```
+package name   com.eventinvite.app
+signature hash B+9yK03Bwjx        (11 chars, computed from the DEBUG keystore)
+intent action  com.whatsapp.otp.OTP_RETRIEVED
+SDK            com.whatsapp.otp:whatsapp-otp-android-sdk:1.0.0
+zero-tap also  a handshake (sendOtpIntentToWhatsApp) BEFORE each send, ≤10 min
+```
+
+⚠ **The hash is the debug keystore's**, and that is currently correct for
+release too — `android/app/build.gradle.kts` still signs release with
+`signingConfigs.getByName("debug")` (§446.1). The day a real release keystore
+exists, the hash changes and zero-tap silently stops working on the store
+build. The template screen allows up to 5 apps, so add the release hash
+alongside rather than replacing.
+
+Jamal created `otp_verify_app` (Authentication, zero-tap, TTL 10 min) so the
+existing `otp_verify` is left alone for whatever else uses it. **It is in Meta
+review — up to 72 hours.** Backend needs no code change to adopt it:
+`MSG91_OTP_TEMPLATE` is read fresh on every send, so swapping the value is the
+whole migration.
+
+### 462. Open
+
+1. **The WhatsApp zero-tap Android side is NOT built** (§461) — no
+   `ReceiveCodeActivity`, no SDK dependency, no handshake. Parked at Jamal's
+   request until Meta approves `otp_verify_app`. Until then WhatsApp falls
+   back to a copy-code message, i.e. today's behaviour.
+2. **The MSG91 SMS code is now redundant** (§461) — `msg91Sms.service.js`, the
+   dual-send in two services, and 6 `.env` vars, all serving a path nobody will
+   take now. Uncommitted, so removal is clean. Decision not made.
+3. **The whole mobile half is uncommitted** — 13 files across
+   `Event_Invite_Mobile_App`, **and none of it has run on a device.**
+   `dart analyze` is clean; that is not the same as working.
+4. **"Store all data at QR-join" is only half done** (§458 caches events and
+   event detail when opened; nothing prefetches the joined event's full data at
+   scan time, which is what was actually asked for).
+5. **The login banner is still `Image.network` on an Unsplash URL** — it fails
+   to a flat colour silently, which is what "img overlay showing but it not
+   currently" was. Should be a bundled asset. Offered, never answered.
+6. `testTrigger` still exists with no caller (§453).
+7. Carried from §452/§448: nothing gates a send on
+   `event_notification_template_prefs` yet; `EVENT_QR_SECRET` still not on
+   Render; `OTP_ACCEPT_ANY=true` on production; secrets pasted into chat
+   unrotated; `NotificationsScreen` still a three-card mockup; Opened/Clicked
+   always 0.
+
