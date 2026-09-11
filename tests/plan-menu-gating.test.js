@@ -352,6 +352,34 @@ async function cleanup() {
     const submitOn = await guestApp('POST', `/client/events/${event.id}/my-rsvp`, { response_type: 'yes', party_size: 2 });
     ok('RSVP back on: guest answers from the RSVP tab -> 200', submitOn.status === 200, `${submitOn.status} ${submitOn.body?.message}`);
 
+    // ══ 7. App features follow the PLAN, not the event ═════════════════════
+    // Chat is an 'app' menu (apply-app-feature-menus.js). The event never lists
+    // it in menu_ids; granting it on mobile is enough for the app to show it,
+    // and the portal never sees it as an event menu.
+    console.log('\n── 7. app features (plan-only, mobile) ─────────────');
+    const [chatRow] = await q("SELECT id FROM event_menus WHERE slug = 'chat' AND menu_group = 'app' AND deleted_at IS NULL");
+    if (!chatRow) {
+        gap('app feature menus exist (run apply-app-feature-menus.js --apply)', false);
+    } else {
+        const planNow = [...withoutRsvp, { menu_id: M.rsvp, for_website: 1, for_mobile: 1 }];
+        const appBefore = await app('GET', `/client/events/${event.id}`);
+        ok('plan without Chat: app event menus have no chat',
+            !(appBefore.data?.event?.menus || []).some((m) => m.slug === 'chat'));
+
+        await planService.update(plan.id, { menus: [...planNow, { menu_id: chatRow.id, for_website: 0, for_mobile: 1 }] });
+        const appAfter = await app('GET', `/client/events/${event.id}`);
+        const webAfter = await portal('GET', `/client/events/${event.id}`);
+        const webOptsAfter = await portal('GET', '/client/event-options');
+        ok('plan grants Chat on mobile: app event shows chat (event menu_ids unchanged)',
+            (appAfter.data?.event?.menus || []).some((m) => m.slug === 'chat')
+            && !(appAfter.data?.event?.menu_ids || []).map(Number).includes(Number(chatRow.id)),
+            JSON.stringify((appAfter.data?.event?.menus || []).map((m) => m.slug)));
+        ok('portal event menus do NOT include the app feature',
+            !(webAfter.data?.event?.menus || []).some((m) => m.slug === 'chat'));
+        ok('wizard (event-options) does NOT offer the app feature',
+            !(webOptsAfter.data?.menus || []).some((m) => m.slug === 'chat'));
+    }
+
     // ══ Summary ═════════════════════════════════════════════════════════════
     console.log(`\n${pass} passed, ${fail} failed, ${gaps.length} gap(s)`);
     gaps.forEach((g) => console.log(`  - GAP: ${g}`));

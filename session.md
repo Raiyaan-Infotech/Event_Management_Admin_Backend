@@ -12315,3 +12315,33 @@ Also run locally first (Test Client #23): events 57–59 + splashes 21–24 (one
 ⚠ **Production catalogue slugs do not match the app's Explore grid.** Prod plan menus are `home`, `gallery-2`, `about-the-celebration`, `memories`, `home-3`…; the app (§490) maps tiles to `event-information`, `gallery`, `rsvp`, `agenda`… and there is **no `rsvp` menu on production at all**. Once the new app build ships, production events will show "No features are enabled for this event yet", and RSVP will be off for every production event (§492). Needs a decision before release: rename/add production menus to the app's slugs, or map by something other than slug.
 ⚠ Prod event #1 "Demo Wedding" has no QR and `menu_ids` NULL; #2 "Jamal & Aisha" also has `menu_ids` NULL → under the new plan gating both show no menus.
 ⚠ The live servers still run the OLD code (nothing committed/pushed): the splash `for-event` read, RSVP gating, portal sidebar gating and platform menu filtering are not live yet — the data is in place for when they are.
+
+### 494. Chat, Wishes, Invite & Share, Guests… came back — "app features" are a plan-only menu kind
+
+Jamal: "some menu like chat wishes invite and share … disappearing why?" Cause (§490): a tile shows only when its slug is in `event.menus`, and 8 tiles had **no `event_menus` row at all** (family, participants, invite-share, guests, near-by, chat, social-wall, downloads) — no plan could grant them; Wishes existed but few plans/events had it; production's catalogue uses different slugs entirely.
+
+Where an event's menus come from (explained to Jamal): Menu Management (`event_menus`) → Manage Plan Menus (`subscription_plan_menus`, W/M) → event wizard Menus step (`events.menu_ids`) → `GET /client/events/:id` `menus` → app Explore grid.
+
+**Jamal chose Option 1 — two kinds of menu:**
+- **Event features** (core/additional/custom — Event Info, Agenda, Venue, Gallery, RSVP, Contact Us): unchanged — on the event (`menu_ids`) AND granted by the plan.
+- **App features** — new `menu_group = 'app'` (Family, Participants, Invite & Share, Near By, Chat, Wishes, Social Wall, Downloads): **plan grant on mobile alone**; every event of that host shows them, the wizard never offers them. **Guests** reuses the `portal` section with Mobile on — one menu for both surfaces.
+
+| Piece | Change |
+|---|---|
+| `src/database/tools/apply-app-feature-menus.js` | NEW, idempotent. ENUM + `'app'` (refuses if `portal` missing); creates each app feature (mobile only, catalogue company) or **converts** an existing event-feature row (local `wishes` id 8, core → app); grants each to every plan on mobile ONCE (an `app` row is never re-granted); `guests` portal row: `is_mobile=1` + `for_mobile=1` on every plan granting it, once |
+| `EventMenu.js` | ENUM + `app` |
+| `clientPortal.getEventOptions` | `menus` excludes `portal` AND `app` (wizard + create validation never see them) |
+| `clientEvent.presentOne` | `menus` = event features (`menu_ids` ∩ plan, groups not portal/app) + **on mobile only** plan-granted `app`/`portal` menus. Portal event pages unchanged |
+| Admin `subscriptions/[id]/menus` + `use-menu-management.ts` | "Mobile App Features" group, fetched unscoped like portal sections |
+| App `wedding_home_screen.dart` | each tile takes a **list of slugs**; `_baseSlug` strips a duplicate's `-N` suffix. Aliases for production's catalogue: Event Info ← `event-information`, `home`, `about-the-celebration`; Gallery ← `gallery`, `memories` (so prod `home-3`, `gallery-2` match) |
+| `tests/plan-menu-gating.test.js` | step 7: app event shows Chat once the plan grants it on mobile though `menu_ids` never lists it; portal event menus + wizard never show it |
+
+**Verified**
+- Local tool: created ids 23–29 (+ wishes converted), granted to 9 plans; guests Mobile on for 8; re-run all `=`.
+- Test: **38 passed, 0 failed**.
+- Test Client events 57 / 23, as the app: event-information, gallery, rsvp, venue, contact-us + wishes, family, participants, invite-share, near-by, chat, social-wall, downloads, guests. As the portal: event features only.
+- **Admin browser** (Basic Plan): new "Mobile App Features" group with all 8 ON; summary Total 17 / Enabled 17, Mobile App Features 8/8.
+- **Phone** (Test Client, Rohan & Diya, after re-opening — a screen loaded before the tool still showed the old 5): Event Info, Venue, Gallery, **Family, Participants, Invite & Share, Guests**, RSVP, **Near By, Chat, Wishes, Social Wall, Downloads**, Contact Us. Agenda correctly absent (Wedding Special grants it website-only). `dart analyze` clean.
+- **Production applied**: ENUM + `app`; app features ids **21–28** granted to all 5 plans; `guests` (16) Mobile on for 5 plans; re-run all `=`.
+
+⚠ Production events: #3–#5 carry `menu_ids [1,4]` = `home`, `gallery-2` → Event Info + Gallery tiles via the aliases, plus the 9 app-feature tiles. #1 "Demo Wedding" and #2 "Jamal & Aisha" have `menu_ids` NULL → app features only. Still not live until the backend + app are deployed.

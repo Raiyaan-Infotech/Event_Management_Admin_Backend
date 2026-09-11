@@ -396,7 +396,9 @@ const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
     // decide which sidebar sections the client sees, so they are kept out of
     // `menus` — the wizard would otherwise offer "Guests" as an event feature,
     // and event create validation (which reads `menus`) would accept it.
-    const menus = granted.filter((m) => m.menu_group !== 'portal');
+    // App features ('app') are not per-event choices either — the plan alone
+    // grants them — so the wizard must not offer them as event menus.
+    const menus = granted.filter((m) => m.menu_group !== 'portal' && m.menu_group !== 'app');
     const portalSections = granted.filter((m) => m.menu_group === 'portal').map((m) => m.slug);
 
     // The admin-authored invitation templates this plan entitles them to. The

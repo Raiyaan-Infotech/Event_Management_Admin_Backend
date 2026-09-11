@@ -513,21 +513,47 @@ const getEventForViewer = async (clientId, eventId, opts = {}) => {
 const presentOne = async (event, { platform = 'website' } = {}) => {
     const presented = present(event);
 
-    const granted = new Set(
-        await clientPortalService.ownerGrantedMenuIds(presented.website_client_id, platform),
-    );
+    const grantedIds = await clientPortalService.ownerGrantedMenuIds(presented.website_client_id, platform);
+    const granted = new Set(grantedIds);
     const visibleIds = presented.menu_ids.map(Number).filter((id) => granted.has(id));
 
     // Resolve the menu names for the ids stored on the row. Done here rather
     // than through an association because menu_ids is a JSON array — see the
     // model comment for why it is not a join table.
-    presented.menus = visibleIds.length
+    //
+    // EVENT FEATURES only: the event's own selection, narrowed by the plan.
+    const eventFeatures = visibleIds.length
         ? (await EventMenu.findAll({
-            where: { id: { [Op.in]: visibleIds }, is_active: 1 },
+            where: {
+                id: { [Op.in]: visibleIds },
+                is_active: 1,
+                menu_group: { [Op.notIn]: ['portal', 'app'] },
+            },
             attributes: ['id', 'name', 'slug', 'menu_group'],
             order: [['sort_order', 'ASC'], ['id', 'ASC']],
         })).map((m) => m.toJSON())
         : [];
+
+    /*
+      APP FEATURES — mobile only. Chat, Wishes, Invite & Share, Guests… are not
+      chosen per event: the host's plan granting them on MOBILE is the whole
+      rule, so every event of that host shows them without its menu_ids having
+      to list them. `portal` rows count when the plan also grants them on mobile
+      (Guests is one menu for both surfaces). See apply-app-feature-menus.js.
+    */
+    const appFeatures = platform === 'mobile' && grantedIds.length
+        ? (await EventMenu.findAll({
+            where: {
+                id: { [Op.in]: grantedIds },
+                is_active: 1,
+                menu_group: { [Op.in]: ['app', 'portal'] },
+            },
+            attributes: ['id', 'name', 'slug', 'menu_group'],
+            order: [['sort_order', 'ASC'], ['id', 'ASC']],
+        })).map((m) => m.toJSON())
+        : [];
+
+    presented.menus = [...eventFeatures, ...appFeatures];
 
     // Same design block the list attaches, so the detail screen and the card it
     // was opened from cannot disagree about what the invitation looks like.

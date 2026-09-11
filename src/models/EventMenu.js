@@ -38,10 +38,12 @@ module.exports = (sequelize) => {
         },
         // Drives the Core / Additional / Custom sections on Manage Plan Menus.
         // 'portal' = a client-portal SIDEBAR section (Guests, Messages, …), not
-        // an event feature: never offered by the event wizard or the app. See
+        // an event feature: never offered by the event wizard. See
         // apply-portal-section-menus.js.
+        // 'app' = a mobile APP feature (Chat, Wishes, Invite & Share, …): granted
+        // by the plan alone, not chosen per event. See apply-app-feature-menus.js.
         menu_group: {
-            type: DataTypes.ENUM('core', 'additional', 'custom', 'portal'),
+            type: DataTypes.ENUM('core', 'additional', 'custom', 'portal', 'app'),
             allowNull: false,
             defaultValue: 'core',
         },
