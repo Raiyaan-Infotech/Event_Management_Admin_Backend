@@ -55,10 +55,16 @@ module.exports = (sequelize) => {
             defaultValue: 'Asia/Kolkata',
         },
 
+        /**
+         * 'light' by default, not 'system'. The portal pushes this into
+         * next-themes on load, so 'system' turned the portal dark for everyone
+         * whose OS is dark — without them ever choosing it. 'system' stays a
+         * choice on the Preferences screen. See tools/apply-client-theme-default.js.
+         */
         theme: {
             type: DataTypes.ENUM('light', 'dark', 'system'),
             allowNull: false,
-            defaultValue: 'system',
+            defaultValue: 'light',
         },
         /** Where "go to my dashboard" lands. Validated against real routes. */
         default_landing: {

@@ -12345,3 +12345,49 @@ Where an event's menus come from (explained to Jamal): Menu Management (`event_m
 - **Production applied**: ENUM + `app`; app features ids **21–28** granted to all 5 plans; `guests` (16) Mobile on for 5 plans; re-run all `=`.
 
 ⚠ Production events: #3–#5 carry `menu_ids [1,4]` = `home`, `gallery-2` → Event Info + Gallery tiles via the aliases, plus the 9 app-feature tiles. #1 "Demo Wedding" and #2 "Jamal & Aisha" have `menu_ids` NULL → app features only. Still not live until the backend + app are deployed.
+
+### 495. Production: Ismail's account filled with a live-looking wedding + client portal dark-by-default and dark colours fixed
+
+**A. Ismail (+91 7010051951) — production only**
+
+Jamal: "create client name ismail this 7010051951 … some live like event … look perfect … in prod only". The account **already existed**: production `website_clients` #16 "ismail", QR/website signup, no email, **no plan** (so it could create nothing). Not duplicated — `assertMobileFree` would refuse anyway, and two accounts on one number would split his login.
+
+`showcase-events.seeder.js` extended (the file stays the one showcase seeder):
+- `--mobile` to find an account (refuses if the number matches more than one), `--set` (`showcase` | `ismail`), `--plan <id>` and `--name` change the account itself, printed in the dry run first.
+- Sets with `responses: true` give guests a spread of answers (accepted / declined / maybe / not yet, `responded_at` after `invited_at`, wishes/regrets in `notes`, table numbers, cities) and **one `event_messages` invite row per guest** (sent/delivered). History only — nothing dispatches `event_messages` by status (the only `queued` write is inside a send), so no WhatsApp/SMS/email went out. Guest numbers are 9xxxxxxxxx fillers, emails @example.com.
+- `--clear` also removes the set's invite rows.
+
+Run: `node src/database/seeders/showcase-events.seeder.js --prod --set ismail --mobile 7010051951 --plan 1 --name Ismail --apply`
+
+| Result (production) | |
+|---|---|
+| Account #16 | name → "Ismail", plan → **#1 Permium plan** (Wedding / Nikah / Islam; home, gallery-2, 8 app features, portal sections). Gold (#4) was not used — it is scoped to Birthday |
+| #6 Ismail & Ayesha — Engagement | 16 Aug 2026 (**past → Completed**), Taj Coromandel, theme bnd-2, 16 guests (14 yes / 2 no), splash "ENGAGED" couple photo |
+| #7 Mehendi Night | 23 Oct 2026, Sheraton Grand Mahabalipuram, theme wg, 20 guests (10 / 2 / 4 maybe / 4 pending), gradient splash |
+| #8 Nikah Ceremony | 25 Oct 2026, ITC Grand Chola, theme fk, 28 guests (15 / 3 / 6 / 4), "YOU'RE INVITED" couple photo splash |
+| #9 Walima Dinner | 27 Oct 2026, Hyatt Regency Chennai, theme rr, 32 guests (17 / 3 / 6 / 6), "WALIMA" image splash |
+
+Splashes #5–#8. Verified read-only through the real services (`getEventById` with platform mobile + `getActiveSplashForEvent`): every event's stats = invited N / joined 0 / **sent N**, app tiles `home, gallery-2, family, participants, invite-share, near-by, chat, wishes, social-wall, downloads, guests`, splash present. Ismail signs in to the app with his number (OTP); he has no email/password, so portal email login is not available to him until one is set.
+
+**B. Client portal opened dark, and colours broke in dark mode on every page**
+
+Two separate causes:
+1. **Dark by default** — `client_preferences.theme` defaulted to `'system'`; the row is created on first Settings read and `ThemeSync` pushes it into next-themes, so every client with a dark OS got a dark portal they never chose (`defaultTheme="light"` in layout.tsx was overridden).
+2. **Wrong colours in dark** — `ThemeTokens` wrote the backend palette with `document.documentElement.style.setProperty`. Inline styles beat `.dark { … }` in globals.css, so in dark mode `--background` / `--foreground` / `--sidebar-accent` stayed LIGHT while cards, borders and muted text went dark: light text on a light page.
+
+| Piece | Change |
+|---|---|
+| Portal `components/theme-tokens.tsx` | writes a `<style id="backend-theme-tokens">` instead of inline styles: `html:not(.dark)` = backend values as given; `html.dark` = brand/accent lifted towards white, sidebar tint mixed into the dark card, background/text left to the `.dark` palette. (0,1,1) specificity, so load order does not matter |
+| Portal `Header.tsx` | toggle uses `resolvedTheme` (with `system` stored it showed a moon and the first click did nothing); icon buttons `dark:hover:bg-secondary` (the ghost variant's `dark:hover:bg-accent/50` painted an amber square) |
+| Portal `ChartsSection.tsx` | `resolvedTheme` |
+| Portal `Footer.tsx`, `Breadcrumb.tsx` | hard-coded `border-slate-50 bg-white/50 text-slate-400`, `bg-white`, `text-[#c8c8c8]`, `text-[#6c757d]` → tokens |
+| Backend `models/ClientPreference.js`, `tools/apply-client-preferences.js` | default `'light'` |
+| Backend `tools/apply-client-theme-default.js` | NEW: column default → light; rows still `'system'` and **never edited** (updated_at ≤ created_at + 5 s) → light. A saved row is left alone, `system` included |
+
+Tool: local applied (default light; the 1 local row was edited → untouched). **Production applied** (on Jamal's "apply migration now"): column default → light, 2 unedited rows → light, 0 edited rows touched; a re-run finds nothing to do.
+
+Audit of the rest: the stat-card tints (`bg-[#hex]/10`) are translucent and read fine on both grounds; QR, 2FA and switch-thumb `bg-white` are intentional.
+
+**Verified in a real browser** (Playwright, browser set to a DARK OS, client #106): /dashboard, /dashboard/events, /dashboard/guests, /dashboard/analytics, /dashboard/settings each load **light** (no `.dark`, `<html>` carries only `color-scheme`), and ONE click on the toggle gives dark: body #0b1120, text #e2e8f0, cards #111a2e, headings light. Screenshots viewed in both modes. `tsc --noEmit` clean. Guests / Analytics show the plan lock for that client, so their contents were checked in code, not on screen.
+
+Not deployed — the portal fix reaches production only with a portal deploy; the backend default only with a backend deploy (the prod DB tool above works without one).
