@@ -437,13 +437,13 @@ const createEvent = async (clientId, body) => {
  * The `website_client_id` in the WHERE is what makes an id from another
  * client's account a 404 rather than a read — the id alone is guessable.
  */
-const getEventById = async (clientId, eventId) => {
+const getEventById = async (clientId, eventId, opts = {}) => {
     const event = await Event.findOne({
         where: { id: eventId, website_client_id: clientId },
         include: EVENT_INCLUDE,
     });
     if (!event) return null;
-    return presentOne(event);
+    return presentOne(event, opts);
 };
 
 /**
@@ -476,8 +476,8 @@ const HOST_ONLY_FIELDS = [
  * decrypts. It is NOT `website_client_id` — that column names the host, and
  * reading it here would let every guest read every event of their own host.
  */
-const getEventForViewer = async (clientId, eventId) => {
-    const owned = await getEventById(clientId, eventId);
+const getEventForViewer = async (clientId, eventId, opts = {}) => {
+    const owned = await getEventById(clientId, eventId, opts);
     if (owned) return owned;
 
     const membership = await EventGuest.findOne({
@@ -492,21 +492,38 @@ const getEventForViewer = async (clientId, eventId) => {
     });
     if (!event) return null;
 
-    const presented = await presentOne(event);
+    const presented = await presentOne(event, opts);
     for (const field of HOST_ONLY_FIELDS) delete presented[field];
     return presented;
 };
 
-/** The shared tail of both reads: menus resolved and the design attached. */
-const presentOne = async (event) => {
+/**
+ * The shared tail of both reads: menus resolved and the design attached.
+ *
+ * ── `menus` IS GATED BY THE PLAN AS IT IS NOW ───────────────────────────────
+ * `menu_ids` is what was chosen when the event was saved and is returned
+ * untouched (the portal's edit form reads it). `menus` — what the event SHOWS —
+ * is those ids narrowed to what the owner's plan grants today on the caller's
+ * platform (`opts.platform`, 'website' | 'mobile'). So:
+ *   - a menu the admin removes from the plan disappears from existing events
+ *   - a web-only menu never reaches the app
+ *   - adding the menu back to the plan brings it back, because nothing was
+ *     deleted from the event.
+ */
+const presentOne = async (event, { platform = 'website' } = {}) => {
     const presented = present(event);
+
+    const granted = new Set(
+        await clientPortalService.ownerGrantedMenuIds(presented.website_client_id, platform),
+    );
+    const visibleIds = presented.menu_ids.map(Number).filter((id) => granted.has(id));
 
     // Resolve the menu names for the ids stored on the row. Done here rather
     // than through an association because menu_ids is a JSON array — see the
     // model comment for why it is not a join table.
-    presented.menus = presented.menu_ids.length
+    presented.menus = visibleIds.length
         ? (await EventMenu.findAll({
-            where: { id: { [Op.in]: presented.menu_ids }, is_active: 1 },
+            where: { id: { [Op.in]: visibleIds }, is_active: 1 },
             attributes: ['id', 'name', 'slug', 'menu_group'],
             order: [['sort_order', 'ASC'], ['id', 'ASC']],
         })).map((m) => m.toJSON())
@@ -516,7 +533,53 @@ const presentOne = async (event) => {
     // was opened from cannot disagree about what the invitation looks like.
     await attachDesign([presented], presented.company_id ?? null);
 
+    presented.stats = await guestStatsFor(presented.id);
+
     return presented;
+};
+
+/**
+ * The app's Event Info tiles: Invited Guests / Guests Joined / Invitations Sent.
+ *
+ *   invited_guests    guest ROWS on the event — one invitation each, however
+ *                     many people it covers (the portal's "Total Invitations")
+ *   guests_joined     rows with `participant_client_id` — the guest opened the
+ *                     app and joined by QR, not merely listed by the host
+ *   invitations_sent  `event_messages` of kind `invite` that actually left
+ *                     (`sent`/`delivered`). Counted from the send log, NOT from
+ *                     `event_guests.invited_at`: the QR join stamps that too,
+ *                     with nothing sent.
+ *
+ * ONE round trip of three sub-selects rather than three queries — production
+ * is ~370ms a query, and this runs on every event open.
+ *
+ * Null on failure, never a thrown error: a count is decoration on the event,
+ * and the app shows "—" rather than losing the whole screen.
+ */
+const guestStatsFor = async (eventId) => {
+    try {
+        const [row] = await sequelize.query(
+            `SELECT
+                (SELECT COUNT(*) FROM event_guests
+                  WHERE event_id = :id AND deleted_at IS NULL) AS invited_guests,
+                (SELECT COUNT(*) FROM event_guests
+                  WHERE event_id = :id AND deleted_at IS NULL
+                    AND participant_client_id IS NOT NULL) AS guests_joined,
+                (SELECT COUNT(*) FROM event_messages
+                  WHERE event_id = :id AND deleted_at IS NULL
+                    AND kind = 'invite' AND status IN ('sent', 'delivered')) AS invitations_sent`,
+            { replacements: { id: eventId }, type: Sequelize.QueryTypes.SELECT },
+        );
+        return {
+            invited_guests: Number(row?.invited_guests) || 0,
+            guests_joined: Number(row?.guests_joined) || 0,
+            invitations_sent: Number(row?.invitations_sent) || 0,
+        };
+    } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[clientEvent] guest stats not computed', { event_id: eventId, error: err.message });
+        return null;
+    }
 };
 
 /**

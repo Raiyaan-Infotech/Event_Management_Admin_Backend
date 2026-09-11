@@ -454,6 +454,9 @@ db.WebsiteClient.hasMany(db.ClientBackupCode, { foreignKey: 'website_client_id',
 
 db.SplashScreen.belongsTo(db.WebsiteClient, { foreignKey: 'website_client_id', as: 'client' });
 db.WebsiteClient.hasMany(db.SplashScreen, { foreignKey: 'website_client_id', as: 'splashScreens' });
+// hasOne, not hasMany: `splash_screens.event_id` is UNIQUE.
+db.SplashScreen.belongsTo(db.Event, { foreignKey: 'event_id', as: 'event' });
+db.Event.hasOne(db.SplashScreen, { foreignKey: 'event_id', as: 'splashScreen' });
 
 db.ClientTransaction.belongsTo(db.WebsiteClient, { foreignKey: 'website_client_id', as: 'client' });
 db.WebsiteClient.hasMany(db.ClientTransaction, { foreignKey: 'website_client_id', as: 'transactions' });

@@ -4,6 +4,8 @@ const {
     Sequelize,
     Event,
     EventGuest,
+    EventGuestResponseLog,
+    EventMenu,
     WebsiteClient,
     EventCategory,
 } = require('../models');
@@ -17,6 +19,36 @@ const { OTP_TTL_SECONDS, OTP_MAX_ATTEMPTS } = require('./websiteClientOAuth.serv
 const msg91 = require('./msg91Whatsapp.service');
 const msg91Sms = require('./msg91Sms.service');
 const notificationTrigger = require('./notificationTrigger.service');
+const rsvpService = require('./clientRsvp.service');
+const notifications = require('./clientNotification.service');
+const clientPortalService = require('./clientPortal.service');
+
+/**
+ * Whether an event is collecting RSVPs right now.
+ *
+ * ON only when BOTH hold:
+ *   - the event itself carries the `rsvp` menu (`events.menu_ids`), and
+ *   - the host's plan grants `rsvp` on MOBILE today — the same gate the app's
+ *     Explore grid and the portal sidebar use (`ownerGrantedMenuIds`).
+ *
+ * When OFF, the QR registration form does not ask for attendance, `join`
+ * ignores any answer it is sent, and the RSVP tab refuses — so a host whose
+ * plan has no RSVP never collects answers they have no screen to read.
+ */
+const rsvpEnabledFor = async (event) => {
+    if (!event) return false;
+    const rsvpMenu = await EventMenu.findOne({ where: { slug: 'rsvp', is_active: 1 }, attributes: ['id'] });
+    if (!rsvpMenu) return false;
+
+    let menuIds = event.menu_ids;
+    if (typeof menuIds === 'string') {
+        try { menuIds = JSON.parse(menuIds); } catch { menuIds = []; }
+    }
+    if (!Array.isArray(menuIds) || !menuIds.map(Number).includes(Number(rsvpMenu.id))) return false;
+
+    const granted = await clientPortalService.ownerGrantedMenuIds(event.website_client_id, 'mobile');
+    return granted.includes(Number(rsvpMenu.id));
+};
 
 /**
  * Self-registration: a guest scans the invitation QR and joins the event.
@@ -107,15 +139,18 @@ const resolveInvite = async (token) => {
     const event = await eventFromToken(token);
     const categoryId = event.event_category_id;
 
-    const [relationships, foods] = await Promise.all([
+    const [relationships, foods, rsvpEnabled] = await Promise.all([
         relationshipOptions.listForCategory(categoryId, DEFAULT_COMPANY_ID),
         foodOptions.listForCategory(categoryId, DEFAULT_COMPANY_ID),
+        rsvpEnabledFor(event),
     ]);
 
     return {
         event: publicEvent(event),
         relationship_options: relationships.map((r) => ({ id: r.id, name: r.name })),
         food_preference_options: foods.map((r) => ({ id: r.id, name: r.name })),
+        /** Whether the form should ask "Will you be attending?" — see rsvpEnabledFor. */
+        rsvp_enabled: rsvpEnabled,
     };
 };
 
@@ -357,6 +392,18 @@ const RESPONSE_TO_STATUS = {
  * `invite_source` is NOT overwritten on that path: the model defines it as how
  * this person FIRST came in, so a guest the host added by WhatsApp stays
  * 'whatsapp' even though they completed the form by QR.
+ *
+ * ── ⚠ ON AN EXISTING ROW, ONLY WHAT WAS SENT IS WRITTEN ──────────────────────
+ * The returning-participant path (a re-scan) posts the token and nothing else.
+ * This used to write every field regardless, so a re-scan set the RSVP back to
+ * "none", party size to 1, and blanked food, relationship and notes — wiping
+ * the guest's answer in the portal. Now a field absent from the body is left
+ * as it is.
+ *
+ * ── ONE RSVP PER EVENT ──────────────────────────────────────────────────────
+ * An answer already on the row is never replaced here — the same rule as
+ * `submitMyRsvp`. Only the host can clear it (portal: RSVP -> reset), after
+ * which the guest may answer again.
  */
 const join = async (client, payload = {}) => {
     const event = await eventFromToken(payload.token);
@@ -370,37 +417,67 @@ const join = async (client, payload = {}) => {
         })
         : null;
 
-    const response = ['yes', 'no', 'maybe'].includes(payload.response_type)
+    // An event that is not collecting RSVPs stores NO answer, whatever the body
+    // says — an older app build, or a hand-made request, must not write an RSVP
+    // the host's plan has no screen for. See rsvpEnabledFor.
+    const rsvpOn = await rsvpEnabledFor(event);
+
+    const response = rsvpOn && ['yes', 'no', 'maybe'].includes(payload.response_type)
         ? payload.response_type
         : 'none';
 
     // "No. of Guests with you" counts people BROUGHT — so the party is them
     // plus that many. Storing it as party_size directly would undercount every
-    // booking by one head.
-    const extra = Math.max(0, Math.min(255, Number(payload.guest_count) || 0));
+    // booking by one head. It is part of the RSVP answer, so it is ignored too
+    // when RSVP is off.
+    const extra = rsvpOn ? Math.max(0, Math.min(255, Number(payload.guest_count) || 0)) : 0;
 
-    const fields = {
-        name: String(payload.name || '').trim() || existing?.name || client.name,
-        gender: ['male', 'female', 'other'].includes(payload.gender) ? payload.gender : null,
-        relationship: payload.relationship ? String(payload.relationship).slice(0, 60) : null,
-        relationship_option_id: payload.relationship_option_id || null,
-        email: payload.email ? String(payload.email).trim().toLowerCase() : existing?.email ?? null,
-        dietary_preference: payload.food_preference
+    // A new row takes every field (with its defaults); an existing one only
+    // what the body actually carries — see the header.
+    const sent = (k) => payload[k] !== undefined && payload[k] !== null && String(payload[k]).trim() !== '';
+    const take = (k) => !existing || sent(k);
+
+    const alreadyAnswered = Boolean(existing) && existing.response_type !== 'none';
+    // The party size belongs to the answer, so it moves only with it: the
+    // re-scan path always posts `guest_count: 0`.
+    const writeAnswer = !existing || (response !== 'none' && !alreadyAnswered);
+
+    const before = snapshotAnswer(existing);
+
+    const fields = { participant_client_id: client.id };
+    if (take('name')) fields.name = String(payload.name || '').trim() || existing?.name || client.name;
+    if (take('gender')) fields.gender = ['male', 'female', 'other'].includes(payload.gender) ? payload.gender : null;
+    if (take('relationship')) {
+        fields.relationship = payload.relationship ? String(payload.relationship).slice(0, 60) : null;
+        fields.relationship_option_id = payload.relationship_option_id || null;
+    }
+    if (take('email')) {
+        fields.email = payload.email ? String(payload.email).trim().toLowerCase() : existing?.email ?? null;
+    }
+    if (take('food_preference')) {
+        fields.dietary_preference = payload.food_preference
             ? String(payload.food_preference).slice(0, 255)
-            : null,
-        food_preference_option_id: payload.food_preference_option_id || null,
-        special_requirements: payload.special_request
+            : null;
+        fields.food_preference_option_id = payload.food_preference_option_id || null;
+    }
+    if (take('special_request')) {
+        fields.special_requirements = payload.special_request
             ? String(payload.special_request).slice(0, 500)
-            : null,
-        notes: payload.message ? String(payload.message).slice(0, 500) : null,
-        plus_one: extra > 0 ? 1 : 0,
-        plus_one_count: extra,
-        party_size: extra + 1,
-        response_type: response,
-        rsvp_status: RESPONSE_TO_STATUS[response] ?? 'pending',
-        responded_at: response === 'none' ? null : new Date(),
-        participant_client_id: client.id,
-    };
+            : null;
+    }
+    if (take('message')) fields.notes = payload.message ? String(payload.message).slice(0, 500) : null;
+    if (writeAnswer) {
+        Object.assign(fields, {
+            plus_one: extra > 0 ? 1 : 0,
+            plus_one_count: extra,
+            party_size: extra + 1,
+            response_type: response,
+            // With RSVP off nobody is being asked, so "invited" — not "pending",
+            // which would read as an answer still to come.
+            rsvp_status: RESPONSE_TO_STATUS[response] ?? (rsvpOn ? 'pending' : 'invited'),
+            responded_at: response === 'none' ? null : new Date(),
+        });
+    }
 
     let guest;
     if (existing) {
@@ -425,6 +502,10 @@ const join = async (client, payload = {}) => {
     const accountName = String(client.name || '').trim();
     if (fields.name && (!accountName || accountName === clientDigits)) {
         await WebsiteClient.update({ name: fields.name }, { where: { id: client.id }, hooks: false });
+    }
+
+    if (writeAnswer && fields.response_type !== 'none') {
+        await recordGuestAnswer(guest, before, fields, client.id);
     }
 
     // Trigger Welcome Invitation (checks client portal on/off pref)
@@ -469,12 +550,203 @@ const myEvents = async (clientId) => {
         }));
 };
 
+/* ── The guest's own RSVP ─────────────────────────────────────────────────── */
+
+/**
+ * The answer as it stood before a write, for the RSVP history. A row that does
+ * not exist yet had no answer.
+ */
+function snapshotAnswer(guest) {
+    return {
+        response_type: guest?.response_type ?? 'none',
+        party_size: guest?.party_size ?? 1,
+        dietary_preference: guest?.dietary_preference ?? null,
+        accommodation: guest?.accommodation ?? 'unknown',
+        notes: guest?.notes ?? null,
+    };
+}
+
+const RESPONSE_WORD = { yes: 'accepted', no: 'declined', maybe: 'replied maybe to' };
+
+/**
+ * What the portal sees when a GUEST answers: an RSVP History entry marked
+ * `guest`, and a notification to the host.
+ *
+ * Neither may fail the answer itself — the guest row is already written, and
+ * turning a failed log or notification into an error would tell the guest
+ * their RSVP did not go through when it did.
+ */
+async function recordGuestAnswer(guest, before, data, participantClientId) {
+    try {
+        const prior = await EventGuestResponseLog.count({ where: { guest_id: guest.id } });
+        await rsvpService.logResponseChange(guest.website_client_id, guest, before, data, {
+            first: prior === 0,
+            source: 'guest',
+            changedBy: participantClientId,
+        });
+
+        const after = data.response_type;
+        if (['yes', 'no', 'maybe'].includes(after) && after !== before.response_type) {
+            await notifications.notify(guest.website_client_id, {
+                type: after === 'yes' ? 'rsvp_accepted' : after === 'no' ? 'rsvp_declined' : 'rsvp_maybe',
+                title: 'New RSVP',
+                body: `${guest.name} ${RESPONSE_WORD[after]} your invitation.`,
+                eventId: guest.event_id,
+                guestId: guest.id,
+                link: `/dashboard/rsvps/${guest.id}`,
+                meta: { response: after, source: 'guest' },
+            });
+        }
+    } catch (err) {
+        logger.error?.('[guestRegistration.rsvp] history/notification not written:', err.message);
+    }
+}
+
+const presentMyRsvp = (guest) => ({
+    guest_id: guest.id,
+    name: guest.name,
+    dial_code: guest.dial_code,
+    mobile: guest.mobile,
+    email: guest.email,
+    response_type: guest.response_type,
+    rsvp_status: guest.rsvp_status,
+    party_size: Number(guest.party_size) || 1,
+    special_requirements: guest.special_requirements,
+    dietary_preference: guest.dietary_preference,
+    notes: guest.notes,
+    responded_at: guest.responded_at,
+});
+
+const eventIdOf = (raw) => {
+    const id = Number(raw);
+    if (!Number.isInteger(id) || id <= 0) throw ApiError.notFound('Event not found.');
+    return id;
+};
+
+/**
+ * The signed-in person's RSVP for one event — the app's RSVP screen.
+ *
+ * Found by `participant_client_id`, never `website_client_id` (that is the
+ * host). The host of the event has no guest row of their own, and is told so
+ * rather than shown a 404: they can open their own event's RSVP tab.
+ *
+ * `can_respond` is the one-time rule stated once, here, so the app never has
+ * to re-derive it: true only while no answer is on the row.
+ */
+const getMyRsvp = async (clientId, rawEventId) => {
+    const eventId = eventIdOf(rawEventId);
+
+    const guest = await EventGuest.findOne({
+        where: { event_id: eventId, participant_client_id: clientId },
+    });
+    if (!guest) {
+        const owned = await Event.findOne({
+            where: { id: eventId, website_client_id: clientId },
+            attributes: ['id'],
+        });
+        if (owned) return { is_host: true, can_respond: false, rsvp_enabled: false, rsvp: null };
+        throw ApiError.notFound('You are not a guest of this event.');
+    }
+
+    const event = await Event.findByPk(eventId, { attributes: ['id', 'website_client_id', 'menu_ids'] });
+    const rsvpOn = await rsvpEnabledFor(event);
+
+    return {
+        is_host: false,
+        rsvp_enabled: rsvpOn,
+        can_respond: rsvpOn && guest.response_type === 'none',
+        rsvp: presentMyRsvp(guest),
+    };
+};
+
+/**
+ * Submit the RSVP — ONCE per event.
+ *
+ * Writes the same `event_guests` columns the portal's RSVPs, Guests and
+ * analytics read, so the host sees it the moment their screen refetches; there
+ * is no separate RSVP table to sync.
+ *
+ * ── THE ONE-TIME RULE IS ENFORCED IN THE UPDATE ITSELF ──────────────────────
+ * `WHERE response_type = 'none'` on the UPDATE, not a read-then-write: two taps
+ * on Confirm (or two devices) cannot both land, because the second finds no row
+ * left to match. Only the host clearing the response in the portal re-opens it.
+ *
+ * `party_size` counts the guest too (1 = just them). A decline stores 1 — a
+ * head count for somebody not coming would inflate every total.
+ */
+const submitMyRsvp = async (clientId, rawEventId, body = {}) => {
+    const eventId = eventIdOf(rawEventId);
+
+    const guest = await EventGuest.findOne({
+        where: { event_id: eventId, participant_client_id: clientId },
+    });
+    if (!guest) {
+        const owned = await Event.findOne({
+            where: { id: eventId, website_client_id: clientId },
+            attributes: ['id'],
+        });
+        if (owned) throw ApiError.badRequest('You are hosting this event — RSVPs are for your guests.');
+        throw ApiError.notFound('You are not a guest of this event.');
+    }
+
+    const event = await Event.findByPk(eventId, { attributes: ['id', 'website_client_id', 'menu_ids'] });
+    if (!(await rsvpEnabledFor(event))) {
+        throw ApiError.badRequest('RSVP is not enabled for this event.');
+    }
+
+    const response = String(body.response_type || '').toLowerCase();
+    if (!['yes', 'no', 'maybe'].includes(response)) {
+        throw ApiError.badRequest('Please choose a response.');
+    }
+
+    let partySize = 1;
+    if (response !== 'no') {
+        partySize = Number(body.party_size ?? 1);
+        if (!Number.isInteger(partySize) || partySize < 1 || partySize > 50) {
+            throw ApiError.badRequest('Number of guests must be between 1 and 50.');
+        }
+    }
+
+    const before = snapshotAnswer(guest);
+    const data = {
+        response_type: response,
+        rsvp_status: RESPONSE_TO_STATUS[response],
+        responded_at: new Date(),
+        party_size: partySize,
+        plus_one: partySize > 1 ? 1 : 0,
+        plus_one_count: partySize - 1,
+    };
+    if (body.special_requirements !== undefined) {
+        data.special_requirements = body.special_requirements
+            ? String(body.special_requirements).slice(0, 500) : null;
+    }
+    if (body.notes !== undefined) {
+        data.notes = body.notes ? String(body.notes).slice(0, 500) : null;
+    }
+
+    const [affected] = await EventGuest.update(data, {
+        where: { id: guest.id, response_type: 'none' },
+    });
+    if (!affected) {
+        throw ApiError.badRequest(
+            'You have already responded to this event. To change your answer, please contact the host.',
+        );
+    }
+
+    await guest.reload();
+    await recordGuestAnswer(guest, before, data, clientId);
+
+    return getMyRsvp(clientId, eventId);
+};
+
 module.exports = {
     resolveInvite,
     requestOtp,
     verifyOtp,
     join,
     myEvents,
+    getMyRsvp,
+    submitMyRsvp,
     // exported for tests
     publicEvent,
     eventFromToken,

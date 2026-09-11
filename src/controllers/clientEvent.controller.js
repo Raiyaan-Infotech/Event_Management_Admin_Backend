@@ -59,11 +59,18 @@ const analytics = asyncHandler(async (req, res) => {
     }, 'Analytics retrieved');
 });
 
+const clientPortalService = require('../services/clientPortal.service');
+
 const getById = asyncHandler(async (req, res) => {
     // getEventForViewer, not getEventById: a guest who joined by QR does not
     // OWN the event, and the owner-scoped read answered 404 for them — which is
     // what left every event screen blank after joining.
-    const event = await clientEventService.getEventForViewer(req.websiteClient.id, req.params.id);
+    //
+    // `platform` gates `event.menus`: the app sees the plan's mobile menus, the
+    // portal its website menus — see presentOne.
+    const event = await clientEventService.getEventForViewer(req.websiteClient.id, req.params.id, {
+        platform: clientPortalService.platformFromHeader(req.get('x-client')),
+    });
     if (!event) throw ApiError.notFound('Event not found.');
     return ApiResponse.success(res, { event }, 'Event retrieved');
 });

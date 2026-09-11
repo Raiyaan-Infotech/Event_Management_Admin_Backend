@@ -4,11 +4,16 @@ const { DataTypes } = require('sequelize');
  * A saved splash / loading screen configuration — the mobile app's own screen
  * shown when a guest opens an event, not a web page.
  *
- * ── ⚠ NOT PER-EVENT YET, DELIBERATELY ───────────────────────────────────────
- * `event_name` is plain text a client types, not a foreign key. This module
- * ships its own CRUD first; linking a saved splash to a real `events` row is
- * an explicitly later phase. See the migration tool's header for the full
- * reasoning.
+ * ── PER-EVENT, ONE EACH ─────────────────────────────────────────────────────
+ * `event_id` is the real link, and it is UNIQUE: one event has at most one
+ * splash, so the app's "which splash for this event?" read is a single
+ * unambiguous lookup. `status` ('draft' | 'active') still decides whether
+ * guests actually see it, so a client can build one without publishing it.
+ *
+ * `event_name` predates the link and stays — see the column's own comment.
+ * Rows created before `event_id` existed keep `event_id = NULL`; their typed
+ * names match no real event, so they were left unlinked rather than guessed
+ * into one. See `apply-splash-screen-event-link.js` for the full reasoning.
  *
  * ── background_config / sound_config / loader_config / animation_config ────
  * `background_type` picks ONE of six shapes; `background_config` holds
@@ -41,8 +46,26 @@ module.exports = (sequelize) => {
 
         main_title: { type: DataTypes.STRING(60), allowNull: false },
         sub_title: { type: DataTypes.STRING(20), allowNull: true },
-        /** Plain text today — see the model header. Not a foreign key yet. */
+        /**
+         * The display name shown on the splash. Kept as its own column even
+         * though `event_id` now exists: the service copies it from the chosen
+         * event on save, and the rows created before the link existed have
+         * nothing else to show.
+         */
         event_name: { type: DataTypes.STRING(100), allowNull: false },
+
+        /**
+         * The event this splash belongs to — UNIQUE, so one event has at most
+         * one splash and the app's lookup needs no tie-breaking rule.
+         *
+         * NULL-able for the rows saved before the link existed; the portal form
+         * requires it from now on. MySQL allows many NULLs under a UNIQUE
+         * index, which is what lets those rows stay as unlinked drafts.
+         *
+         * `ON DELETE SET NULL` in the migration, not CASCADE: deleting an event
+         * should not take a design the client built with it.
+         */
+        event_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
         tagline: { type: DataTypes.STRING(150), allowNull: true },
 
         background_type: {

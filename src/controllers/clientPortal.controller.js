@@ -22,7 +22,10 @@ const me = asyncHandler(async (req, res) => {
  * One request rather than four — all of it derives from the same plan lookup.
  */
 const eventOptions = asyncHandler(async (req, res) => {
-    const options = await clientPortalService.getEventOptions(req.websiteClient.id);
+    // The app gets the plan's MOBILE menus, the portal its WEBSITE menus.
+    const options = await clientPortalService.getEventOptions(req.websiteClient.id, {
+        platform: clientPortalService.platformFromHeader(req.get('x-client')),
+    });
     return ApiResponse.success(res, options, 'Event options retrieved');
 });
 

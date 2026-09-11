@@ -78,4 +78,17 @@ const myEvents = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, { events });
 });
 
-module.exports = { resolve, requestOtp, verifyOtp, join, myEvents };
+/** The signed-in guest's own RSVP for one event, plus whether they may still answer. */
+const myRsvp = asyncHandler(async (req, res) => {
+    const result = await service.getMyRsvp(req.websiteClient.id, req.params.id);
+    return ApiResponse.success(res, result, 'RSVP retrieved');
+});
+
+/** Submit it — once per event; the service refuses a second answer. */
+const submitMyRsvp = asyncHandler(async (req, res) => {
+    const result = await service.submitMyRsvp(req.websiteClient.id, req.params.id, req.body);
+    logger.logRequest(req, `Client ${req.websiteClient.id} answered the RSVP for event ${req.params.id}`);
+    return ApiResponse.success(res, result, 'Your RSVP has been submitted');
+});
+
+module.exports = { resolve, requestOtp, verifyOtp, join, myEvents, myRsvp, submitMyRsvp };

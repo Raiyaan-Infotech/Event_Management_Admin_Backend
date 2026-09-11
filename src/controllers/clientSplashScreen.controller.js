@@ -48,4 +48,24 @@ const uploadMedia = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, result, 'File uploaded');
 });
 
-module.exports = { list, getOne, create, update, remove, uploadMedia };
+/**
+ * The splash the mobile app should show as one event opens.
+ *
+ * ⚠ 200 with `splash_screen: null` when the event has none, rather than a 404.
+ * "This event has no splash" is a normal answer the app acts on by going
+ * straight into the event; a 404 would make the app treat an ordinary event as
+ * a failure, and it cannot tell the two apart from the status code alone.
+ *
+ * Viewer-scoped, unlike the rest of this module: the event's owner AND a guest
+ * who joined it by QR can read it, because guests are who a splash is for. The
+ * host-only fields are stripped — see `getActiveSplashForEvent`.
+ */
+const forEvent = asyncHandler(async (req, res) => {
+    const splash = await service.getActiveSplashForEvent(
+        req.websiteClient.id,
+        req.params.eventId,
+    );
+    return ApiResponse.success(res, { splash_screen: splash ?? null }, 'Splash screen retrieved');
+});
+
+module.exports = { list, getOne, create, update, remove, uploadMedia, forEvent };

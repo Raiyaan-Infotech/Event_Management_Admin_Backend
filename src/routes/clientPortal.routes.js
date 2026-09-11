@@ -173,6 +173,15 @@ router.get('/events/notification-templates/summary', eventNotificationTemplateCo
 router.post('/events/join', guestRegistrationController.join);
 router.get('/events/joined', guestRegistrationController.myEvents);
 
+/**
+ * The GUEST's own RSVP for one event (the app's RSVP screen) — one answer per
+ * event. Distinct from `/rsvps/:id`, which is the HOST editing a guest's answer.
+ * Both write the same `event_guests` columns, which is why an answer given here
+ * shows on the portal's RSVPs screen with nothing to sync.
+ */
+router.get('/events/:id/my-rsvp', guestRegistrationController.myRsvp);
+router.post('/events/:id/my-rsvp', guestRegistrationController.submitMyRsvp);
+
 router.get('/events', eventController.list);
 router.post('/events', eventController.create);
 router.get('/events/:id', eventController.getById);
@@ -391,6 +400,11 @@ router.post(
     },
     splashController.uploadMedia,
 );
+
+// The app's read: the ACTIVE splash for one event, or null. Declared BEFORE
+// `/splash-screens/:id` — the same ordering trap as `/events/stats`, since
+// Express would otherwise match "for-event" as an id.
+router.get('/splash-screens/for-event/:eventId', splashController.forEvent);
 
 router.get('/splash-screens', splashController.list);
 router.post('/splash-screens', splashController.create);

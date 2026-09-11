@@ -517,7 +517,10 @@ const logResponseChange = async (clientId, guest, before, data, opts = {}) => {
             accommodation: pick('accommodation') || 'unknown',
             notes: pick('notes') || null,
             source: opts.source || 'client',
-            changed_by_client_id: clientId,
+            /* `clientId` is the HOST (it scopes the log). When the guest
+               answered from the app, the person who made the change is the
+               guest's own account, passed as `changedBy`. */
+            changed_by_client_id: opts.changedBy ?? clientId,
             changed_at: new Date(),
         });
     } catch (err) {
@@ -862,6 +865,7 @@ module.exports = {
     getGroup,
     moveToGroup,
     exportRows,
+    logResponseChange,
     BUCKET,
     RESPONSE_TYPES,
 };

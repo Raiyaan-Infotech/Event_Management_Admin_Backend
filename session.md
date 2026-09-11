@@ -11838,3 +11838,480 @@ whole migration.
    unrotated; `NotificationsScreen` still a three-card mockup; Opened/Clicked
    always 0.
 
+---
+
+## Session 41 — Status bar root cause, offline gap diagnosed live, Notifications built for real, and a router bug found by testing on a physical device
+
+> **Date:** 2026-09-09→10 | **Backend:** Event_Management_Admin_Backend · **Mobile:** Event_Invite_Mobile_App
+> §462.3's "none of it has run on a device" is no longer true — this session tested live via adb, on the wired Redmi, and that testing is what caught two real bugs (§466, §467) neither of which static analysis or `dart analyze` could have found.
+> §462.2 is now WRONG, not just stale — see §468.1.
+
+### 463. Two more quick UI fixes, then the status bar's ACTUAL cause
+
+Removed the ❤️ from "Welcome to EventInvit" (Home header) — same pass as §460's 👋 removal, just missed the first time.
+
+The "topbar has full white" fix in §459 addressed `ConnectionBanner` double-applying the status-bar inset, but Jamal reported the SAME white band again afterward. Root cause was one level up: **nothing in the whole app ever called
+`SystemChrome.setSystemUIOverlayStyle`.** Flutter's status bar defaults to transparent, but MIUI (and some other OEM skins) fall back to an OPAQUE white bar the moment nothing claims it explicitly — a native window property no amount of Flutter-side `Material`/`ColoredBox` painting in `ConnectionBanner` could ever reach, which is exactly why fixing that widget twice never touched this.
+
+Fixed in `app.dart`, once, via `AnnotatedRegion<SystemUiOverlayStyle>` wrapping the router's child: `statusBarColor: Colors.transparent`, with `statusBarIconBrightness`/`statusBarBrightness` flipping automatically with the same `isDark` the theme already computes every build.
+
+### 464. The connection indicator, round 3 — a strip cost a visible gap, so it became a dot, then an overlay
+
+Jamal: "top bar above has so much space fix that okay ... as dot i think do that now". Shrunk the always-visible strip to a 7px dot (unlabelled when online, "Offline — saved data" text only when offline). Gap persisted.
+
+Root cause, this time real and structural, not cosmetic: the dot lived in a `Column` ABOVE `child`, with `MediaQuery.removePadding(removeTop: true)` around `child` to stop its own `SafeArea` re-adding the status-bar inset a second time. That mechanism is correct Flutter (it's what `SafeArea` itself uses internally) — but two rounds of "still a gap" after applying it is the sign to stop trusting it rather than patch further blind.
+
+Rebuilt as a `Stack` overlay instead: `child` passed through **completely untouched** — no `MediaQuery` override, no `SafeArea`, nothing — and the dot draws in a `Positioned` pinned to the physical top-right corner via `MediaQuery.paddingOf(context).top + 4`, wrapped in `IgnorePointer` so it can never steal a tap. Structurally cannot reintroduce the gap because it no longer participates in layout at all. Confirmed by a live screenshot afterward (§465) — dot renders correctly, no white band.
+
+### 465. The offline gap, diagnosed live rather than guessed at
+
+Jamal, from the phone: "in inside that event screen we saw img and below event name and date when i am offline it not show why it not save initially". Rather than guess, read the SharedPreferences file directly off the device:
+
+```
+adb shell run-as com.eventinvite.app cat /data/data/com.eventinvite.app/shared_prefs/FlutterSharedPreferences.xml
+```
+
+(needed `MSYS_NO_PATHCONV=1` prefix — Git Bash mangles the leading `/data/data/...` into a Windows path otherwise.) This proved event 23's full detail WAS genuinely cached — the whole JSON blob, theme, menus, everything — meaning the §458 caching itself was never the bug.
+
+The real gap: `selectedEventIdProvider` (which event is CURRENTLY being looked at) is a plain in-memory `StateProvider`, not persisted anywhere — it resets to `null` on every fresh Dart process. So a cold restart while offline lands on "No event is selected. Open it from My Events, or scan the invitation QR again" (an existing, already-good status message in `wedding_home_screen.dart` that Jamal had never noticed distinguished this from a real load failure) even though the underlying data was sitting safely on disk the whole time. **Not yet fixed** — diagnosed and explained, no code written for persisting the selection.
+
+### 466. QR-join never actually downloaded anything — the loader was cosmetic
+
+Same complaint, different root cause, once Jamal clarified: "we have to do that offline sync ... after scan QR show that loader like fetching event details that time get all data for user okay store that". §460's "Fetching event details…" text was purely cosmetic — nothing under it ever called the API. Both join paths navigated straight to Home/success the moment the join succeeded, so the event was only ever fetched lazily, later, live — exactly why it broke offline.
+
+Built `fetching_event_view.dart`: `FetchingEventView` (cloud-download icon, "Fetching Event Details…", subtitle, progress bar — matches Jamal's own reference mockup almost exactly) plus `prefetchEventDetails()`, a best-effort, never-throwing helper with a 900ms floor (same pattern as `AppSaveLoader`) that calls `EventRepository.byId()` — which already caches, from §458 — before continuing. Wired into BOTH places a join actually completes: `scan_qr_screen.dart`'s "already joined" branch, and `registration_screen.dart`'s `_confirm()`. Both now show the loader, prefetch+cache, THEN navigate — closing the actual gap this time, not just the visible symptom.
+
+### 467. Two real bugs, caught only by testing live on the wired device
+
+Live logcat during Jamal's own testing (`GET /client/notifications` responses, read directly off the phone) surfaced two genuine bugs neither `dart analyze` nor a code read had caught:
+
+**Bug A — stats parsing crashed on every single call.** The backend's `stats` shape (`getStats` in `clientNotification.service.js`) is nested: `{ total, unread, reminders, guest_activity, by_category: { rsvp: {total, unread}, ... } }`. `NotificationRepository.list()` cast it flat — `stats.map((k, v) => MapEntry(k, (v as num?)?.toInt() ?? 0))` — which threw the moment it reached `by_category` (a Map, not a number). Every call to the notifications list failed silently into `FutureProvider`'s error state, which is why Jamal saw an empty list while the Home badge (a different, correctly-shaped `/count` endpoint) still showed a real unread number — "badge shows 18, list shows nothing" was this exact bug, not a caching or scoping issue. Fixed by properly extracting `by_category.<cat>.total` into a flat `Map<String, int>`.
+
+**Bug B — the bell literally could not navigate.** `home_shell.dart`: `late int _index = widget.initialIndex;` only runs its initializer the FIRST time the State object is created. go_router reuses the same `HomeShell` State across every `/home` navigation (same route, different query param) rather than creating a new one — so the bell's `context.go('/home?tab=2')` rebuilt the widget with a new `initialIndex` that `_index` never re-read. The route change genuinely happened; the tab switch silently didn't follow it. Fixed with a `didUpdateWidget` override that re-syncs `_index` when `widget.initialIndex` changes.
+
+Both fixes verified against real traffic: after the fix, category chip counts (`All (35)`, `RSVP (2)`, `Reminders (1)`, `Messages (1)`) matched exactly what was seeded in §469 below, live, on the device.
+
+### 468. Two things corrected, one by Jamal's own screenshot, one by the git log
+
+1. **§462.2 said the MSG91 SMS code was "uncommitted, removal is clean, decision not made."** It is no longer uncommitted — `a8d8f94 "feat: add SMS OTP delivery support via MSG91..."` is now on `main`. That decision needs revisiting for real: the WhatsApp zero-tap path (§461) is strictly better and needs no DLT registration, but `msg91Sms.service.js` + the dual-send wiring + `sms_autofill` in `AppOtpField` are now committed, working code, not a discardable draft. Whether to keep both channels (WhatsApp zero-tap AND SMS) or rip the SMS half back out is now Jamal's call to make deliberately, not mine to assume.
+2. Confirmed live via `adb shell dumpsys package` that the phone's installed build's `lastUpdateTime` can be checked directly — used repeatedly this session to tell whether a screenshot reflected the current code or a stale prior build, after `home page top bar shows so much space` turned out to be Jamal testing a screenshot from BEFORE the round of fixes that addressed it. Worth remembering as a standing check before diagnosing anything from a screenshot: `adb shell dumpsys package com.eventinvite.app | grep lastUpdateTime` first.
+
+### 469. Notification module built for real — scoped down from Jamal's own mockup
+
+Jamal supplied a 10-screen mockup (Transactional/Campaign split, search, filters, detail view). Checked the real backend first rather than building to the mockup blind: `GET /client/notifications` + `/count` + `/read-all` + `/:id/read` + `/:id/archive` all already existed in `clientPortal.routes.js`, fully unused by the app — `notifications_screen.dart` was still the three-hardcoded-cards mockup flagged back in §447.
+
+**No "Campaign" category exists anywhere in this backend for a participant** — `TYPE_CATEGORY` in `clientNotification.service.js` only ever produces `rsvp / reminder / message / system / guest`. Jamal picked "real notifications only" when asked, so Campaign was dropped rather than faked.
+
+Built:
+- `notification_repository.dart` — model, repo, and providers (`notificationFeedProvider`, `unreadNotificationCountProvider`, plus `notificationCategoryFilterProvider` / `notificationUnreadOnlyProvider` / `notificationSearchProvider`)
+- `notifications_screen.dart` — real list, category chips with live counts, an "Unread" filter chip (a cross-category filter, not a sixth category — kept visually distinct), a search box (committed on submit, not per-keystroke), "Mark all as read" scoped to whichever tab is open (mirrors the backend's own scoping rule), pull-to-refresh, empty/error states
+- `notification_detail_screen.dart` — new, reached via `context.push('/notification-detail', extra: notification)` rather than a second fetch, since the tapped row already has everything the detail view shows. Opening it IS the read action; a toggle can flip it back to unread. "View Event" navigates through this app's own `/event/wedding` route.
+- Home's bell badge now reads `unreadNotificationCountProvider` — replacing the hard-coded `3` that had sat there with a comment saying no endpoint existed. One does; it was just never wired up.
+
+**Deliberately not followed: the backend's `link` field** (e.g. `/dashboard/guests/12`) is a HOST WEB PORTAL route written for `event_client_single`'s own router — it is not a path that exists in this app. Following it would open nothing, so tapping instead offers "View Event" through the app's own real route only when the notification names one.
+
+Seeded 7 real test notifications for mobile `9884699435` (`website_clients.id = 23`, "Test Client") — one per real type across all five categories, via `clientNotification.service.js`'s existing `notify()`, run directly with `node -e` (not a committed script — a one-off, per CLAUDE.md's "no scratch scripts" rule for anything meant to persist).
+
+### 470. Network diagnosis — AP Isolation on the router, not the app, not the port
+
+Jamal, on the wired phone: `SocketException: No route to host (errno 113)` hitting `192.168.1.38:5001`, suspected a port issue. Diagnosed properly rather than guessed:
+
+- `ping` from the phone to the laptop: `Destination Host Unreachable`
+- `Test-NetConnection` from the laptop to the phone: also failed, confirming it's BIDIRECTIONAL
+- Both devices confirmed on the exact same access point (`netsh wlan show interfaces` and the phone's own wifi dump both showed BSSID `8c:13:e2:25:f9:58`), same `/24` subnet, both individually had real internet
+
+`errno 113` (EHOSTUNREACH) is a routing-layer failure, not a port-layer one — a wrong/closed port gives `Connection refused` (errno 111) instead, and would still happen on ANY port, which is how "is it a port issue" was ruled out directly rather than by assertion. Same AP + same subnet + mutually unreachable = **AP/Client Isolation**, a router security feature blocking device-to-device traffic on the same Wi-Fi even though both devices are individually online. Not a code bug anywhere.
+
+**Workaround shipped for the current session:** `adb reverse tcp:5001 tcp:5001` — tunnels the phone's own `127.0.0.1:5001` through the USB cable straight to the laptop, bypassing Wi-Fi and the router entirely. Verified live with `adb shell curl` returning a real HTTP 400 (not a connection error) before telling Jamal to flip `.env`'s `API_BASE_URL` back to `http://127.0.0.1:5001/api/v1`. ⚠ This tunnel is NOT persistent — it drops if the phone is unplugged or the adb session ends, and needs re-running. The real fix (disabling AP Isolation on `star-5G`'s router admin page) was handed to Jamal, not done, since it needs router credentials this session does not have.
+
+### 471. Open
+
+1. **`selectedEventIdProvider` still not persisted** (§465) — the actual, now-precisely-diagnosed reason an offline cold-restart can land on "No event is selected" despite the underlying data being cached correctly. Fix identified, not built: persist the selected id to `SharedPreferences` alongside the event data.
+2. **The MSG91 SMS vs WhatsApp zero-tap decision is now live on `main`, not a draft** (§468.1) — needs Jamal's explicit call, not an assumption either way.
+3. **The WhatsApp zero-tap Android side is still not built** (§461/§462.1) — parked on Meta's review of `otp_verify_app`, unchanged this session.
+4. **Notification module's newest round (detail screen, search, filter, mark-all-read) has NOT been tested on device yet** — built after the last confirmed-working screenshot; `dart analyze` clean, nothing more.
+5. Cannot drive taps on the Redmi via `adb input` — blocked by MIUI's `INJECT_EVENTS` permission requirement (Settings → Developer options → "USB debugging (Security settings)", not enabled). Screenshots and logcat work fine; live interactive testing this session depended on Jamal tapping while logs were watched.
+6. **The login banner is still `Image.network` on an Unsplash URL** (§462.5) — unchanged, still offered, still unanswered.
+7. `testTrigger` still exists with no caller (§453) — unchanged.
+8. Carried from §452/§448/§462.7: nothing gates a send on `event_notification_template_prefs`; `EVENT_QR_SECRET` still not on Render; `OTP_ACCEPT_ANY=true` on production; secrets pasted into chat unrotated; app's `NotificationsScreen` mockup status is now RESOLVED (§469) — remove from future carry-forwards; Opened/Clicked always 0.
+
+---
+
+## Session 42 — Sample data traded for real rows across nine screens, and splashes finally point at events
+
+> **Date:** 2026-09-10 | **Backend:** Event_Management_Admin_Backend · **Client portal:** event_client_single · **Mobile:** Event_Invite_Mobile_App
+> The theme of this session: screens whose design was finished months ago but which were still rendering the sample wedding — "RAHUL & PRIYA / We're Engaged! / The Grand Palace, Mumbai" — while the real data for them already sat in the API. Nine screens converted. Three live bugs fell out of the conversion, and §462/§471's "app has no splash-rendering screen" is now half resolved: the LINK exists (schema on production), the renderer still does not.
+
+### 472. The sample wedding was in more places than anyone had counted
+
+Jamal's ask each round was some variant of "this page has data, wire it". Rather than one big sweep, the pattern that kept repeating is worth recording, because it is what made the work slower than it looked:
+
+**The same fake data lived in several unrelated files, and fixing one did not fix the others.** Three separate hardcoded guest lists existed, none aware of the others:
+
+| File | Constant | Read by |
+|---|---|---|
+| `guests/guest_list_data.dart` | `kGuestList` (8 guests + RSVP status) | Guest List |
+| `invite/invite_shared.dart` | `kGuests` (8 guests, family/friends/others) | the invite guest picker |
+| `participants/participant_data.dart` | `kParticipants` + `kParticipantTotals` | Participants |
+
+Plus `family/family_data.dart` (`kFamilyMembers`, `kFamilyGroups` — ~150 lines), and the sample values baked into `EventBanner`'s own **default parameters**, which is why three screens showed the sample wedding without any of them containing a sample string.
+
+### 473. Two screens were wired, then reported as still hardcoded — twice, for two different reasons
+
+Worth remembering because both cost a round trip.
+
+**First: near-duplicate screens.** Venue was wired, and Jamal came back with "venue still not wire?". Correct — there are **two** directions screens:
+
+```
+/event/venue-directions  -> venue_directions_screen.dart   (from Share Venue)   <- wired first
+/event/directions        -> event_directions_screen.dart   (from Event Info)    <- the one he was on
+```
+
+Nearly identical files. The route table is the only place that difference is visible; reading either file alone tells you nothing. **Check the router for a second screen before declaring a page done.**
+
+**Second: a stale build.** Family was wired and reported as still hardcoded. §468.2's standing check settled it in one command:
+
+```
+adb shell dumpsys package com.eventinvite.app | grep lastUpdateTime   -> 18:47:24
+ls -l lib/features/event/family/family_screen.dart                    -> 19:30:34
+```
+
+The installed APK was 43 minutes older than the code. Also worth stating plainly: nearly every screen converted this session changed `StatefulWidget` -> `ConsumerStatefulWidget`, or gained a constructor parameter, or moved in the router — **none of which hot reload can apply.** A full restart is not optional after this kind of change.
+
+### 474. What got wired, and what could not be
+
+Real data now, all through `selectedEventProvider` / the new `GuestRepository`:
+
+- **Venue directions x2**, **Share Venue**, **Agenda**, **Gallery / Upload Photos / Add Category** (via the shared `EventBanner`), **Invite & Share** (all six flows, via `InviteCard` + `InvitationPreviewCard`), **Family** + **Member Profile**, **Guest List** + add flow, **Participants** + details.
+- `ClientEventDetail` gained `endDate` — the API had always returned `end_date`; the app simply never read it. Plus `eventDays` (the real `start_date`..`end_date` span) and `durationLabel`.
+- The Agenda day strip is derived from that real span, and **scrolls past 4 days**: the design assumed 3, and event 29 spans 2026-08-27 -> 2026-09-05, which would have squeezed ten chips to ~25px each.
+
+Deliberately **not** invented, because no column exists: Date of Birth and Occupation on a guest; Elders/Kids counts (no age/dob on `event_guests`); the agenda timeline itself; every gallery photo. These render an em-dash or stay sample with a comment saying why.
+
+**Cannot be wired at all — no table exists.** Checked all 160 tables rather than assuming:
+
+- **Chat** (6 screens). `event_messages` has 209 rows and every single one is `sender: 'system'` — a one-way invite/reminder/update delivery log across whatsapp/email/push. There is no guest->host message anywhere. Conversation needs a real threads table; `chat_state.dart` is in-memory local state.
+- **Wishes, Social Wall, Downloads, Speakers, event Gallery.** No tables. All are `event_menus` slugs with per-plan limits defined in `subscriptionPlan.service.js`'s `LIMIT_CATALOG`, which is what makes them look implemented from the plan screens.
+
+> `LIMIT_CATALOG` also carries `venue: [{ key: 'max_venues' }]` — so **multi-venue per event is the intended design**, while `events` holds exactly one `venue_name`/`venue_address`. The "Main Venue" badge in the app's design is aimed at a schema that does not exist yet.
+
+### 475. Three real bugs the conversion exposed
+
+1. **`ParticipantRepository` called an endpoint that does not exist.** `GET /events/:eventId/participants` — nothing in `clientPortal.routes.js` matches. Its own header calls it "the reference repository — copy this shape for every other feature", and it shipped with a `useSampleData` fallback; since that flag went false, the fallback stopped running too, so every call was a live 404. The screen never noticed because it read `kParticipants` directly and ignored the repository. **Deleted.** Participants and Guests are the same `event_guests` rows and now share one repository.
+2. **`participant_details_screen` read `kParticipants.first`** — every row you tapped showed the same sample person, with their city defaulted to "Chennai, Tamil Nadu".
+3. **The add-guest flow's save was theatre.** `review_guest_screen._confirm()` waited 700ms to look busy, then appended to a plain Dart list. Every guest "saved" in the app was gone on the next launch. Now a real `POST /client/guests`.
+
+### 476. The chat back button was invisible, not missing
+
+Reported as "chat screen has app bar no back btn". The button was **there** — `/event/chat` is reached by `push`, so `automaticallyImplyLeading` had already inserted one. The theme sets `appBarTheme.foregroundColor: AppColors.onColor` (white, for the default navy bar), and the screen overrides `backgroundColor` to the light surface without touching the foreground: **white on white.**
+
+That is why every sibling screen passes `BackButton(color: AppColors.primary)` explicitly, and why this screen's own search/menu icons pass `color: AppColors.textPrimary` — each is working around the same mismatch. Scanning for the pattern (light bar + no explicit `leading` + no `foregroundColor`) found **`notification_detail_screen.dart` with the identical latent bug**; also fixed. The notifications *tab* is fine — it lives in `HomeShell`, is never pushed, so having no back button is correct there.
+
+⚠ Systemic, and not fixed: any future screen with a light `AppBar` inherits a white foreground. The real fix is a shared app-bar widget or setting `foregroundColor` alongside `backgroundColor`, but ~25 screens already hand-override their colours, so changing the theme default shifts all of them at once and needs device checking.
+
+### 477. The form says email is optional; the API requires it
+
+`POST /client/guests` requires `event_id`, `first_name` **and a valid `email`** — and `email` is also what its duplicate check keys on (`website_client_id` + `event_id` + `email`). The app's add-guest form labels the field **"Email (Optional)"**.
+
+Not silently papered over: the create surfaces the server's own message on screen, so a guest saved without an email fails visibly rather than vanishing. **Jamal's call which side changes** — mark the field required in the app, or relax the backend (which weakens dedupe). Not assumed either way.
+
+### 478. RSVP status: five values on the server, three pills in the app
+
+`event_guests.rsvp_status` is `not_responded | invited | pending | accepted | declined`; the app's `RsvpStatus` is `attending | notAttending | pending`. Mapping: `accepted`->attending, `declined`->notAttending, everything else->pending. That is why event 22's 33 `invited` guests all appear under "Pending".
+
+⚠ **`RsvpStatusX.wire` and `rsvpStatusFromWire` were deleted**, not reused. They emitted `attending` / `not_attending`, which the server **rejects outright**. They had become orphaned once `Participant.fromJson` went, and leaving them there was a trap for whoever wired the next write. The real conversion now lives in `GuestRepository` next to the shape it belongs to.
+
+### 479. Family is guests sorted by relationship — and the two signals disagree per event
+
+There is no family table. `family` is an `event_menus` slug with a `max_family_members` plan limit and nothing behind it. But two real columns carry the information, and this is the useful find: **`guest_relationship_options`** (admin-managed per event category — "Bride's Father", "Groom's Sister", "Relative", "Family Friend") and **`event_guest_groups`** (the client's own groups, with their own colours: Family `#EC4899`, Close Friends `#8B5CF6`, Colleagues `#3B82F6`).
+
+⚠ The two are used **inconsistently across real events**, which is the part that forced a judgement call:
+
+```
+event 22 (36 guests):  group_id set on all 36, relationship NULL on all 36
+event 23 (6 guests):   relationship set, group_id NULL
+```
+
+Reading `relationship` alone leaves event 22's Family tab **empty** despite 11 guests sitting in a group the client literally named "Family". So `EventGuest.familyCategory` reads `relationship` first and **falls back to the group name**. Stated rather than hidden — if strict relationship-only is wanted, it is one method.
+
+`friend` is tested before `family`, or "Family Friend" classifies as family.
+
+Which events actually have family data, for future testing: **event 22 has 11** (Aakash Sharma, Aman Sharma, Pooja Verma, Aditi Iyer, Kavya Menon, Ananya Kulkarni, Nikhil Rao, Riya Iyer, Aditi Desai, Riya Verma, Divya Gupta — all via the "Family" group, all `invited`); **event 23 has 2** (Bride's Sister, Bride's Brother, both `accepted`); **event 26 has none**.
+
+Tapping a group card used to open a single **member** profile, which for a whole group could only ever show the wrong person. It now filters the member list to that group instead — there is no group-detail screen to send it to.
+
+### 480. Splash screens now point at real events — one each, on production
+
+§462/§471 carried "the app has no splash-rendering screen". Half of that is now closed. The module shipped deliberately unlinked:
+
+> "`event_name` is plain text a client types, not a foreign key. This module ships its own CRUD first; linking a saved splash to a real `events` row is an explicitly later phase."
+> — the SplashScreen model's own header
+
+None of the saved rows' typed names matched a real event, so there was nothing to name-match on. **Jamal chose one event, one splash**, enforced in the database rather than by convention.
+
+| Piece | What changed |
+|---|---|
+| `apply-splash-screen-event-link.js` | NEW. `event_id INT UNSIGNED NULL` + `uq_splash_screens_event_id` (UNIQUE) + FK to `events`. Refuses to add the index while duplicates exist and **names the offending events** instead of letting MySQL say "Duplicate entry" |
+| `SplashScreen.js` | `event_id`; header rewritten from "NOT PER-EVENT YET" to the 1:1 rule |
+| `models/index.js` | `Event.hasOne(SplashScreen)` — hasOne, not hasMany, because the column is UNIQUE |
+| `clientSplashScreen.service.js` | `resolveEvent` (scoped ownership check, same guard as `clientGuest`), `assertEventFree` (friendly duplicate refusal), `getActiveSplashForEvent`; `normalise` is now async and takes `clientId` |
+| `clientSplashScreen.controller.js` + routes | `GET /client/splash-screens/for-event/:eventId`, declared BEFORE `/:id` — the same ordering trap as `/events/stats` |
+| Client portal `splash-form.tsx` + `use-splash-screens.ts` | Free-text "Event Name" -> dropdown of the client's own events, with already-taken events filtered out |
+
+Deliberate choices worth keeping:
+
+- **`event_id` is NULL-able** even though the form now requires it. Rows saved before the link have no event, and MySQL permits many NULLs under a UNIQUE index — so they survive as unlinked drafts instead of being deleted or guessed into the wrong event.
+- **`event_name` was kept, not dropped.** It is `NOT NULL`, and the service now **copies it from the chosen event and ignores any value sent for it**, so the text on the splash cannot drift. Omitted from `SplashScreenPayload` so the form cannot try.
+- **`ON DELETE SET NULL`, not CASCADE.** Deleting an event should not silently destroy a design the client built with it.
+- **200 with `splash_screen: null`, not 404**, when an event has no splash. "No splash" is a normal answer the app acts on by going straight in; a 404 would make an ordinary event look like a failure.
+- The dropdown **excludes events that already have a splash** — the server refuses a duplicate anyway, but learning that after filling in six panels is a poor way to find out. The splash's own event stays selectable, or editing one would blank its own field.
+
+Verified against real data before and after: linking splash 14 to event 23 rewrote `event_name` from the typed "Priya & Arjun Wedding" to the real **"Rohan & Diya"**; a second splash for event 23 was refused by name; a foreign event id was refused; a `draft` was not served; a full create->publish->read->delete cycle worked.
+
+**Applied to production** (`--prod --apply`), re-run confirms idempotent, and `schema-audit.js` afterwards: **MISSING TABLES: none. MISSING COLUMNS: none.**
+
+> ⚠ Production had **0** unlinked splash rows to worry about; local has 6. And the local count is 6, not 19 — `SELECT COUNT(*)` says 19 but 13 are soft-deleted duplicates from the seeder running twice.
+
+### 481. Two things about the splash feature that are NOT done
+
+1. **No guest sees a splash.** The renderer does not exist — the app has nothing that reads any of this. The three completed pieces make the feature *configurable*, not *visible*. The portal's `splash-preview.tsx` is a usable spec for it: it already resolves all six background types (`image`, `video`, `solid_color`, `gradient`, `logo`, `couple_photo`) in CSS, so the Flutter version need not reverse-engineer the JSON config blobs.
+2. **The read is owner-scoped**, so a guest who joined by QR gets `null` — which is the exact opposite of the point of the feature. Serving a host's splash to their guests needs the same viewer-scoped treatment `getEventForViewer` got beside `getEventById`. Left undone on purpose: it widens who may read a splash, which is a decision, not a detail.
+
+### 482. Settings: an API with no screen, and a delivery message that is now wrong on mobile
+
+Audited for wiring and found there is nothing to wire — the app's Settings screen is **three tiles** (Theme, About, Logout) with no preference controls at all. `GET /client/settings` meanwhile returns a full payload from `client_preferences`.
+
+Of its 13 preference fields, **six are web-portal concepts** with no meaning in an app navigated by a bottom bar: `default_landing` (`dashboard`), `items_per_page` (20), `compact_mode`, `auto_save`, `show_tips`, `language_code`. Worth having on mobile: the notification matrix (grouped Events / Guests / Account & Billing, each with `instant | daily_digest | weekly_digest`), the DND window, and `theme` — the app's own appearance choice persists to `SharedPreferences` only, so it is per-device and dies on reinstall. `date_format` / `time_zone` are real but touch every date on every screen, so deferred.
+
+⚠ **The blocker to fix before any settings UI ships:** the payload's `delivery` block reports in-app notifications as **disabled**, reason *"there is no notification feed in this portal"*. That was written for the web portal. The **mobile app has a working feed** since §469. Shipping the UI against this payload would tell mobile users notifications don't work while they visibly do. Needs per-platform delivery reporting.
+
+### 483. Network: the app was hitting production because `.env` was never passed
+
+Reported as the app calling `onrender.com`. Not a config error — `AppConfig.apiBaseUrl`'s **default** is the live backend, and `.env` (already correct at `http://127.0.0.1:5001/api/v1`) only applies with `flutter run --dart-define-from-file=.env`. Plain `flutter run` silently uses production.
+
+Then `Connection refused` on `127.0.0.1:5001`: `adb reverse --list` was **empty**. §470's tunnel is not persistent and had dropped. Re-ran `adb reverse tcp:5001 tcp:5001`. Confirmed the backend itself was healthy first (`netstat` showed node listening on 5001; the endpoint answered HTTP 400 to an empty body rather than refusing), so the tunnel was the whole problem. No hotspot needed — USB `adb reverse` bypasses Wi-Fi and the router's AP isolation entirely.
+
+### 484. Open
+
+1. **The splash renderer is not built** (§481.1) — the whole visible half of the feature.
+2. **The splash read is owner-scoped** (§481.2) — needs a viewer-scoped variant before guests can ever see one.
+3. **Settings notification UI + the per-platform `delivery` fix** (§482) — awaiting approval, not started.
+4. **Email required by the API, optional in the form** (§477) — Jamal's call, unresolved.
+5. **Add Participant and Add Member still don't save** — both show a success toast and write nothing, the same theatre §475.3 removed from the guest flow. Both would really be `POST /client/guests` with a `relationship`.
+6. **`kRelationships` / `kParticipantRelationships` are hardcoded** — the server owns these in `guest_relationship_options`, per event category, and `InviteRepository` already reads that list for the QR-join form. Baking them into the app means an app-store release to add a value.
+7. **`kInviteMessage` and `kInviteLink` are still sample** — the invite body text and the share URL. `kInviteLink` has no real destination: there is **no public web page anywhere** that resolves a shared invite link in a browser, so sharing only works by the receiving phone scanning the QR through this app. The event's real `qr_token` IS returned to the owner by `GET /client/events/:id`, so a real QR image can be generated; a browser-openable link cannot.
+8. **The light-`AppBar` foreground mismatch is systemic** (§476) — two instances fixed, the theme-level cause left alone.
+9. **`event_menus` has polluted rows** — ids 9-17 are `event-info-updated-d1786679758014`-style duplicates from menu-duplication testing, visible in any menu picker.
+10. **Multi-venue is designed for but not schemad** (§474) — `max_venues` exists as a plan limit; `events` holds one venue.
+11. **No lat/lng anywhere** — the venue map, route, ETA, distance, traffic and turn-by-turn steps remain placeholder. Either geocode `venue_address` on demand or add columns plus a map picker to the event wizard; not decided.
+12. Carried from §471: `selectedEventIdProvider` still not persisted; the MSG91 SMS vs WhatsApp zero-tap decision still live on `main`; WhatsApp zero-tap Android side still not built; the login banner still an Unsplash `Image.network`; `testTrigger` still has no caller; `EVENT_QR_SECRET` still not on Render; `OTP_ACCEPT_ANY=true` on production; secrets pasted into chat unrotated; Opened/Clicked always 0.
+
+---
+
+## Session 43 — Splash screens reach guests: viewer-scoped read + the app's renderer
+
+> **Date:** 2026-09-11 | **Backend:** Event_Management_Admin_Backend · **Mobile:** Event_Invite_Mobile_App
+> Closes §484.1 and §484.2. Jamal: "do that splash screen wiring for each event based".
+
+### 485. What was built
+
+**Backend**
+- `getActiveSplashForEvent` is now **viewer-scoped**: the event's owner OR a guest with `event_guests.participant_client_id` = the caller — the same two doors as `getEventForViewer`. The splash is matched on the event's own owner too, and `website_client_id`, `company_id`, `name` (internal label), `deleted_at` are stripped.
+- **Bug fixed — soft delete held the UNIQUE slot.** `splash_screens` is paranoid, so a deleted splash kept its `event_id` under `uq_splash_screens_event_id`. `assertEventFree` skips deleted rows → passes → MySQL "Duplicate entry" 500 on the next create for that event. `deleteSplashScreen` now nulls `event_id` before `destroy()`. `apply-splash-screen-event-link.js` gained an idempotent step clearing `event_id` on already-deleted rows — **local had 1** (the §480 delete-cycle test), applied locally. ⚠ **Production not checked** — run `node src/database/tools/apply-splash-screen-event-link.js --prod` (dry) then `--prod --apply`.
+- Verified against local data: event 23 → owner (client 23) gets splash 14, QR guest (client 69) gets splash 14 with no host-only keys, stranger gets null.
+
+**Mobile**
+| File | What |
+|---|---|
+| `data/repositories/splash_repository.dart` | NEW. `EventSplash` model, `SplashRepository.forEvent` (4s timeout, offline cache `event_splash_<id>`, **never throws** — any failure = no splash), `eventSplashProvider` (family by event id) |
+| `features/event/event_splash_screen.dart` | NEW. Renders all six background types, overlay, titles, date (`show_event_date`), tagline, loader (`dots` or spinner, whole time). **No button** (Jamal's call): auto-enters `/event/wedding` after 3s once the event has downloaded, 5s hard ceiling; immediately when there is no active splash. Portal's `button_*` fields are not drawn (`button_color` = loader fallback colour) |
+| `app_router.dart` | `/event/open` route; `/event/:id` deep link now goes through the splash |
+| `home_screen`, `my_events_screen`, `notification_detail_screen` | open via `/event/open` |
+| `fetching_event_view.dart` | `prefetchEventDetails` also warms the splash cache on join |
+
+Deliberate choices:
+- **Plays once per open, not per return.** Only the entry points go through `/event/open`; every "back to event" button still goes to `/event/wedding`.
+- **`logo` type uses dark text** on its cream ground — the portal preview's white-on-cream is unreadable.
+- `?? 0` overlay default follows the portal **preview**, not the form slider's 40 for video/couple photo.
+
+### 486. Not delivered (need a plugin the app does not carry)
+
+1. **Video backgrounds show `fallback_image_url`**, not the video — needs `video_player`.
+2. **Sound** (`sound_*`) — needs an audio plugin.
+3. **Animations** (`animation_*`) — still saved, not delivered.
+4. `dark_overlay` (couple photo) ignored, same as the portal preview.
+5. Background images use `Image.network` — not persisted across a cold offline start; the splash then shows its dark fallback colour.
+6. **Not run on device yet** — `dart analyze` on all 8 changed files: no issues. Needs a full restart (new route + new screen, hot reload cannot apply).
+
+### 487. RSVP from the app now reaches the client portal — once per event
+
+The app's `rsvp_screen.dart` was a mockup: sample guest "Rajesh Kumar", "RSVP by 15 May 2024", saved nothing. The existing `/client/rsvps/*` routes are HOST-scoped (owner edits a guest's answer) — a guest had no way to answer their own.
+
+**Backend**
+- `GET` / `POST /client/events/:id/my-rsvp` (`guestRegistration.service` `getMyRsvp` / `submitMyRsvp`). Found by `participant_client_id`. Writes the SAME `event_guests` columns the portal's RSVPs / Guests / analytics read — nothing to sync. Response: `{ is_host, can_respond, rsvp }`.
+- **One answer per event**, enforced atomically: `UPDATE ... WHERE response_type = 'none'`, so a double tap or second device cannot both land. Only the host clearing it (portal RSVP → reset) re-opens it. Decline stores `party_size = 1`.
+- Each guest answer appends RSVP History with `source = 'guest'`, `changed_by_client_id` = the guest (`logResponseChange` gained `opts.changedBy`, now exported), and notifies the host (`rsvp_accepted|declined|maybe`, link `/dashboard/rsvps/:id`).
+- **Bug fixed in `join`** — the re-scan path posts only the token (+ `guest_count: 0`), and join overwrote every field: RSVP → `none`, party → 1, food / relationship / notes / gender → NULL. A re-scan wiped the guest's answer in the portal. Now an existing row takes only the fields actually sent, and an existing answer is never replaced (same one-time rule).
+
+**Verified on local (temp guest row, cleaned up; notify + WhatsApp trigger stubbed):** submit yes/3/"Jain food" → portal `rsvp.list` shows bucket accepted, party 3, Jain food; history `null -> yes source=guest by=10 scope=23`; host notification captured; second submit refused, row unchanged; re-scan `join` kept yes / party 3 / Jain food.
+
+**Mobile** — `data/repositories/rsvp_repository.dart` (new), `rsvp_screen.dart` rewritten: loading/error, host message, **read-only "already responded" view** when `can_respond` is false, real flow otherwise (identity shown read-only from the guest row, guests stepper 1–50 hidden on decline, special requests). Event date replaces the fake RSVP deadline (no deadline column exists).
+
+⚠ **Every QR-joined guest has already answered** — `registration_screen.dart` asks the same question with `_response = 'yes'` as default (all 11 local QR guest rows are `yes`). So in practice the RSVP tab shows the locked answer for them. Open question for Jamal: drop the RSVP question from registration (join would store `none`, leaving the RSVP tab as the one place to answer), or keep both.
+
+Note: client 23 (the test account) has guest rows on its OWN events 22/23/26, so it sees the guest view there, not the host message.
+
+### 488. Event Info tiles: Invited Guests / Guests Joined / Invitations Sent are real
+
+All three were hardcoded `'—'` with a stale comment ("guests_available: false", "messaging PAUSED"). `GET /client/events/:id` (both owner and guest-viewer reads, via `presentOne`) now carries `stats`, computed by `guestStatsFor` in ONE round trip of three sub-selects (prod latency):
+
+| Tile | Definition |
+|---|---|
+| `invited_guests` | `event_guests` rows (not deleted) — one invitation each, = portal "Total Invitations" |
+| `guests_joined` | rows with `participant_client_id` — joined through the app by QR |
+| `invitations_sent` | `event_messages` `kind='invite'` AND `status IN ('sent','delivered')` — NOT `invited_at`, which the QR join stamps with nothing sent |
+
+Null on failure (tile shows "—", never a fake 0). App: `ClientEventDetail.invitedGuests/guestsJoined/invitationsSent` from `stats`; cached offline with the event.
+
+Verified against direct counts, host and guest view: event 22 → 36 / 1 / 0, event 23 → 6 / 6 / 0, event 26 → 6 / 4 / 0.
+
+⚠ **Invitations Sent is 0 everywhere, and that is true:** event 22's 138 invite messages (30 WhatsApp + 108 email) are ALL `status='queued'` — none ever left (WhatsApp/email delivery is not live). The only `sent` rows are 5 `update` pushes. Counting `queued` would show 138 for invitations nobody received — Jamal's call if he wants "attempted" instead.
+
+### 489. End-to-end test: limited plan → client portal → mobile API → plan update
+
+Jamal: "create new client, create new plan with limited menu, login client portal, that menu only showing … check mobile api … update that plan it reflects".
+
+**What "menu" means here** (worth recording — it is not the portal sidebar): a plan's menus are `event_menus` rows linked through `subscription_plan_menus`, each with `for_website` / `for_mobile` flags (W/M). The portal SIDEBAR is not plan-gated at all (`lib/navigation.ts`); what the plan gates is the event wizard's menu choices (`/client/event-options`) and therefore which menus an event can carry.
+
+**`tests/plan-menu-gating.test.js`** (new, re-runnable). Admin steps through the service layer (no admin credentials available to a test); portal via real HTTP with a cookie session; app via real HTTP with OTP + bearer. Keeps its data for manual checks; `--cleanup` removes every `ZZ QA` / `ZZ_QA_*` row.
+
+Run 2026-09-11 — **17 passed, 0 failed, 3 gaps**. Plan 18: Event Information (W+M), Agenda (**W only**), RSVP (W+M); client 100; event 52.
+
+| Check | Result |
+|---|---|
+| Portal login, `/client/me` shows the plan | PASS |
+| Portal offered exactly Event Information, Agenda, RSVP | PASS |
+| Create with Gallery (not in plan) → 400 | PASS |
+| Event + guest created | PASS |
+| App OTP login, reads event, stats 1 / 0 / 0, event in list | PASS |
+| Plan update (−Agenda +Gallery): portal AND app offer update immediately; Agenda now refused on create | PASS |
+| **GAP 1** — app gets Agenda although it is web-only | `for_website`/`for_mobile` are stored but `getEventOptions` never reads them; both platforms get the same list |
+| **GAP 2** — app's event detail shows Agenda | `presentOne` resolves `menu_ids` by `is_active` only |
+| **GAP 3** — existing event keeps Agenda after the plan drops it | same cause: event menus are never re-checked against the current plan (portal and app both) |
+
+Plus the known one: the app's Explore grid is a **hardcoded 16-tile list** (`wedding_home_screen.dart` `_tiles`) and reads neither the plan nor `event.menus` — so on the phone every tile shows regardless of plan.
+
+Test data kept: portal `zzqa.709944@example.com` / `QaTest@1` (localhost:3005), app `+91 7070994485` (any OTP).
+
+**On the device (Redmi, driven by `adb shell input` — works now that USB debugging (Security settings) is on):** logged out Test Client → Existing Participant → +91 7070994485 → OTP → Home shows "Hi, ZZ QA Client 709944" with its one event "ZZ QA Wedding 709944, 20 Dec 2026, QA Hall, Chennai" — the real data. Opening it: **the Explore grid shows all 15 tiles** (Event Info, Agenda, Venue, Gallery, Family, Participants, Invite & Share, Guests, RSVP, Near By, Chat, Wishes, Social Wall, Downloads, Contact Us) while the plan now grants only Event Information, Gallery, RSVP. Device confirms the hardcoded grid.
+
+Other things seen on the device: Home's **"8 Invitations"** tile for a client with 1 guest (looks hardcoded — not checked yet); the event hero is a stock wedding photo (known Unsplash fallback).
+
+adb notes: typing an OTP with one `input text 649097` drops digits in `AppOtpField` — send one digit at a time with a short delay. The phone is left **signed in as the ZZ QA client**; Test Client is `9884699435`.
+
+### 490. The three gaps fixed — plan menus now gate per platform and follow the plan as it is now
+
+**Backend**
+- `clientPortal.service`: `platformFromHeader(x-client)` (`flutter` → `mobile`, anything else → `website`), `grantedMenuIds(planId, platform)` (reads `for_website` / `for_mobile` — stored since the plan wizard shipped, read by nothing until now), `ownerGrantedMenuIds(ownerId, platform)` (owner's plan must exist and be active, else nothing).
+- `getEventOptions(clientId, { platform })` — portal gets website menus, app gets mobile menus. Create/update validation keeps the default `website` (only the portal creates events).
+- `clientEvent.service presentOne(event, { platform })` — `event.menus` = saved `menu_ids` ∩ what the OWNER's plan grants today on that platform. **`menu_ids` is returned untouched** (the portal edit form reads it), so nothing on the event is deleted and re-granting a menu restores it. Owner not viewer: a guest sees the host's event under the host's plan.
+- Controllers `clientPortal.eventOptions` and `clientEvent.getById` pass the platform.
+
+**Mobile**
+- `ClientEventDetail.menuSlugs` from `event.menus`.
+- `wedding_home_screen.dart` Explore grid: `(label, icon, slug)`; a tile shows only if its slug is in `menuSlugs`; nothing renders until the event loads (no flash of all 15); "No features are enabled for this event yet." when none.
+- ⚠ Tiles with **no `event_menus` row can never be granted, so they never show**: Family, Participants, Invite & Share, Guests, Near By, Chat, Social Wall, Downloads (slugs `family`, `participants`, `invite-share`, `guests`, `near-by`, `chat`, `social-wall`, `downloads`). Creating a menu with that exact slug in Menu Management and granting it on a plan turns one on. `speakers` exists as a menu but has no app screen.
+- Home "Invitations" tile: was a literal `8`; now `invitationCountProvider` = `/client/events/joined` length.
+
+**Re-run `tests/plan-menu-gating.test.js`: 24 passed, 0 failed, 0 gaps** (plan 19, client 101, event 53). New locks: app gets Event Information + RSVP while portal gets all 3; `menu_ids` untouched; after −Agenda both portal and app event show Event Information + RSVP; re-adding Agenda (W+M) brings it back on the app.
+
+`dart analyze` clean on the 3 mobile files. Not yet seen on device at the time of writing — needs a hot restart of the running app.
+
+### 491. Client portal sidebar is plan-driven; Integrations removed — verified in a real browser
+
+Jamal chose: **gate sidebar sections by plan menu** (not "list plan menus in the sidebar"), and **remove Integrations** (it linked to `/dashboard/integrations`, which has no page).
+
+**The trap avoided:** plan menus are `event_menus` rows — the SAME rows the Create Event wizard offers as event features and the app turns into Explore tiles. Adding "Guests" as a normal menu would have made it an event feature. So portal sections get their own `menu_group = 'portal'`, which the wizard never shows (it renders only core/additional/custom) and which `getEventOptions` returns separately.
+
+| Piece | Change |
+|---|---|
+| `src/database/tools/apply-portal-section-menus.js` | NEW. Adds `'portal'` to `event_menus.menu_group` ENUM; creates Guests / Messages / Splash Screens / Analytics / Notification Templates (slugs `guests`, `messages`, `splash-screens`, `analytics`, `notification-templates`), website-only; grants each **newly created** one to every existing plan (one `INSERT IGNORE … SELECT` per section — prod latency). Never re-grants an existing section, so a re-run cannot undo an admin's removal. **Applied locally** (ids 18–22, 9 plans); re-run idempotent. |
+| `EventMenu.js` | ENUM gains `portal` |
+| `clientPortal.service getEventOptions` | `menus` = event features only (portal group excluded — event create validation reads `menus`, so a portal section can never be stored on an event); new `portal_sections: [slug]`; all early returns carry `portal_sections: []` |
+| Admin FE `subscriptions/[id]/menus/page.tsx` + `use-menu-management.ts` | "Client Portal Sections" group so an admin can grant/remove sections per plan |
+| Portal `lib/navigation.ts` | `section` slug on Splash Screens, Guests, Messages, RSVPs (`rsvp`, the existing event menu), Notification Templates, Analytics; Integrations removed; `grantedSections()` + `sectionForPath()` (longest URL wins) |
+| Portal `AppSidebar.tsx` | renders `visibleNav` — gated entries only when granted; hidden until options load (no flash) |
+| Portal `components/common/plan-section-gate.tsx` + dashboard `layout.tsx` | NEW. A typed URL to a section the plan lacks shows "{Section} is not included in your plan" with Compare plan features / Back to dashboard |
+
+Always visible: Dashboard, My Events, Templates, Notifications, Billing, Settings.
+
+**Browser test (Playwright 1.62.1 already in the portal's node_modules, headless Chromium, 1440×900).** Sign-in via the same `POST /public/website-clients/login` the Public Site form uses (the form itself also demands a mobile OTP); its cookies are host-scoped to `localhost`, so they carry to the portal on :3005. Script: scratchpad `portal-shot.js`. ⚠ Git Bash mangles a `/dashboard/...` argument into `C:/Program Files/Git/dashboard/...` — prefix `MSYS_NO_PATHCONV=1`.
+
+| Step | Plan 20 | Sidebar seen in the browser |
+|---|---|---|
+| B1 | Event Information, Agenda + all 5 portal sections, **no RSVP** | Dashboard, My Events, Templates, Splash Screens, Guests, Messages, Notifications, Notification Templates, Analytics, Billing, Settings — **no RSVPs, no Integrations** |
+| B2a | admin **+RSVP, −Guests, −Messages** | … Splash Screens, **RSVPs**, Notifications … — **Guests and Messages gone** |
+| B2b | same, open `/dashboard/guests` directly | lock screen "Guests is not included in your plan (ZZ QA Limited Plan 057610)" |
+| B3 | admin **re-adds Guests** | Guests back with All Guests / Add Guest / Guest Groups / Import Guests; the Guests page loads with the QA guest |
+
+`tsc --noEmit` on the portal: 0 errors. `tests/plan-menu-gating.test.js` gained a `portal_sections` assertion: **25 passed, 0 failed**.
+
+⚠ **Deploy order matters:** run `node src/database/tools/apply-portal-section-menus.js --prod --apply` **before** the portal/backend deploy reaches production — otherwise every production client loses Guests, Messages, Splash Screens, Analytics and Notification Templates until an admin re-grants them.
+⚠ A plan created **after** the tool runs gets no portal sections until the admin ticks them in Manage Plan Menus → Client Portal Sections (e.g. the test's plan 21 / `zzqa.166871@example.com` shows a reduced sidebar — correct, not a bug).
+Not gated server-side: the section APIs themselves (e.g. `/client/guests`) still answer a client whose plan lacks the section — the portal no longer presents them, but the API is not a plan boundary yet.
+Not browser-tested: the admin's Manage Plan Menus page (no admin credentials available to a script) — done in §492.
+
+### 492. RSVP follows the plan in QR registration; admin plan-menus page verified in the browser (and two bugs it caught)
+
+**RSVP gating.** Jamal: "did not ask in registration when client not add rsvp". One rule, `rsvpEnabledFor(event)` in `guestRegistration.service`: ON only when the event's `menu_ids` include the `rsvp` menu AND the host's plan grants `rsvp` on MOBILE today (`ownerGrantedMenuIds`, same gate as the Explore grid / sidebar).
+
+| Where | RSVP on | RSVP off |
+|---|---|---|
+| `POST /public/events/qr/resolve` | `rsvp_enabled: true` | `rsvp_enabled: false` |
+| App registration | 3 steps as before | **2 steps**: RSVP step, "No. of Guests with you", review "Attendance" and the message all hidden |
+| `join` (server) | stores the answer | **ignores any `response_type` / `guest_count` sent** → `none` / `invited` / party 1 (an old build or hand-made request cannot store one) |
+| Thank You | "Your RSVP has been submitted" | "You have joined the event" (`&rsvp=0`) |
+| `GET/POST /events/:id/my-rsvp` | `rsvp_enabled: true`, answer once | `rsvp_enabled: false`, `can_respond: false`, POST → 400 "RSVP is not enabled" |
+| App RSVP tab | flow / locked answer | "RSVP is not enabled — this event is not collecting RSVPs" |
+
+If the host adds RSVP later, guests who joined meanwhile have `none` → they answer once from the RSVP tab.
+App files: `invite_repository.dart` (`rsvpEnabled`, default true for an older backend), `registration_screen.dart` (`_steps` list, `_isLastStep`), `registration_success_screen.dart` (`rsvpSubmitted`), `app_router.dart`, `rsvp_repository.dart`, `rsvp_screen.dart`. `dart analyze` clean on all 6.
+The Welcome Invitation trigger fired by `join` is in-app + push only (no WhatsApp) — safe for test joins.
+
+`tests/plan-menu-gating.test.js` step 6 — **34 passed, 0 failed**: resolve on→true, plan −RSVP → false; a new guest joins sending "yes" + 3 → stored none/invited/party 1; RSVP tab off + POST 400; plan +RSVP → tab on, POST 200.
+
+⚠ Not tested on the phone: registration needs a QR in front of the camera, and the running app still needs `R`.
+
+**Admin Manage Plan Menus — browser test** (SuperAdmin via the real `/auth/login` form; the page wipes both inputs 100ms after mount, so the script waits before typing). First screenshot (Basic Plan): the "Client Portal Sections" heading was there but **empty, Total Menus 4**. Two causes, both fixed:
+
+1. **Page scope.** It lists menus filtered by the plan's `event_category_id` / `event_type_id`; portal sections have none. Now a second `useEventMenus({ menu_group: 'portal' })` is merged in. (Save was not destructive — `selection` is seeded from `plan.planMenus`, which included the sections — but they could not be seen or toggled.)
+2. **`company_id` NULL — worse than it looked.** The tool created the 5 menus with NULL company. `base.service getAll` matches `company_id = X` exactly (admin list), and `clientPortal.activeWhere` does too whenever the client HAS a company — so **every real client (company 1) got `portal_sections: []` and would have lost all 5 sidebar sections**; the ZZ QA clients only worked because they were created without a company. The tool now takes the catalogue's company from the existing event menus, uses it on insert, and back-fills NULL portal rows. Applied locally ("set company_id = 1 on 5"). Test Client 23 (company 1, Wedding Special) now returns all 5 `portal_sections`.
+
+Second screenshot: Client Portal Sections shows Guests, Messages, Splash Screens, Analytics, Notification Templates, all ON; summary **Total 9 / Enabled 9**, Client Portal Sections **5 / 5**.
+
+⚠ Production: `apply-portal-section-menus.js --prod --apply` (dry-run first) — now also sets the company on the section rows. Run it before the backend + portal deploy. — **Done in §493.**
+
+### 493. Production: portal-section migration applied + showcase events and splashes seeded
+
+**Migration (production, 2026-09-11).** `apply-portal-section-menus.js --prod` dry-run, then `--prod --apply`: `menu_group` enum gained `portal`; Guests / Messages / Splash Screens / Analytics / Notification Templates created as **event_menus 16–20**, company 1, each granted (website only) to all **5** production plans. Re-run: all `=`, idempotent. Splash tool `--prod` dry-run: nothing to do (no deleted rows holding an event, schema already present).
+Safe BEFORE the code deploy: the current production portal wizard renders only core/additional/custom groups, and the current admin Manage Plan Menus page seeds its save from `planMenus`, so it keeps the new rows.
+
+**QR key — memory corrected.** A token the LIVE server issued (prod event 2) decrypts with `.env.production`'s `EVENT_QR_SECRET` and not with the `ACCESS_TOKEN_SECRET` fallback → **Render does have `EVENT_QR_SECRET` now.** (`project_events_qr.md` said otherwise; updated.) Local `.env` holds a different key, so anything issuing prod tokens must load `.env.production`.
+
+**`src/database/seeders/showcase-events.seeder.js` (new).** Goes through the real services — `clientEvent.service.createEvent` (plan-validated category/type/religion/menus, real QR) and `clientSplashScreen.service` (one splash per event, event name copied). `--email` required on prod, dry-run until `--apply`, idempotent, `--clear` removes only its three events (by name, with guests + splashes) and splashes named `[Showcase] …`.
+
+Applied to **Jamal J.M (#2, jamaludheen779@gmail.com, Permium plan — Wedding / Nikah, menus `home`, `gallery-2`)**:
+
+| Event | Date · Venue | Theme | Guests | Splash |
+|---|---|---|---|---|
+| #3 Ayaan & Zara — Nikah | 2026-11-21 · ITC Grand Chola, Chennai | `bnd-2` | 10 | #1 couple_photo, active |
+| #4 Imran & Sana — Walima Reception | 2026-12-06 · Taj Falaknuma Palace, Hyderabad | `wg` | 12 | #2 image (banquet), active |
+| #5 Faisal & Noor — Mehendi Night | 2027-01-15 · The Leela Palace, Chennai | `fk` | 8 | #3 gradient emerald→gold, active |
+| #2 Jamal & Aisha (existing) | 2026-12-18 · Taj Coromandel | — | 3 | #4 couple_photo "Save the Date", active |
+
+Verified read-only afterwards: all three new QR tokens **decrypt with the live key**; menus `[1,4]`; splashes active and linked; re-run dry-run says "3 showcase event(s) already on this account".
+Also run locally first (Test Client #23): events 57–59 + splashes 21–24 (one on existing event 30). Local-only; `--clear` removes them.
+
+⚠ **Production catalogue slugs do not match the app's Explore grid.** Prod plan menus are `home`, `gallery-2`, `about-the-celebration`, `memories`, `home-3`…; the app (§490) maps tiles to `event-information`, `gallery`, `rsvp`, `agenda`… and there is **no `rsvp` menu on production at all**. Once the new app build ships, production events will show "No features are enabled for this event yet", and RSVP will be off for every production event (§492). Needs a decision before release: rename/add production menus to the app's slugs, or map by something other than slug.
+⚠ Prod event #1 "Demo Wedding" has no QR and `menu_ids` NULL; #2 "Jamal & Aisha" also has `menu_ids` NULL → under the new plan gating both show no menus.
+⚠ The live servers still run the OLD code (nothing committed/pushed): the splash `for-event` read, RSVP gating, portal sidebar gating and platform menu filtering are not live yet — the data is in place for when they are.

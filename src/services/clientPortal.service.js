@@ -269,10 +269,57 @@ const getMe = async (clientId) => {
  * plan grants. One request rather than four, because every part of it comes
  * from the same plan lookup and the wizard needs all of it at once.
  */
-const getEventOptions = async (clientId) => {
+/**
+ * Which platform a request comes from, for plan menu gating.
+ *
+ * The mobile app's ApiClient stamps every request `X-Client: flutter`; the web
+ * portal sends nothing. Anything that is not the app is treated as the website,
+ * so an unknown caller gets the portal's menus rather than none.
+ */
+const platformFromHeader = (value) =>
+    String(value || '').trim().toLowerCase() === 'flutter' ? 'mobile' : 'website';
+
+/**
+ * The menu ids a plan grants ON ONE PLATFORM.
+ *
+ * `subscription_plan_menus` carries `for_website` / `for_mobile` per menu — the
+ * admin wizard picks each menu per platform — and until now nothing read them,
+ * so a web-only menu reached the app as well.
+ */
+const grantedMenuIds = async (planId, platform = 'website') => {
+    const flag = platform === 'mobile' ? 'for_mobile' : 'for_website';
+    const grants = await SubscriptionPlanMenu.findAll({
+        where: { plan_id: planId, [flag]: 1 },
+        attributes: ['menu_id'],
+    });
+    return grants.map((g) => Number(g.menu_id));
+};
+
+/**
+ * The menus an EXISTING event may show right now: what its OWNER's plan grants
+ * today on this platform.
+ *
+ * Owner, not viewer — a guest sees the host's event under the host's plan.
+ * A missing or inactive plan grants nothing, the same answer `getEventOptions`
+ * gives, so a lapsed plan cannot keep features visible on old events.
+ */
+const ownerGrantedMenuIds = async (ownerClientId, platform = 'website') => {
+    const owner = await WebsiteClient.findByPk(ownerClientId, { attributes: ['id', 'subscription_plan_id'] });
+    if (!owner?.subscription_plan_id) return [];
+    const plan = await SubscriptionPlan.findByPk(owner.subscription_plan_id, { attributes: ['id', 'is_active'] });
+    if (!plan || Number(plan.is_active) !== 1) return [];
+    return grantedMenuIds(plan.id, platform);
+};
+
+/**
+ * `platform` narrows the plan's menus to the ones granted on that platform
+ * (see `grantedMenuIds`). Defaults to the website — the portal, and the
+ * create/update validation, which only the portal drives.
+ */
+const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
     const client = await WebsiteClient.findByPk(clientId);
     if (!client) {
-        return { plan: null, reason: 'Account not found.', categories: [], types: [], religions: [], menus: [], templates: [] };
+        return { plan: null, reason: 'Account not found.', categories: [], types: [], religions: [], menus: [], portal_sections: [], templates: [] };
     }
 
     const companyId = client.company_id ?? null;
@@ -281,7 +328,7 @@ const getEventOptions = async (clientId) => {
         return {
             plan: null,
             reason: 'No subscription plan is assigned to your account yet. Please contact us.',
-            categories: [], types: [], religions: [], menus: [], templates: [],
+            categories: [], types: [], religions: [], menus: [], portal_sections: [], templates: [],
         };
     }
 
@@ -290,14 +337,14 @@ const getEventOptions = async (clientId) => {
         return {
             plan: null,
             reason: 'Your subscription plan is no longer available. Please contact us.',
-            categories: [], types: [], religions: [], menus: [], templates: [],
+            categories: [], types: [], religions: [], menus: [], portal_sections: [], templates: [],
         };
     }
     if (Number(plan.is_active) !== 1) {
         return {
             plan: plan.toJSON(),
             reason: 'Your subscription plan is inactive. Please contact us.',
-            categories: [], types: [], religions: [], menus: [], templates: [],
+            categories: [], types: [], religions: [], menus: [], portal_sections: [], templates: [],
         };
     }
 
@@ -331,21 +378,26 @@ const getEventOptions = async (clientId) => {
         order: [['sort_order', 'ASC'], ['id', 'ASC']],
     });
 
-    // The menus the PLAN grants — not the catalogue. Read through the join so a
-    // menu the admin later deselects from the plan disappears here too.
-    const grants = await SubscriptionPlanMenu.findAll({
-        where: { plan_id: plan.id },
-        attributes: ['menu_id', 'sort_order'],
-    });
-    const menuIds = grants.map((g) => g.menu_id);
+    // The menus the PLAN grants ON THIS PLATFORM — not the catalogue. Read
+    // through the join so a menu the admin later deselects from the plan (or
+    // from this platform) disappears here too.
+    const menuIds = await grantedMenuIds(plan.id, platform);
 
-    const menus = menuIds.length
+    const granted = menuIds.length
         ? await EventMenu.findAll({
             where: activeWhere(companyId, { id: { [Op.in]: menuIds } }),
             attributes: [...TAXONOMY_ATTRS, 'slug', 'menu_group'],
             order: [['sort_order', 'ASC'], ['id', 'ASC']],
         })
         : [];
+
+    // Two different things share the grant table. Event FEATURES are what the
+    // wizard offers and an event stores; PORTAL SECTIONS ('portal' group) only
+    // decide which sidebar sections the client sees, so they are kept out of
+    // `menus` — the wizard would otherwise offer "Guests" as an event feature,
+    // and event create validation (which reads `menus`) would accept it.
+    const menus = granted.filter((m) => m.menu_group !== 'portal');
+    const portalSections = granted.filter((m) => m.menu_group === 'portal').map((m) => m.slug);
 
     // The admin-authored invitation templates this plan entitles them to. The
     // wizard narrows these further by the category/type actually chosen in
@@ -360,6 +412,8 @@ const getEventOptions = async (clientId) => {
         types: types.map((r) => r.toJSON()),
         religions: religions.map((r) => r.toJSON()),
         menus: menus.map((r) => r.toJSON()),
+        /** Slugs of the portal sidebar sections this plan grants on this platform. */
+        portal_sections: portalSections,
         templates,
     };
 };
@@ -641,4 +695,5 @@ module.exports = {
     removeMyAvatar,
     updateMe,
     changeMyPassword,
-    deleteMyAccount, getMe, getEventOptions, setFavouriteTemplates };
+    deleteMyAccount, getMe, getEventOptions, setFavouriteTemplates,
+    platformFromHeader, grantedMenuIds, ownerGrantedMenuIds };
