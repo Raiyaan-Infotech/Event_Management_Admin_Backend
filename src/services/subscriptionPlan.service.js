@@ -178,6 +178,15 @@ const assertCodeAvailable = async (code, companyId, excludeId = null) => {
 const syncPlanMenus = async (planId, menus, transaction) => {
     if (!Array.isArray(menus)) return;
 
+    /*
+      The client portal caches a plan's granted menus for a minute (that lookup
+      sits on every mobile event open, where a round trip costs ~200-374ms in
+      production). Drop it here, so turning a menu on takes effect on the NEXT
+      request instead of appearing to do nothing for a minute. Required lazily:
+      clientPortal.service is not otherwise part of the admin path.
+    */
+    require('./clientPortal.service').invalidatePlanGrants(planId);
+
     const incoming = menus
         .map((m, index) => ({
             menu_id: parseInt(m.menu_id ?? m.id, 10),

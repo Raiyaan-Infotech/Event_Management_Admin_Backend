@@ -477,23 +477,40 @@ const HOST_ONLY_FIELDS = [
  * reading it here would let every guest read every event of their own host.
  */
 const getEventForViewer = async (clientId, eventId, opts = {}) => {
-    const owned = await getEventById(clientId, eventId, opts);
-    if (owned) return owned;
+    /*
+      ── ONE READ OF THE EVENT, AUTHORISED IN JS ────────────────────────
+      This used to read the event owner-scoped, and then — for a guest, which is
+      who the mobile app mostly is — read the guest row and read the event AGAIN
+      unscoped: three serial round trips before any presentation work began. The
+      event row and the membership row do not depend on each other, so they are
+      fetched together and the ownership decision is made here. A guest open is
+      two round trips instead of three, and an owner open pays nothing in time
+      (the membership probe rides alongside).
 
-    const membership = await EventGuest.findOne({
-        where: { event_id: eventId, participant_client_id: clientId },
-        attributes: ['id'],
-    });
-    if (!membership) return null;
+      The rule is unchanged and still explicit: the event is returned ONLY to its
+      owner, or to someone with a guest row naming them as the participant.
+      `participant_client_id` is set only by the join flow, which is gated on an
+      OTP-verified number and a QR token that decrypts. It is NOT
+      `website_client_id` — that column names the HOST, and reading it here would
+      let every guest read every event of their own host.
+    */
+    const [event, membership] = await Promise.all([
+        Event.findOne({ where: { id: eventId }, include: EVENT_INCLUDE }),
+        EventGuest.findOne({
+            where: { event_id: eventId, participant_client_id: clientId },
+            attributes: ['id'],
+        }),
+    ]);
 
-    const event = await Event.findOne({
-        where: { id: eventId },
-        include: EVENT_INCLUDE,
-    });
     if (!event) return null;
 
+    const isOwner = Number(event.website_client_id) === Number(clientId);
+    if (!isOwner && !membership) return null;
+
     const presented = await presentOne(event, opts);
-    for (const field of HOST_ONLY_FIELDS) delete presented[field];
+    if (!isOwner) {
+        for (const field of HOST_ONLY_FIELDS) delete presented[field];
+    }
     return presented;
 };
 
@@ -517,49 +534,62 @@ const presentOne = async (event, { platform = 'website' } = {}) => {
     const granted = new Set(grantedIds);
     const visibleIds = presented.menu_ids.map(Number).filter((id) => granted.has(id));
 
-    // Resolve the menu names for the ids stored on the row. Done here rather
-    // than through an association because menu_ids is a JSON array — see the
-    // model comment for why it is not a join table.
-    //
-    // EVENT FEATURES only: the event's own selection, narrowed by the plan.
-    const eventFeatures = visibleIds.length
-        ? (await EventMenu.findAll({
-            where: {
-                id: { [Op.in]: visibleIds },
-                is_active: 1,
-                menu_group: { [Op.notIn]: ['portal', 'app'] },
-            },
-            attributes: ['id', 'name', 'slug', 'menu_group'],
-            order: [['sort_order', 'ASC'], ['id', 'ASC']],
-        })).map((m) => m.toJSON())
-        : [];
-
     /*
-      APP FEATURES — mobile only. Chat, Wishes, Invite & Share, Guests… are not
-      chosen per event: the host's plan granting them on MOBILE is the whole
-      rule, so every event of that host shows them without its menu_ids having
-      to list them. `portal` rows count when the plan also grants them on mobile
-      (Guests is one menu for both surfaces). See apply-app-feature-menus.js.
+      ── EVENT FEATURES + APP FEATURES IN ONE QUERY ──────────────────────
+      Resolve the menu names for the ids stored on the row. Done here rather
+      than through an association because menu_ids is a JSON array — see the
+      model comment for why it is not a join table.
+
+      EVENT FEATURES are the event's own selection, narrowed by the plan.
+      APP FEATURES are mobile-only and are NOT chosen per event: the host's plan
+      granting them on MOBILE is the whole rule, so every event of that host
+      shows them without its menu_ids having to list them. `portal` rows count
+      when the plan also grants them on mobile (Guests is one menu for both
+      surfaces). See apply-app-feature-menus.js.
+
+      These were two sequential `findAll`s over the same table with disjoint
+      groups — now ONE round trip, partitioned in JS. The design and the guest
+      stats do not depend on the menus or on each other either, so all three go
+      together instead of three-deep. On the event-open path that is three
+      round trips saved, ~200–374ms each in production.
     */
-    const appFeatures = platform === 'mobile' && grantedIds.length
-        ? (await EventMenu.findAll({
-            where: {
-                id: { [Op.in]: grantedIds },
-                is_active: 1,
-                menu_group: { [Op.in]: ['app', 'portal'] },
-            },
-            attributes: ['id', 'name', 'slug', 'menu_group'],
-            order: [['sort_order', 'ASC'], ['id', 'ASC']],
-        })).map((m) => m.toJSON())
-        : [];
+    const wantsApp = platform === 'mobile' && grantedIds.length > 0;
+    const menuIdsToRead = [...new Set([...visibleIds, ...(wantsApp ? grantedIds : [])])];
+
+    const [menuRows] = await Promise.all([
+        menuIdsToRead.length
+            ? EventMenu.findAll({
+                where: {
+                    id: { [Op.in]: menuIdsToRead },
+                    is_active: 1,
+                },
+                attributes: ['id', 'name', 'slug', 'menu_group'],
+                order: [['sort_order', 'ASC'], ['id', 'ASC']],
+                raw: true,
+            })
+            : [],
+        // Same design block the list attaches, so the detail screen and the
+        // card it was opened from cannot disagree about what the invitation
+        // looks like.
+        attachDesign([presented], presented.company_id ?? null),
+        guestStatsFor(presented.id).then((stats) => { presented.stats = stats; }),
+    ]);
+
+    const visible = new Set(visibleIds);
+    const eventFeatures = [];
+    const appFeatures = [];
+    for (const row of menuRows) {
+        // The groups are disjoint, so a row lands in exactly one bucket and the
+        // two buckets keep the order they were concatenated in before. Ordering
+        // inside each is still the query's (sort_order, id).
+        if (row.menu_group === 'app' || row.menu_group === 'portal') {
+            if (wantsApp) appFeatures.push(row);
+        } else if (visible.has(Number(row.id))) {
+            eventFeatures.push(row);
+        }
+    }
 
     presented.menus = [...eventFeatures, ...appFeatures];
-
-    // Same design block the list attaches, so the detail screen and the card it
-    // was opened from cannot disagree about what the invitation looks like.
-    await attachDesign([presented], presented.company_id ?? null);
-
-    presented.stats = await guestStatsFor(presented.id);
 
     return presented;
 };

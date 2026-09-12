@@ -1,4 +1,5 @@
 const {
+    sequelize,
     Sequelize,
     WebsiteClient,
     SubscriptionPlan,
@@ -15,6 +16,19 @@ const { Op } = Sequelize;
 const bcrypt = require('bcryptjs');
 const ApiError = require('../utils/apiError');
 const mediaService = require('./media.service');
+const { TtlCache } = require('../utils/ttlCache');
+
+/**
+ * Plan gating is read on EVERY event open and every options call, is identical
+ * for every guest of the same host, and changes only when an admin saves the
+ * plan. One minute of staleness against two saved round trips per request — and
+ * a save busts it outright, so the only window is another process's copy.
+ */
+const PLAN_CACHE_TTL_MS = 60 * 1000;
+/** planId:platform -> menu ids the plan grants. */
+const planGrantsCache = new TtlCache(PLAN_CACHE_TTL_MS);
+/** clientId -> their ACTIVE plan id, or 0 when they have none. */
+const ownerPlanCache = new TtlCache(PLAN_CACHE_TTL_MS);
 
 /**
  * What a signed-in website client is allowed to see and do in the portal.
@@ -232,32 +246,41 @@ const getMe = async (clientId) => {
     const plain = client.toJSON();
     plain.plan = null;
 
-    /**
-     * Whether this account can sign in with a password at all.
-     *
-     * The HASH is never returned — `defaultScope` drops it and this reports only
-     * whether one is set. The Settings page needs the distinction: an account
-     * created by Google or Facebook has no password, and asking it for a
-     * "current password" that never existed is a dead end with no way out.
-     *
-     * Queried separately rather than via the default scope, which excludes the
-     * column entirely, so `client.password` here would be undefined either way.
-     */
-    const [pw] = await WebsiteClient.scope('withPassword').findAll({
-        where: { id: clientId },
-        attributes: ['id', 'password'],
-        limit: 1,
-    });
-    plain.has_password = pw && pw.password ? 1 : 0;
+    /*
+      Both of these depend only on the client row that is already loaded, not on
+      each other, so they go TOGETHER. They used to be awaited one after the
+      other, which made the app's first call after launch three round trips deep
+      (~1s in production) when it needed two.
+    */
+    const [pwRows, plan] = await Promise.all([
+        /*
+          Whether this account can sign in with a password at all.
 
-    if (client.subscription_plan_id) {
-        const plan = await SubscriptionPlan.findByPk(client.subscription_plan_id, {
-            attributes: PLAN_ATTRS,
-        });
-        // A plan that has since been deactivated is reported rather than
-        // hidden: the client needs to know why their options vanished.
-        if (plan) plain.plan = plan.toJSON();
-    }
+          The HASH is never returned — `defaultScope` drops it and this reports
+          only whether one is set. The Settings page needs the distinction: an
+          account created by Google or Facebook has no password, and asking it
+          for a "current password" that never existed is a dead end with no way
+          out.
+
+          Queried separately rather than via the default scope, which excludes
+          the column entirely, so `client.password` here would be undefined
+          either way.
+        */
+        WebsiteClient.scope('withPassword').findAll({
+            where: { id: clientId },
+            attributes: ['id', 'password'],
+            limit: 1,
+        }),
+        client.subscription_plan_id
+            ? SubscriptionPlan.findByPk(client.subscription_plan_id, { attributes: PLAN_ATTRS })
+            : null,
+    ]);
+
+    const pw = pwRows[0];
+    plain.has_password = pw && pw.password ? 1 : 0;
+    // A plan that has since been deactivated is reported rather than hidden:
+    // the client needs to know why their options vanished.
+    if (plan) plain.plan = plan.toJSON();
 
     return plain;
 };
@@ -288,11 +311,29 @@ const platformFromHeader = (value) =>
  */
 const grantedMenuIds = async (planId, platform = 'website') => {
     const flag = platform === 'mobile' ? 'for_mobile' : 'for_website';
-    const grants = await SubscriptionPlanMenu.findAll({
-        where: { plan_id: planId, [flag]: 1 },
-        attributes: ['menu_id'],
+    // Cached: the same answer for every guest of every event on this plan, and
+    // it only changes when an admin saves the plan — which busts it explicitly
+    // (see `invalidatePlanGrants`, called from subscriptionPlan.service).
+    return planGrantsCache.wrap(`${planId}:${platform}`, async () => {
+        const grants = await SubscriptionPlanMenu.findAll({
+            where: { plan_id: planId, [flag]: 1 },
+            attributes: ['menu_id'],
+        });
+        return grants.map((g) => Number(g.menu_id));
     });
-    return grants.map((g) => Number(g.menu_id));
+};
+
+/**
+ * Drop a plan's cached grants — call after WRITING the plan's menus.
+ *
+ * Without this, turning a menu on in the admin panel would appear to do nothing
+ * for up to [PLAN_CACHE_TTL_MS], which is exactly the kind of "did my save
+ * work?" that makes people save twice.
+ */
+const invalidatePlanGrants = (planId) => {
+    if (planId === undefined || planId === null) planGrantsCache.invalidate();
+    else planGrantsCache.invalidatePrefix(`${planId}:`);
+    ownerPlanCache.invalidate();
 };
 
 /**
@@ -304,11 +345,35 @@ const grantedMenuIds = async (planId, platform = 'website') => {
  * gives, so a lapsed plan cannot keep features visible on old events.
  */
 const ownerGrantedMenuIds = async (ownerClientId, platform = 'website') => {
-    const owner = await WebsiteClient.findByPk(ownerClientId, { attributes: ['id', 'subscription_plan_id'] });
-    if (!owner?.subscription_plan_id) return [];
-    const plan = await SubscriptionPlan.findByPk(owner.subscription_plan_id, { attributes: ['id', 'is_active'] });
-    if (!plan || Number(plan.is_active) !== 1) return [];
-    return grantedMenuIds(plan.id, platform);
+    /*
+      ONE query for the owner's ACTIVE plan id, not two.
+      This used to be `WebsiteClient.findByPk` followed by
+      `SubscriptionPlan.findByPk` — two round trips, one after the other, on the
+      path that every event open goes through. Joined here instead, and the
+      result cached for a minute: a client's plan is changed by an admin, not by
+      the guest who is waiting for the screen to paint. With the grants cache
+      below it, a warm event open spends ZERO queries on plan gating where it
+      used to spend three.
+
+      `sequelize.query` rather than an `include` because there is no
+      WebsiteClient → SubscriptionPlan association defined, and adding one to
+      satisfy this would touch every other read of that model.
+    */
+    const planId = await ownerPlanCache.wrap(String(ownerClientId), async () => {
+        const [row] = await sequelize.query(
+            `SELECT p.id AS plan_id
+               FROM website_clients c
+               JOIN subscription_plans p ON p.id = c.subscription_plan_id
+              WHERE c.id = :id AND p.is_active = 1
+              LIMIT 1`,
+            { replacements: { id: ownerClientId }, type: Sequelize.QueryTypes.SELECT },
+        );
+        // 0, not undefined: "no active plan" is an answer worth caching, and
+        // `wrap` treats undefined as a miss.
+        return Number(row?.plan_id) || 0;
+    });
+    if (!planId) return [];
+    return grantedMenuIds(planId, platform);
 };
 
 /**
@@ -698,4 +763,4 @@ module.exports = {
     updateMe,
     changeMyPassword,
     deleteMyAccount, getMe, getEventOptions, setFavouriteTemplates,
-    platformFromHeader, grantedMenuIds, ownerGrantedMenuIds };
+    platformFromHeader, grantedMenuIds, ownerGrantedMenuIds, invalidatePlanGrants };
