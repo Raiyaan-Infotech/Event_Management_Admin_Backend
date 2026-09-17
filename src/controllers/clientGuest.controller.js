@@ -21,6 +21,21 @@ const list = asyncHandler(async (req, res) => {
     return ApiResponse.paginated(res, rows, pagination, 'Guests retrieved');
 });
 
+/**
+ * The dropdowns the Add/Edit Guest form needs: Relationship, Food Preference
+ * and the gender list, scoped to the event's category.
+ *
+ * Client-scoped on purpose — the admin option routes answer 401 for a website
+ * client. See `clientGuest.service.getGuestFormOptions`.
+ */
+const formOptions = asyncHandler(async (req, res) => {
+    const data = await guestService.getGuestFormOptions(
+        req.websiteClient.id,
+        req.query.event_id,
+    );
+    return ApiResponse.success(res, data, 'Guest form options retrieved');
+});
+
 /** The five tiles. Takes the same `event_id` as the list so they agree. */
 const stats = asyncHandler(async (req, res) => {
     const data = await guestService.getGuestStats(req.websiteClient.id, req.query);
@@ -178,7 +193,7 @@ const sampleCsv = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
-    list, stats, getById, create, update, remove, bulk,
+    list, stats, formOptions, getById, create, update, remove, bulk,
     listGroups, allGroups, groupStats, getGroup, createGroup, updateGroup, removeGroup,
     previewImport, commitImport, exportGuests, sampleCsv,
 };

@@ -248,6 +248,9 @@ router.post('/events/:id/notification-templates/:templateId/test', eventNotifica
  * looking for guest number NaN.
  */
 router.get('/guests/stats', guestController.stats);
+// The Add/Edit Guest form's dropdowns. Literal path, so it must sit with the
+// others ABOVE `/guests/:id` or Express matches "form-options" as an id.
+router.get('/guests/form-options', guestController.formOptions);
 router.get('/guests/export', guestController.exportGuests);
 router.post('/guests/bulk', guestController.bulk);
 

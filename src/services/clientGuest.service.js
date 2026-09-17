@@ -9,6 +9,10 @@ const { Op } = Sequelize;
 const ApiError = require('../utils/apiError');
 const notifications = require('./clientNotification.service');
 const notificationTrigger = require('./notificationTrigger.service');
+// The same two catalogues the guest's own registration form reads — see
+// getGuestFormOptions for why the host cannot go through the admin routes.
+const relationshipOptions = require('./guestRelationshipOption.service');
+const foodOptions = require('./guestFoodPreferenceOption.service');
 
 /**
  * Guests.
@@ -29,15 +33,29 @@ const notificationTrigger = require('./notificationTrigger.service');
  */
 
 /** Everything a client may set. Ownership columns are absent on purpose. */
+/*
+  ⚠ A COLUMN MISSING FROM HERE IS DROPPED IN SILENCE.
+
+  `normalise` copies only the fields named below out of the body, so anything
+  absent is discarded without an error — the save succeeds and the value is
+  simply gone. `gender`, `relationship`, `relationship_option_id` and
+  `food_preference_option_id` were exactly that: real columns on `event_guests`,
+  written by the guest's own registration form, and unreachable from the host's
+  Add Guest form because they were never listed here.
+*/
 const WRITABLE_FIELDS = [
     'event_id', 'group_id',
     'title', 'first_name', 'last_name', 'email', 'dial_code', 'mobile', 'whatsapp',
+    'gender', 'relationship', 'relationship_option_id',
     'company', 'table_number', 'party_size',
     'rsvp_status', 'response_type', 'invite_source',
     'address_line1', 'address_line2', 'city', 'state', 'postal_code', 'country',
-    'dietary_preference', 'special_requirements', 'plus_one', 'plus_one_count',
+    'dietary_preference', 'food_preference_option_id',
+    'special_requirements', 'plus_one', 'plus_one_count',
     'custom_answers', 'notes',
 ];
+
+const GENDERS = ['male', 'female', 'other'];
 
 const RSVP_STATUSES = ['not_responded', 'invited', 'pending', 'accepted', 'declined'];
 const RESPONSE_TYPES = ['none', 'yes', 'no', 'maybe'];
@@ -218,10 +236,32 @@ const normalise = async (clientId, body, { partial = false, existing = null } = 
     const optional = {
         address_line1: 255, address_line2: 255, city: 120, state: 120,
         postal_code: 20, country: 100, dietary_preference: 255,
-        special_requirements: 500, notes: 500,
+        special_requirements: 500, notes: 500, relationship: 60,
     };
     for (const [field, max] of Object.entries(optional)) {
         if (has(field)) data[field] = str(picked[field], max);
+    }
+
+    // Matched against the list rather than stored as typed: the column is a
+    // plain string, so an unrecognised value would persist and every reader
+    // would then have to cope with it.
+    if (has('gender')) {
+        data.gender = GENDERS.includes(picked.gender) ? picked.gender : null;
+    }
+
+    /*
+      The option-table ids behind `relationship` and `dietary_preference`.
+
+      Both carry the LABEL and the id: the label is what the guest chose at the
+      time and must survive the option being renamed or retired, while the id is
+      what joins back to the catalogue. Storing only one of them loses the other
+      answer, so the registration form sends both and this accepts both.
+    */
+    for (const field of ['relationship_option_id', 'food_preference_option_id']) {
+        if (has(field)) {
+            const id = Number(picked[field]);
+            data[field] = Number.isInteger(id) && id > 0 ? id : null;
+        }
     }
 
     if (has('plus_one')) data.plus_one = picked.plus_one ? 1 : 0;
@@ -516,10 +556,50 @@ const bulkUpdate = async (clientId, guestIds, action, value) => {
     throw ApiError.badRequest('Unknown bulk action.');
 };
 
+/**
+ * The Relationship and Food Preference dropdowns for the host's guest form.
+ *
+ * ── WHY THIS EXISTS RATHER THAN REUSING THE ADMIN ROUTES ────────────────────
+ * `/guest-relationship-options` and `/guest-food-preference-options` sit behind
+ * the admin JWT and `hasPermission`, so a website client gets 401 from both —
+ * the same reason `/client/media/proxy` and the client avatar uploader exist.
+ *
+ * ── AND WHY NOT REUSE `resolveInvite` ───────────────────────────────────────
+ * That one answers for somebody holding a QR token, which a host does not have
+ * for their own event. Same two catalogues, same category scoping; different
+ * caller, so a different door.
+ *
+ * Scoped by the EVENT's category, because the catalogues are: a wedding offers
+ * "Bride's Father", a corporate event offers "Delegate". The event is looked up
+ * through `website_client_id`, so a host can only ask about their own.
+ */
+const getGuestFormOptions = async (clientId, rawEventId) => {
+    const eventId = Number(rawEventId);
+    if (!eventId) throw ApiError.badRequest('Please select an event.');
+
+    const event = await Event.findOne({
+        where: { id: eventId, website_client_id: clientId },
+        attributes: ['id', 'event_category_id'],
+    });
+    if (!event) throw ApiError.notFound('Event not found.');
+
+    const [relationships, foods] = await Promise.all([
+        relationshipOptions.listForCategory(event.event_category_id, 1),
+        foodOptions.listForCategory(event.event_category_id, 1),
+    ]);
+
+    return {
+        relationship_options: relationships.map((r) => ({ id: r.id, name: r.name })),
+        food_preference_options: foods.map((r) => ({ id: r.id, name: r.name })),
+        genders: GENDERS,
+    };
+};
+
 module.exports = {
     WRITABLE_FIELDS,
     RSVP_STATUSES,
     RESPONSE_TYPES,
+    getGuestFormOptions,
     listGuests,
     getGuestStats,
     getGuestById,
