@@ -151,6 +151,41 @@ router.get('/events/stats', eventController.stats);
 router.get('/events/analytics', eventController.analytics);
 router.post('/events/qr/decode', eventController.decodeQr);
 
+/**
+ * An event's cover photo — the mobile app's list card and event screen.
+ *
+ * Raster images only, 5MB. No SVG, for the same reason as the avatar: an SVG
+ * can carry script, and this is rendered into other people's screens. Declared
+ * with the other literal `/events/...` routes, before `/events/:id`.
+ */
+const eventCoverUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+        const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+        if (allowed.includes(file.mimetype)) return cb(null, true);
+        cb(new Error('Please choose a JPG, PNG or WEBP image.'), false);
+    },
+});
+
+router.post(
+    '/events/cover-image',
+    (req, res, next) => {
+        eventCoverUpload.single('file')(req, res, (err) => {
+            if (err) {
+                return res.status(400).json({
+                    success: false,
+                    message: err.code === 'LIMIT_FILE_SIZE'
+                        ? 'That image is larger than 5MB.'
+                        : err.message || 'That image could not be uploaded.',
+                });
+            }
+            next();
+        });
+    },
+    eventController.uploadCover,
+);
+
 // Per-event notification template toggles — a client's control over which
 // of the admin's applicable templates are on for ONE of their own events.
 // '/events/notification-templates/summary' sits at a different depth than
@@ -181,6 +216,19 @@ router.get('/events/joined', guestRegistrationController.myEvents);
  */
 router.get('/events/:id/my-rsvp', guestRegistrationController.myRsvp);
 router.post('/events/:id/my-rsvp', guestRegistrationController.submitMyRsvp);
+
+/*
+ * Wishlist. `/events/wishlist` is declared BEFORE `/events/:id` for the same
+ * reason `/events/stats` is — Express would otherwise match "wishlist" as an
+ * id and hand it to getById, which answers 404 for it.
+ *
+ * POST/DELETE rather than a PUT carrying a boolean: the heart is a toggle in
+ * the UI, but on the wire "add this" and "remove this" are two different
+ * intentions, and both are idempotent.
+ */
+router.get('/events/wishlist', eventController.wishlist);
+router.post('/events/:id/wishlist', eventController.addToWishlist);
+router.delete('/events/:id/wishlist', eventController.removeFromWishlist);
 
 router.get('/events', eventController.list);
 router.post('/events', eventController.create);

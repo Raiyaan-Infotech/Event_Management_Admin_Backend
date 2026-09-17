@@ -126,4 +126,46 @@ const decodeQr = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, result, 'QR code decoded');
 });
 
-module.exports = { list, stats, analytics, getById, create, update, remove, decodeQr };
+/** Upload an event cover photo; the wizard saves the returned URL with the event. */
+const uploadCover = asyncHandler(async (req, res) => {
+    const result = await clientEventService.uploadCoverImage(req.websiteClient.company_id, req.file);
+    return ApiResponse.success(res, result, 'Image uploaded');
+});
+
+
+/**
+ * The client's hearted events.
+ *
+ * `platform` matters here for the same reason it does on getById — a mobile
+ * caller gets the app's menu set, a portal caller the portal's.
+ */
+const wishlist = asyncHandler(async (req, res) => {
+    const platform = clientPortalService.platformFromHeader(req.get('x-client'));
+    const events = await clientEventService.getWishlist(req.websiteClient.id, { platform });
+    // `{ events }`, matching /events/joined — the app reads data.events for
+    // every list endpoint, and a bare array here would be the one exception.
+    return ApiResponse.success(res, { events }, 'Wishlist retrieved');
+});
+
+/** Heart an event. Idempotent — hearting twice is not an error. */
+const addToWishlist = asyncHandler(async (req, res) => {
+    const data = await clientEventService.setWishlisted(
+        req.websiteClient.id,
+        req.params.id,
+        true,
+    );
+    return ApiResponse.success(res, data, 'Added to wishlist');
+});
+
+/** Un-heart an event. Idempotent — removing what is not there is not an error. */
+const removeFromWishlist = asyncHandler(async (req, res) => {
+    const data = await clientEventService.setWishlisted(
+        req.websiteClient.id,
+        req.params.id,
+        false,
+    );
+    return ApiResponse.success(res, data, 'Removed from wishlist');
+});
+
+module.exports = { list, stats, analytics, getById, create, update, remove, decodeQr, uploadCover,
+    wishlist, addToWishlist, removeFromWishlist };

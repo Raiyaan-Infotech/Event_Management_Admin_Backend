@@ -105,6 +105,21 @@ const publicEvent = (event) => ({
     organizer: event.organizer,
     event_category_id: event.event_category_id,
     category_name: event.category?.name ?? null,
+    // The event's own photo, for the guest's event card in the app.
+    cover_image: event.cover_image ?? null,
+    /*
+      The row's last-modified stamp, for the app's offline sync.
+
+      This allowlist is what a GUEST may see, and a timestamp is the one thing
+      the app cannot work out for itself: it compares this against the
+      `updated_at` on its own cached copy of the event to decide whether the
+      saved copy is stale. Without it the app can only tell "cached / not
+      cached" and would never know the host had changed the venue.
+
+      Safe to expose: it says WHEN the row changed, never what changed or who
+      changed it.
+    */
+    updated_at: event.updated_at ?? null,
 });
 
 /** Decode a QR token to a live event, or explain why not. */

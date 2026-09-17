@@ -95,6 +95,14 @@ module.exports = (sequelize) => {
             primary_color: { type: DataTypes.STRING(9), allowNull: true },
 
             /**
+             * The event's own photo, uploaded in the wizard. Shown on the mobile
+             * app's event card and at the top of the event screen. NULL falls
+             * back to the template artwork. NOT part of the invitation design.
+             * Added by apply-event-cover-image.js.
+             */
+            cover_image: { type: DataTypes.STRING(500), allowNull: true },
+
+            /**
              * The client's per-event OVERRIDE of the template's component set
              * and order. NULL on both means "inherit from the template".
              *

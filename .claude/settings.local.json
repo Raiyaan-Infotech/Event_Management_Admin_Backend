@@ -127,7 +127,9 @@
       "Bash(grep -oE \"\\(View Details|Edit Plan|Duplicate Plan|Manage Menus|Manage Badges|View Pricing|Delete Plan\\)$\")",
       "Bash(node scratch/seed_subscription_plans_demo.js)",
       "Bash(node scratch/seed_subscription_plans_demo.js --apply)",
-      "Bash(node -e \"require\\('./src/app'\\); console.log\\('OK backend loads'\\)\")"
+      "Bash(node -e \"require\\('./src/app'\\); console.log\\('OK backend loads'\\)\")",
+      "Bash(node src/database/tools/*)",
+      "Bash(node src/database/seeders/*)"
     ],
     "additionalDirectories": [
       "D:\\Jamal\\Event_Management_Admin_Frontend\\src\\app\\admin\\website-builder\\how-it-works",

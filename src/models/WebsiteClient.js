@@ -82,6 +82,19 @@ module.exports = (sequelize) => {
              */
             favourite_templates: { type: DataTypes.JSON, allowNull: true },
 
+            /**
+             * The client's event wishlist — an array of event ids, hearted from
+             * the mobile app's Home and My Events lists. Same shape and same
+             * reasoning as favourite_templates above: a short per-client list
+             * that is always read and written whole.
+             *
+             * ⚠ NOT a permission. These are ids the client picked, so every
+             * read re-checks that each event is still visible to them (they own
+             * it, or they have a guest row on it). See clientEvent.service's
+             * getWishlist / toggleWishlist.
+             */
+            favourite_events: { type: DataTypes.JSON, allowNull: true },
+
             // The provider's own user id (Google `sub`, Facebook id). This, not
             // the email, is what identifies a social account: Facebook does not
             // always share an email, and a Google email can change.

@@ -17,6 +17,7 @@ const { Op } = Sequelize;
 const ApiError = require('../utils/apiError');
 const eventQr = require('../utils/eventQr');
 const clientPortalService = require('./clientPortal.service');
+const mediaService = require('./media.service');
 
 /**
  * Events belonging to a signed-in website client.
@@ -54,6 +55,7 @@ const WRITABLE_FIELDS = [
     'privacy', 'status',
     'menu_ids',
     'theme_id', 'primary_color',
+    'cover_image',
     'components', 'component_order',
 ];
 
@@ -333,6 +335,18 @@ const normalise = async (clientId, body, { partial = false } = {}) => {
             throw ApiError.badRequest('Primary colour must be a hex value like #2457D6.');
         }
         data.primary_color = value;
+    }
+
+    // The event's own photo — a URL `uploadCoverImage` returned. Only a stored
+    // upload is accepted (absolute http(s), or our own root-relative /uploads
+    // path), so the field cannot be pointed at `javascript:` or a data URI
+    // that every app and portal would then render. Null clears it.
+    if (has('cover_image')) {
+        const value = str(picked.cover_image, 500);
+        if (value && !/^(https?:\/\/|\/uploads\/)/i.test(value)) {
+            throw ApiError.badRequest('Invalid event image.');
+        }
+        data.cover_image = value;
     }
 
     /**
@@ -1141,8 +1155,143 @@ const resolveQrToken = async (token) => {
     return { payload: expanded, event: event ? present(event) : null };
 };
 
+/**
+ * Store an event's cover photo and return its URL.
+ *
+ * Uploaded on pick, before the event is saved — the wizard's final step then
+ * sends the URL as `cover_image`, the same shape as the splash-screen uploader.
+ * Not tied to an event id for that reason: a new event has no id yet.
+ */
+const uploadCoverImage = async (companyId, file) => {
+    if (!file || !file.buffer) throw ApiError.badRequest('Please choose an image to upload.');
+
+    const result = await mediaService.upload(file, { folder: 'event-covers' }, companyId || 1);
+    if (!result || !result.url) throw ApiError.badRequest('That image could not be stored.');
+    return { url: result.url };
+};
+
+
+/* ── Wishlist ────────────────────────────────────────────────────────────────
+ *
+ * The client's hearted events, stored as an array of ids in
+ * `website_clients.favourite_events` (see the model, and
+ * tools/apply-event-wishlist.js for why a JSON column rather than a table).
+ *
+ * ⚠ THE STORED IDS ARE INPUT, NOT AUTHORITY.
+ * They are whatever the client sent, so nothing here may fetch an event just
+ * because its id is in the list. Both functions re-apply the SAME rule
+ * [getEventForViewer] uses — the caller owns the event, or has a guest row
+ * naming them as the participant. Without that, hearting id 1, 2, 3… would be
+ * a way to read every event on the platform.
+ */
+
+/** Ids the client has hearted, normalised: positive ints, no duplicates. */
+const readWishlistIds = (client) => {
+    const raw = client?.favourite_events;
+    const list = Array.isArray(raw) ? raw : [];
+    return [...new Set(
+        list
+            .map((id) => Number(id))
+            .filter((id) => Number.isInteger(id) && id > 0),
+    )].slice(0, 500); // a bounded list cannot be used to stuff the row
+};
+
+/**
+ * Every event the client may still see, out of the ones they hearted.
+ *
+ * Ids that no longer resolve — the event was deleted, or they were removed as
+ * a guest — are dropped from the RESPONSE but deliberately left in the column.
+ * A transient read failure must not quietly empty somebody's wishlist; the
+ * only thing that removes an id is the client un-hearting it.
+ */
+const getWishlist = async (clientId, { platform = 'website' } = {}) => {
+    const client = await WebsiteClient.findByPk(clientId, {
+        attributes: ['id', 'favourite_events'],
+    });
+    if (!client) return [];
+
+    const ids = readWishlistIds(client);
+    if (ids.length === 0) return [];
+
+    // Two queries, not one per id: the events, and the caller's guest rows on
+    // them. Production is ~374ms per round trip (see the prod-latency note), so
+    // a per-id loop here would take seconds on a list of twenty.
+    const [events, memberships] = await Promise.all([
+        Event.findAll({ where: { id: { [Op.in]: ids } }, include: EVENT_INCLUDE }),
+        EventGuest.findAll({
+            where: { event_id: { [Op.in]: ids }, participant_client_id: clientId },
+            attributes: ['event_id'],
+        }),
+    ]);
+
+    const joined = new Set(memberships.map((m) => Number(m.event_id)));
+
+    const visible = events.filter((event) => (
+        Number(event.website_client_id) === Number(clientId)
+        || joined.has(Number(event.id))
+    ));
+
+    // Presented in the order the client hearted them, not the order MySQL
+    // happened to return rows in.
+    const order = new Map(ids.map((id, index) => [id, index]));
+    visible.sort((a, b) => (order.get(Number(a.id)) ?? 0) - (order.get(Number(b.id)) ?? 0));
+
+    return Promise.all(visible.map(async (event) => {
+        const presented = await presentOne(event, { platform });
+        if (Number(event.website_client_id) !== Number(clientId)) {
+            for (const field of HOST_ONLY_FIELDS) delete presented[field];
+        }
+        return { ...presented, wishlisted: true };
+    }));
+};
+
+/**
+ * Heart or un-heart one event. Returns the new state.
+ *
+ * ADDING is authorised, removing is not: you may always take something off
+ * your own list, even an event you can no longer see — otherwise a stale id
+ * would be stuck there forever with no way to clear it.
+ */
+const setWishlisted = async (clientId, eventId, wishlisted) => {
+    const id = Number(eventId);
+    if (!Number.isInteger(id) || id <= 0) {
+        throw new ApiError(400, 'A valid event id is required');
+    }
+
+    const client = await WebsiteClient.findByPk(clientId);
+    if (!client) throw new ApiError(404, 'Client not found');
+
+    const ids = readWishlistIds(client);
+
+    if (wishlisted) {
+        const [event, membership] = await Promise.all([
+            Event.findOne({ where: { id }, attributes: ['id', 'website_client_id'] }),
+            EventGuest.findOne({
+                where: { event_id: id, participant_client_id: clientId },
+                attributes: ['id'],
+            }),
+        ]);
+
+        // Same answer for "does not exist" and "not yours": a 404 that only
+        // fired for real events would confirm which ids exist.
+        const isOwner = event && Number(event.website_client_id) === Number(clientId);
+        if (!event || (!isOwner && !membership)) {
+            throw new ApiError(404, 'Event not found');
+        }
+
+        if (!ids.includes(id)) ids.push(id);
+    } else {
+        const at = ids.indexOf(id);
+        if (at !== -1) ids.splice(at, 1);
+    }
+
+    await client.update({ favourite_events: ids });
+    return { event_id: id, wishlisted: Boolean(wishlisted), count: ids.length };
+};
+
 module.exports = {
     WRITABLE_FIELDS,
+    uploadCoverImage,
     deriveStatus,
     createEvent,
     getEventById,
@@ -1153,4 +1302,7 @@ module.exports = {
     updateEvent,
     deleteEvent,
     resolveQrToken,
+    getWishlist,
+    setWishlisted,
+    readWishlistIds,
 };
