@@ -18,6 +18,10 @@ const foodOptions = require('./guestFoodPreferenceOption.service');
 const { OTP_TTL_SECONDS, OTP_MAX_ATTEMPTS } = require('./websiteClientOAuth.service');
 const msg91 = require('./msg91Whatsapp.service');
 const msg91Sms = require('./msg91Sms.service');
+// One definition of past/live/upcoming for the whole codebase. Imported rather
+// than re-implemented: two copies of this rule drift, and the guest's card and
+// the host's would then disagree about the same event on the same day.
+const { deriveStatus } = require('./clientEvent.service');
 const notificationTrigger = require('./notificationTrigger.service');
 const rsvpService = require('./clientRsvp.service');
 const notifications = require('./clientNotification.service');
@@ -107,6 +111,16 @@ const publicEvent = (event) => ({
     category_name: event.category?.name ?? null,
     // The event's own photo, for the guest's event card in the app.
     cover_image: event.cover_image ?? null,
+    /*
+      past / live / upcoming, computed from the dates.
+
+      The stored `status` column is deliberately NOT sent: it only ever holds
+      draft/upcoming/cancelled, so a guest reading it would file every event —
+      including one that finished last month — under "upcoming". Sending
+      nothing at all had the same effect, because the app falls back to
+      upcoming for anything it cannot parse.
+    */
+    derived_status: deriveStatus(event),
     /*
       The row's last-modified stamp, for the app's offline sync.
 
