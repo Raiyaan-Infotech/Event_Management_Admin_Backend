@@ -111,6 +111,21 @@ const present = (guest) => {
         // The list shows "Imported" as a tab; the flag saves every consumer
         // re-deriving it from invite_source.
         is_imported: plain.invite_source === 'import',
+        /*
+          ── A GUEST IS NOT A PARTICIPANT ───────────────────────────────────
+          A GUEST is a row the host typed in or imported. A PARTICIPANT is
+          somebody who actually joined the event through the app — scanned the
+          invitation, verified their number, and got an account. The column
+          that separates them is `participant_client_id`, which stays NULL
+          forever for guests who never install the app (most of them).
+
+          Sent as a BOOLEAN, never the id itself: the id names another
+          person's account, and "has this guest joined" is the whole question
+          the screens need answered. Without it the app could not tell the two
+          apart, so the Participants list and the Guest List showed the same
+          rows under different titles.
+        */
+        has_joined: Boolean(plain.participant_client_id),
     };
 };
 
