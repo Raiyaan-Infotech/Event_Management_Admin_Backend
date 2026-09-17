@@ -525,6 +525,20 @@ const getEventForViewer = async (clientId, eventId, opts = {}) => {
     if (!isOwner) {
         for (const field of HOST_ONLY_FIELDS) delete presented[field];
     }
+    /*
+      Whether THIS caller owns the event, stated outright.
+
+      The app cannot work it out for itself: `website_client_id` is the field
+      that would answer it and it is stripped just above, precisely because a
+      guest may not read it. Without this flag every client had to assume it was
+      the host, so a guest was shown Edit and Delete controls that the server
+      then refused — the guest list scopes writes by `website_client_id`, which
+      is the host's id, so a participant's call matches no row.
+
+      Safe to send: it tells the caller something about themselves that they
+      already know, and names nobody else.
+    */
+    presented.is_owner = isOwner;
     return presented;
 };
 
