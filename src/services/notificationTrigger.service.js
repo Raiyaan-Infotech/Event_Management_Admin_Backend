@@ -195,6 +195,25 @@ const triggerWelcomeInvitation = async ({
         if (guest?.participant_client_id) recipientClientIds.add(Number(guest.participant_client_id));
         if (client?.id) recipientClientIds.add(Number(client.id));
 
+        /*
+          ── WHO IS PUSHED IS NOT WHO GETS THE RECORD ───────────────────────
+          The set above is for the IN-APP feed, and putting the host in it is
+          deliberate: they keep a copy of every invitation their event sent.
+
+          A push is not a record, it is a message addressed to someone. This
+          one is written TO the guest — "Welcome", their name, their event — so
+          pushing it to the host makes their phone buzz with a greeting meant
+          for somebody else. That is what reusing this set for push did.
+
+          So the host is dropped, UNLESS they are also the person being
+          welcomed: a host who joined their own event as a guest is a real
+          case, and they should still be told.
+        */
+        const welcomedIds = new Set();
+        if (guest?.participant_client_id) welcomedIds.add(Number(guest.participant_client_id));
+        if (client?.id) welcomedIds.add(Number(client.id));
+        const pushClientIds = welcomedIds.size ? welcomedIds : new Set();
+
         const effectiveCompanyId = companyId ?? event.company_id ?? template.company_id ?? 1;
 
         // Verify guestId exists in event_guests table to respect foreign key constraint
@@ -229,14 +248,23 @@ const triggerWelcomeInvitation = async ({
         // Dispatch Push Notification (if push channel is configured)
         if (channels.includes('push')) {
             try {
-                const clientIdsArray = Array.from(recipientClientIds);
-                const activeTokens = await ClientDeviceToken.findAll({
-                    where: {
-                        website_client_id: { [Op.in]: clientIdsArray },
-                        is_active: 1,
-                    },
-                    attributes: ['id', 'token'],
-                });
+                // `pushClientIds`, NOT `recipientClientIds` — see above.
+                const clientIdsArray = Array.from(pushClientIds);
+                if (!clientIdsArray.length) {
+                    logger.info?.(
+                        '[NotificationTrigger] No push recipient for this welcome invitation '
+                        + '(the guest has not joined yet, so there is no account to send to).'
+                    );
+                }
+                const activeTokens = clientIdsArray.length
+                    ? await ClientDeviceToken.findAll({
+                        where: {
+                            website_client_id: { [Op.in]: clientIdsArray },
+                            is_active: 1,
+                        },
+                        attributes: ['id', 'token'],
+                    })
+                    : [];
 
                 if (activeTokens.length > 0) {
                     logger.info?.(
