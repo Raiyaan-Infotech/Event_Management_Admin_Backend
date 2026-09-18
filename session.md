@@ -12689,3 +12689,59 @@ Jamal (screenshots of plan detail "Included Menus (13)" and the plan's menu tabl
 - Backend `subscriptionPlan.service` `MENU_INCLUDE`: each plan menu's `menu` now carries `eventType { name }` and `religion { name }`.
 - Admin FE: new `src/lib/menu-scope.ts` `menuScopeLabel(menu)` → "Nikah · Islam" (empty for portal / app menus, which apply to every event). Shown on plan detail tiles, Manage Plan Menus cards, and the plan wizard's menu table + limits cards. `use-subscription-plans.ts` `PlanMenuRow.menu` gained the two fields. The wizard/Manage pages read `useEventMenus`, which already joined type/religion.
 - Admin `tsc --noEmit` clean. Not committed at time of writing.
+
+### 516. The app's Explore tiles now come from the API — nothing about a tile is hardcoded
+
+Jamal: "some menu are hardcode … all things only come from api like that to map that". Audit: `wedding_home_screen.dart` `_tiles` was a fixed list of 15 `(label, icon, slugs)` — the API only switched a hardcoded tile on or off; label, icon and order were the app's own, and a menu the admin added with a new slug could never appear.
+
+| Piece | Change |
+|---|---|
+| Backend `clientEvent.presentOne` | each `event.menus` row now carries `icon`, `color`, `sort_order` (was id / name / slug / menu_group) |
+| App `event_repository.dart` | new `EventMenuItem` (id, name, slug, icon, color, `baseSlug` strips `-N`); `ClientEventDetail.menus`; `menuSlugs` kept as a getter for the prefetch |
+| App `shared/widgets/menu_icon.dart` (new) | draws the admin's Iconify icon (`mdi:image-multiple` → `api.iconify.design/mdi/image-multiple.svg`) through `AppImageCache` (disk, works offline), tinted with the menu colour; Material fallback while loading / offline-never-seen / non-Iconify names like `calendar` |
+| App `wedding_home_screen.dart` | grid = `event.menus` in server order, label = menu name, icon + colour from Menu Management. Code keeps only `_routes` (base slug → screen, because screens are code) and `_fallbackIcons`. A granted menu with no screen still shows and toasts "X is coming soon" instead of being silently dropped |
+| App `offline_prefetch.dart` | also warms the menu icons at join / download |
+
+Verified: local event 23 read as mobile returns every menu with name / icon / colour / order; Iconify URL answers 200 `image/svg+xml`; `dart analyze lib` — no issues. Not run on a device.
+⚠ App features and portal sections (Family, Chat, Guests, …) have NO icon / colour in Menu Management (the tools created them blank) → they show the built-in fallback icon until an admin sets one.
+Not committed at time of writing.
+
+### 517. Audit of hardcoded data / flow gaps, and M1 — Contact Us wired to the event
+
+Audit only (reported, nothing changed except M1): A2 plan-wizard limit fields keyed by exact slug (`catalog[m.slug]` → `gallery-2` etc. get none; `guests-family` key matches no menu); B1 plan limits shown on Billing but never enforced on create; B2 portal sections hidden not blocked server-side; B3 chat/wishes/social wall/downloads/gallery have no tables; M2 Add Family Member fakes a save; M3 invite share uses fake `kInviteLink` + sample text; M4 hardcoded `kRelationships`; M5 Unsplash sample photos; M6 login banner Unsplash; M7 dead sample constants. Client portal: nothing hardcoded found. Correction to §509: live templates are all `plan_availability = 'all'` with empty `plan_ids` — the deleted plans did not orphan any template.
+
+**M1 fixed** — `event_contact_screen.dart` was a generic support page, five `onTap: () {}`. Now a `ConsumerWidget` on `selectedEventProvider`: header "Contact {organizer | host line}"; Send a Message → `sms:`, Call → `tel:`, WhatsApp → `https://wa.me/<digits>` (bare 10-digit → `91` prefix), Email → `mailto:` with the event name as subject, Venue → `/event/directions`. Phone is cleaned from the wizard's free text (`+91 98765 43210`). A blank channel stays visible, dimmed, "Not provided by the host". The hardcoded "We usually respond within 24 hours" card removed (a claim about the host nobody made).
+Added `url_launcher ^6.3.2` + Android `<queries>` for tel / smsto / mailto / https (Android 11 package visibility). `dart analyze lib` clean; not run on a device — needs a full rebuild (new plugin).
+
+M2 (Add Family Member → guest in the client's "Family" group) — agreed direction; Email required. Occupation / Date of Birth have no `event_guests` column — waiting on Jamal: remove, add columns, or notes.
+
+### 518. M2 — Add Family Member now saves a real guest in the host's "Family" group
+
+Jamal: "Family Relation is one of the guest in group … Create family group and map that … add new family member indirectly add new guest under family groups", and "that same [guest add] form we have to show this place".
+
+A family member IS a guest. `add_member_screen.dart` was a separate form (Full Name, required Occupation, DOB, hardcoded `kRelationships`) that waited 900ms and saved nothing. Now:
+
+| Piece | Change |
+|---|---|
+| `add_member_screen.dart` | rebuilt on the shared `GuestFormBody` (the portal's field set, same as Add Guest / Add Participant). Save → `ensureFamilyGroup()` → `POST /client/guests` with that `group_id` + relationship. Invalidates the guest list and the group picker. Occupation / DOB gone — no column, and the shared form only asks what the row stores |
+| `guest_form_body.dart` | `lockedGroupLabel` (Group shown fixed as "Family") and `showRelationship` (Relationship dropdown from `guestFormOptionsProvider` = the server's `form-options` for the event's category). Add Guest / Add Participant unchanged |
+| `guest_repository.dart` | `create()` sends `relationship_option_id` + `relationship` label (the server stores both); new `ensureFamilyGroup()` — finds the client's "Family" group case-insensitively (reuses one made in the portal) or creates it (`#EC4899`); `familyCategory` — a guest in the Family group whose relationship says nothing about family ("Chief Guest") now still lands on the Family tab |
+| `api_endpoints.dart` | `guestGroupCreate` = `/client/guests/groups` |
+| `family_data.dart` | deleted (`kRelationships` was its only content, now unused) |
+
+Verified on local through the services: group created → guest saved with `group_id`, `relationship = "Bride's Father"`, `relationship_option_id = 8` → cleaned up. `dart analyze lib` clean. Not run on a device. Email is required (server rule, same as Add Guest).
+
+### 519. Pushed, and the menu-duplication question handed to the manager
+
+**Pushed:** mobile app `2f80064` (§516 tiles from the API, §517 Contact Us, §518 Add Family Member — 13 files; Jamal's own 7 uncommitted app files — login, registration, add guest / participant, rsvp, permission screens — left untouched). Backend: `presentOne` icon / colour / sort_order (§516) + this log. App changes reach phones only with a new APK (new plugin `url_launcher`); the backend change is harmless to the current APK.
+
+**Menu duplication — decision is the manager's, not ours.** Jamal is sending him a written summary + screenshots. The facts it rests on:
+- Menu Management requires Category + Type + Religion (matches the manager's Add Menu mockup, `Religion *`), so each menu exists once per wedding religion — 4 copies, labelled "Nikah · Islam" etc. since §515. That is by design, not a bug.
+- Clients and guests never see duplicates: the portal wizard shows only the chosen religion's menus (§513, deployed).
+- Admin plan screens show all 4 copies because plans #8–#11 were created for Wedding + ALL types + ALL religions (§510). The manager's plan mockups scope each plan to ONE type + religion ("Applies To: Wedding · Hindu Wedding · Hindu"; "Menus will be available based on the above selection").
+- Code gap either way: Manage Plan Menus + plan wizard filter menus by category and type, NOT religion.
+- Second difference: the mockup's Religion master is a standalone list (no category / type fields on Add Religion); ours ties each religion to one event type, so the same religion is re-created per type.
+
+Waiting on the manager: (A) the 4 tiers for one religion, (B) 4 tiers × each religion, or (C) keep all-religion plans; and whether Religion should become a standalone list.
+
+**Not done:** "live create that guest" — production has no events (all wiped §509), and a guest belongs to an event; asked Jamal which client / event.

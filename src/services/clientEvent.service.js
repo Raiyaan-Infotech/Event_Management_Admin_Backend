@@ -609,7 +609,10 @@ const presentOne = async (event, { platform = 'website' } = {}) => {
                     id: { [Op.in]: menuIdsToRead },
                     is_active: 1,
                 },
-                attributes: ['id', 'name', 'slug', 'menu_group'],
+                // name / icon / color / sort_order: the app draws its Explore
+                // tiles straight from these (Menu Management is the source of
+                // the label, icon and order — nothing about a tile is hardcoded).
+                attributes: ['id', 'name', 'slug', 'menu_group', 'icon', 'color', 'sort_order'],
                 order: [['sort_order', 'ASC'], ['id', 'ASC']],
                 raw: true,
             })
