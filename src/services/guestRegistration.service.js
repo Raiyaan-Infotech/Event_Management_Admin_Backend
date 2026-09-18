@@ -41,17 +41,26 @@ const clientPortalService = require('./clientPortal.service');
  */
 const rsvpEnabledFor = async (event) => {
     if (!event) return false;
-    const rsvpMenu = await EventMenu.findOne({ where: { slug: 'rsvp', is_active: 1 }, attributes: ['id'] });
-    if (!rsvpMenu) return false;
 
     let menuIds = event.menu_ids;
     if (typeof menuIds === 'string') {
         try { menuIds = JSON.parse(menuIds); } catch { menuIds = []; }
     }
-    if (!Array.isArray(menuIds) || !menuIds.map(Number).includes(Number(rsvpMenu.id))) return false;
+    if (!Array.isArray(menuIds) || !menuIds.length) return false;
+
+    // Menus are duplicated per religion in Menu Management and a duplicate's
+    // slug gets a numeric suffix, so RSVP is `rsvp`, `rsvp-2`, `rsvp-3`… — any
+    // of them on the event counts (the app's Explore grid strips the same suffix).
+    const onEvent = await EventMenu.findAll({
+        where: { id: { [Op.in]: menuIds.map(Number) }, is_active: 1 },
+        attributes: ['id', 'slug'],
+        raw: true,
+    });
+    const rsvpIds = onEvent.filter((m) => /^rsvp(-\d+)?$/.test(m.slug)).map((m) => Number(m.id));
+    if (!rsvpIds.length) return false;
 
     const granted = await clientPortalService.ownerGrantedMenuIds(event.website_client_id, 'mobile');
-    return granted.includes(Number(rsvpMenu.id));
+    return rsvpIds.some((id) => granted.includes(id));
 };
 
 /**

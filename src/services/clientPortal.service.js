@@ -451,7 +451,11 @@ const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
     const granted = menuIds.length
         ? await EventMenu.findAll({
             where: activeWhere(companyId, { id: { [Op.in]: menuIds } }),
-            attributes: [...TAXONOMY_ATTRS, 'slug', 'menu_group'],
+            // The scope columns let the wizard offer only the menus that suit the
+            // category / type / religion picked in step 1 (menus are duplicated
+            // per religion in Menu Management, so unfiltered a Nikah event would
+            // list every religion's copy).
+            attributes: [...TAXONOMY_ATTRS, 'slug', 'menu_group', 'event_category_id', 'event_type_id', 'religion_id'],
             order: [['sort_order', 'ASC'], ['id', 'ASC']],
         })
         : [];

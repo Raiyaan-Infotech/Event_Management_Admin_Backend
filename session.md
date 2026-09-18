@@ -12391,3 +12391,293 @@ Audit of the rest: the stat-card tints (`bg-[#hex]/10`) are translucent and read
 **Verified in a real browser** (Playwright, browser set to a DARK OS, client #106): /dashboard, /dashboard/events, /dashboard/guests, /dashboard/analytics, /dashboard/settings each load **light** (no `.dark`, `<html>` carries only `color-scheme`), and ONE click on the toggle gives dark: body #0b1120, text #e2e8f0, cards #111a2e, headings light. Screenshots viewed in both modes. `tsc --noEmit` clean. Guests / Analytics show the plan lock for that client, so their contents were checked in code, not on screen.
 
 Not deployed — the portal fix reaches production only with a portal deploy; the backend default only with a backend deploy (the prod DB tool above works without one).
+
+## Session 44 — A full-access Wedding plan on production, and the guest/participant split the app never had
+
+> **Date:** 2026-09-17 | **Backend:** Event_Management_Admin_Backend · **Mobile:** Event_Invite_Mobile_App · **Portal (read):** event_client_single
+> Jamal: "in live create new plan with all menu … 3 event all are wedding and past current upcomming", then "guest and participant are dif are you not understand ?"
+
+### 496. "A plan with all menus" is not a checkbox — and four menus did not exist on production
+
+A plan is scoped to ONE category + type, and a `core` menu carries the same scope, so a Wedding plan can only ever offer the Wedding core menus. Plan #1 "Permium plan" already granted everything it could: `home`, `gallery-2`, `guests`, and all 8 app menus = 11. The "missing 11" the audit tool reports are menus for other categories/types plus 4 portal-only ones.
+
+The real gap was in the CATALOGUE. Production's `event_menus` had **no row at all** for `agenda`, `venue`, `rsvp` or `contact-us` — four slugs `wedding_home_screen.dart` looks for. Local has them; the two catalogues had drifted. So **RSVP was ungrantable on production**, which is why the splash → RSVP flow (§487, already built) had never once fired there.
+
+`tools/setup-wedding-full-plan.js` (written, run, then deleted with the other QA tools) created them and built the plan. Two things it got right only after the local dry run caught them:
+
+- **Taxonomy ids are not the same per environment.** On local, category 2 is "Corporate" and type 4 is "Team Building"; on production they are "Wedding" / "Nikah". Hardcoded ids build a correctly-shaped plan around the wrong subject and nothing downstream notices. The tool takes `--like-plan <id>` and copies the scope, printing the resolved NAMES before writing.
+- **Grants ignore scope entirely.** `grantedMenuIds` filters by plan + platform only; a menu's own category/type is never re-checked. Real data leans on this — local plan 7 (Wedding / Christian Wedding) grants seven core menus, none of which carry that scope. A scope-only query would have built a plan with FEWER menus than the one it was meant to surpass, so the grant set is the union of scope ∪ what the reference plan already grants.
+
+**Applied to production:** 4 new `event_menus` rows (core, Wedding/Nikah); plan **#7 `WED-FULL-QA` "Wedding Full Access (QA)"**, 19 menus (6 core incl. `rsvp` + 5 portal + 8 app), `is_visible = 0`; client **#18 "QA Wedding"** (+91 9000000001, later given `qa.wedding@example.com` / `Qa@wed12` for the web portal, which logs in with email+password while the app uses a mobile OTP).
+
+⚠ `event_menus` is a SHARED catalogue — those four rows show up in every admin's Menu Management, not just the test account. That is the intended fix, and the reason the tool was dry-run-first.
+
+### 497. Seeder: a `qa` set whose three weddings are always past / live / upcoming
+
+Every other set hardcodes ISO dates, which goes stale the moment the calendar passes it — useless for testing the status split. The `qa` set computes from today at run time: `-21d`, `-1d → +1d` (so `deriveStatus` reads *live* all day), `+35d`.
+
+Each event carries its own guest list, RSVP spread and invite history, so no row is shared — the point when checking that a participant sees only their own event. Cover photos go through the same `mediaService.upload(..., { folder: 'event-covers' })` call the real endpoint makes, so the stored URL is whatever the environment's driver produces.
+
+**On production:** events **#16 Nikah (past) / #17 Walima (live) / #18 Mehendi (upcoming)**, 14 / 18 / 11 guests, covers on CloudFront and verified serving real JPEG bytes (206, `image/jpeg`).
+
+First run put "(Past)" / "(Happening Now)" / "(Upcoming)" in the event NAMES. Jamal, correctly: "wtf are you doing". Real data does not label itself; cleared and reseeded with plain names, status left to the dates.
+
+### 498. The cover-image API was never broken — local media settings are blank
+
+Reported as "cover img link with s3 and that api not do that like other api". Traced end to end: the route, `clientEvent.service.uploadCoverImage` and the media pipeline are character-for-character the same shape as the avatar and splash uploaders. `schema-audit.js` showed production already had the column.
+
+The cause: **local `settings` group `media` are all empty strings, so `driver = ''` → `'local'`**, and every upload on that machine lands on disk as `/uploads/...`. Other features only LOOK S3-backed because their seeded rows carry production CloudFront URLs — the same trap that cost time once before, when a decoration download 400'd locally because the seeded rows carried production CloudFront URLs while local media settings were blank. On production the identical code returned a CloudFront URL. Nothing to fix.
+
+### 499. Three fields the clients could not see — and one they should never have been pushed
+
+| Field | Added to | Why |
+|---|---|---|
+| `derived_status` | `guestRegistration.publicEvent` | The guest's event payload carried **no status at all**, so the app's `_toStatus(null)` filed every invitation as *upcoming*, a year-old event included. The stored `status` column is not the answer either — it only holds draft/upcoming/cancelled, because past and live are computed. Imported from `clientEvent.service` rather than re-implemented so the guest's card and the host's cannot drift. |
+| `is_owner` | `clientEvent.getEventForViewer` | Already computed internally to strip host-only fields, never sent. The app cannot derive it — `website_client_id` is the field that would answer it and it is stripped from a guest's copy. So every client assumed it was the host and offered a participant Add/Edit/Delete that the server then refused. |
+| `has_joined` | `clientGuest.present` | See §501. |
+
+Also fixed: **the welcome-invitation push went to the host.** `notificationTrigger` built ONE recipient set and used it for two jobs. Putting the host in it is right for the in-app RECORD — they keep a copy of every invitation their event sent — but the same set was reused for push, so the host's phone buzzed with a greeting addressed to the guest. Push now goes to the welcomed party alone, the host dropped unless they are also the one being welcomed.
+
+### 500. The app read `status`, not `derived_status` — in both lists
+
+`event_repository._toItem` did `_toStatus(row['status'])`. `_toStatus` matches on `'live'` / `'past'`, values that live only in `derived_status`; the stored column never holds either. So everything fell to the default. The comment above it even said "the server derives five states" — the author intended `derived_status` and wired the wrong key.
+
+`joined()` and `list()` share `_toItem`, so one fix covered both. Proven against the live API as a guest: `derived_status = "past"`, and that participant saw exactly ONE event, which is the scoping test passing.
+
+### 501. A guest is not a participant — the two screens were the same list
+
+Jamal: "guest and participant are dif are you not understand ?" He was right, and a comment in `participants_screen.dart` had led the work astray:
+
+> ── PARTICIPANTS ARE GUESTS ── … "participant" and "guest" are two names for one table
+
+The model says otherwise, on `participant_client_id`:
+
+> NULL forever for guests a host typed in and who never installed the app — which is most of them.
+
+**A GUEST is a row the host typed in or imported. A PARTICIPANT is somebody who joined through the app** — scanned the invitation, verified their number, got an account. Both live in `event_guests`; they are different people. And both screens read `selectedEventGuestsProvider` **with no filter**, so they showed identical rows under different titles.
+
+- Backend `present()` now returns `has_joined` — a BOOLEAN, never the id, which names another person's account.
+- App parses `EventGuest.hasJoined`, defaulting to **false** (an unknown row is an invitee, not a participant).
+- Participants screen filters on it. Guest List still shows the whole invite list.
+
+**Architecture question Jamal raised — should participants get their own table?** Answered no, and his own next sentence is the reason: "in future we convert participant into guest" means the same person in two states, which is a column flip. Two tables makes it a DELETE + INSERT that changes the row id, and `event_messages.guest_id`, the RSVP response log and check-ins all point at it.
+
+His "phone book" framing does point at a real gap, but it is the CONTACT, not the participant: `event_guests` is scoped to one event, so the same person invited to three events is three unrelated rows with three copies of their number and nothing linking them. The table to add when wanted is `client_contacts` (host-scoped address book) with `event_guests` becoming the per-event invitation referencing it. **Not built — parked on Jamal's decision.**
+
+### 502. Add Participant saved nothing at all
+
+```dart
+await Future<void>.delayed(const Duration(milliseconds: 900));
+AppToast.success(context, 'Participant added');
+```
+
+No request, ever. Every participant added through that screen was discarded while the toast said otherwise. Now `POST /client/guests`, with the list provider invalidated so the screen behind refreshes.
+
+Three faults surfaced in a row fixing the rest of it:
+
+1. **`create()` parsed the wrong shape.** The controller wraps as `{ guest: {...} }` like `getById` and `update` do; the app parsed `data` directly, so `j['id']` was null and `as num` threw — *after* the server had saved the row. Pre-existing, and it would have hit Add Guest too; Add Participant was fake so it never got that far.
+2. **A silent `return` on failed validation** made the button look dead — `validate()` paints small red text that is usually scrolled out of view. Now the project's shared "Please fill all mandatory fields." toast.
+3. **A required dropdown with no options.** Relationship was required and its choices come from the server, so until they loaded the form could not be submitted and nothing said why. A banner now shows loading / failed-with-Retry.
+
+Navigation: the save first used `context.go`, which REPLACES the stack — the list then had no history and its plain `BackButton` did nothing. Now `pop` when possible (`go` only as the deep-link fallback), and the Participants back button got the same `canPop() ? pop() : go('/event/wedding')` fallback the Guest List already had.
+
+### 503. The scanner's black camera: an ordering bug, not permissions
+
+`MobileScannerController.start()` throws *"has not been attached to a MobileScanner widget"* unless that widget is already in the tree. `_Viewfinder` is only built when `_cameraReady == true`, and `_startScanner()` ran BEFORE that — so it started against nothing. The old code then swallowed the error with a bare `catch (_) {}` and set `_cameraReady = true` anyway: the viewfinder mounted, the controller attached, and nothing ever called `start()` again.
+
+Now `_mountViewfinderThenStart()` — setState first, then `start()` in a post-frame callback (setState only *schedules* the build). The error is kept rather than swallowed, so a future failure shows its reason plus a Retry.
+
+Permission handling was never involved and is unchanged: rationale before the OS dialog, and silence when already granted, which is why no permission screen appeared and was correct.
+
+### 504. Forms: the client portal is the source of truth
+
+Jamal: "client portal guest form and app has form not mathced which field in client portal that is right".
+
+The app asked for five things (Full Name, Mobile, Email, RSVP Status, and — briefly, wrongly — a required Gender and Relationship imported from the REGISTRATION form). The portal asks for twenty. New shared `guest_form_body.dart`, used by Add Guest AND Add Participant so they cannot drift apart again:
+
+**Guest Information** — Title/Salutation · First Name \* · Last Name · Email \* · Phone · Guest Group · Company
+**Add More Details (collapsible, as the portal)** — Address 1/2 · City · State · PIN · Country · Table Number · Dietary Preferences · Party Size · Notes · Special Requirements · Plus one + count
+
+- **Full Name split into First + Last.** The app was splitting on whitespace and guessing, wrong for any multi-word first name; the server stores them apart.
+- **Gender / Relationship dropped** — not on the portal's form, and making them required is what made the form unsubmittable. Dietary Preferences reverts to the portal's free text.
+- **Review step deleted.** The portal saves from the form; restating twenty fields on a second screen is not worth a route. `review_guest_screen.dart` removed (tracked in git).
+- **RSVP stays out**, which matches the portal anyway: its default is `not_responded` / `none`, exactly what the app now sends. Recording an answer here would set `can_respond` false and the guest would never be asked.
+
+Backend gaps this exposed: `gender`, `relationship`, `relationship_option_id` and `food_preference_option_id` were real columns **missing from `WRITABLE_FIELDS`**, so they were dropped in silence — the save succeeded and the value was gone. Added with validation. (The form no longer sends the first two, but the registration path does.)
+
+New `GET /client/guests/form-options?event_id=N` — Relationship / Food Preference scoped to the event's category. Needed because `/guest-relationship-options` sits behind the admin JWT and 401s for a client, and `resolveInvite` answers only for somebody holding a QR token.
+
+**Guest Group picker:** first wired to the paginated `/client/guests/groups` and parsed as bare rows. Wrong twice — the server has `/client/guests/groups/all`, whose own comment reads *"Unpaginated, for the pickers on Add Guest and Send Message"*, and it wraps as `{ groups: [...] }`. Fixed. The dropdown is still empty on the QA account because **client #18 has zero groups** (they are per-client, and that account is new) — the empty state now says "No guest groups yet" instead of looking broken.
+
+### 505. Permission screen: Location and Storage added ahead of their features
+
+Jamal: "permission screen add that location and storage also we have do with future work now ask that thigns".
+
+Two entries in the enum and two specs — the screen builds its cards and its "n of N" counter off the list, as its docblock promised. Both **Recommended, never Required**: `allRequiredGranted()` still asks only about the camera, so declining a permission for a feature that does not exist yet costs nothing.
+
+Manifest gained `ACCESS_FINE/COARSE_LOCATION`, `READ_MEDIA_IMAGES`, and the pre-13 storage pair capped with `maxSdkVersion`. `isStorageGranted()` treats `Permission.photos` OR `Permission.storage` as a yes: Android 13 split the blanket permission, each version reports the OTHER as permanently denied, and asking the OS which generation it is would mean a `device_info_plus` dependency for one boolean.
+
+⚠ The copy describes what these WILL do — maps, directions, Near By, downloads. **Nothing reads GPS or writes files on any current screen**, and that is flagged inline on both specs. iOS has no usage strings for these — it has none for the camera either, so iOS permissions look unconfigured generally; left alone since APKs are what ship.
+
+### 506. RSVP left the registration form
+
+Scanning an invitation used to ask attendance at step 2 of 3, before the guest had seen anything about the event. Registering says "this is me"; the RSVP is a decision about turning up. Now `['details', 'review']`, and the join sends **no `responseType` at all** — recording one would flip `can_respond` to false and the splash would never offer the form.
+
+Also, per Jamal, "Join Event" is gone from the card entirely: past / already-registered / host all read **View Event**, and **Register Event** is the only thing the button ever asks for.
+
+### 507. Production credentials for live testing
+
+**Host / creator** — app `9000000001` + any OTP; portal `qa.wedding@example.com` / `Qa@wed12`. Owns all three events, sees View Event, never gets RSVP, gets the Add buttons.
+
+**Participants** (each sees ONLY their own event):
+
+| Mobile | Event | State |
+|---|---|---|
+| 9100016000 / 9100016001 | #16 Nikah (past) | answered *yes* |
+| 9100017008 / 9100017009 | #17 Walima (live) | **no answer → splash → RSVP** |
+| 9100018008 / 9100018009 | #18 Mehendi (upcoming) | **no answer → splash → RSVP** |
+
+A seeded guest is an INVITATION, not an account — `participant_client_id` is null until the join flow fills it. Those six were linked by a tool for testability; the other ~40 cannot sign in. `OTP_ACCEPT_ANY` is on in production, which is what makes `123456` work — **turn it off before the Play Store**.
+
+### 508. Deployed, and what is not
+
+Pushed and live: `derived_status` (48d7f79), `is_owner` (43dd297), the push-recipient fix + qa seeder (768c079, 027816f), `has_joined` (da72539), and Jamal's own `f94a355` (cover image) and `faec8cf` (form-options).
+
+**Not shipped — the whole mobile side needs an APK rebuild:** the scanner fix, real Add Participant, the portal's form, guest groups, Participants-vs-Guests, the permission cards, RSVP out of registration, the label and back-button fixes.
+
+Open:
+- `client_contacts` phone book — §501, parked on Jamal.
+- "Add Participant" is the wrong verb now that the screen is filtered: anyone added there is a guest and will not appear in that list. Remove or relabel — Jamal's call.
+- Four untracked `apply-*` migration tools still in `src/database/tools/` (including `apply-event-cover-image.js`). Untracked = deleting them is permanent, so they were left.
+- QA account has no guest groups; offer to seed a few stands.
+
+---
+
+## Session 45 — Production reset: clean plans, Wedding-only catalogue, per-religion menus, four real clients
+
+> **Date:** 2026-09-18 | **Backend:** Event_Management_Admin_Backend · **Client portal:** event_client_single
+> Almost all of this session is PRODUCTION DATA work, done through the real services (validation + activity log) with a dry run first and a JSON backup before every hard delete. Backups: `D:\Jamal\prod-backups\`.
+> **Code changed (uncommitted, NOT deployed):** wizard menu filter by category/type/religion + server check, RSVP gating on `rsvp-N` slugs — §513.
+
+**Production state at end of session:**
+
+| What | Now |
+|---|---|
+| Plans | #8 Free ₹0 · #9 Basic ₹499 · #10 Standard ₹999 · #11 Premium ₹1999 — all Wedding, yearly (§510) |
+| Plan types | #4 Free, #5 Basic, #6 Standard, #3 Premium (reused); junk #1 Sample Gold / #2 sample yellow left |
+| Event categories | only #2 Wedding live; 17 soft-deleted with marker `2026-09-18 12:00:00` (§511) |
+| Event types | only Nikah, Thirumanam, Christian, Buddhist live; 8 soft-deleted with the same marker (§511) |
+| Event menus | 24 new, 6 per religion (ids 33–56); portal (5) + app (8) kept (§512, §513) |
+| Clients | #26 Jamal (Free), #27 Ismail (Basic), #28 Arsath (Standard), #29 Najeeb (Premium), password `Event@123` (§514) |
+| Events / guests | none — all wiped (§509) |
+
+**Open after this session:**
+1. Commit + deploy backend and portal, or the live wizard lists every religion's copy of each menu and RSVP only works for Nikah (§513).
+2. `event_templates.plan_ids` still name deleted plans 1–7 — re-link templates to plans 8–11 (§509).
+3. Arsath / Najeeb have no mobile → no app login; Ismail / Arsath / Najeeb emails are placeholders (§514).
+4. Revert SQL for categories / types when wanted (§511); #9 Birthday Party needs a separate restore by id.
+5. `tests/plan-menu-gating.test.js` fails 11 checks on the 60 s plan-grant cache, not on this session's change (§513).
+6. Menu Management's own Website/Mobile, Display and Active columns are stored but read by nothing outside Menu Management — kept on purpose (Jamal's call). The plan's W/M switch is what gates a platform.
+
+### 509. Production wiped: every plan and every website client (2026-09-18)
+
+Jamal: "dlt plans in live and client data also". Confirmed scope before writing: **all 7 plans, all 18 `website_clients` and everything under them, hard delete, backup first.**
+
+Deleted in one transaction, children first: 7 `subscription_plans` + 98 `subscription_plan_menus`; 18 `website_clients`; 18 `events`, 227 `event_guests`, 273 `event_messages`, 6 campaigns, 8 RSVP response logs, 3 guest groups, 17 `splash_screens`; 80 `client_sessions`, 36 `client_notifications`, 15 device tokens, 3 preferences, 2 subscriptions / 5 subscription events / 2 invoices (+2 items) / 2 transactions. Every table checked afterwards reads 0.
+
+**Backup:** `D:\Jamal\prod-backups\prod-plans-clients-1789729081042.json` (605 KB, every deleted row, re-read and count-verified before the DELETE ran). Contains real names, emails and numbers, so it stays out of the repo.
+
+Deliberately NOT touched:
+- `vendor_clients` (48), and the `'client'` rows in `mails` / `mail_recipients` / `chat_*`: those are the VENDOR portal's clients (`mail.service` / `chat.service` resolve `'client'` via `VendorClient`), a different table.
+- The catalogue: `event_menus` (incl. §496's four and the portal/app groups), categories, types, religions, templates, notification templates, plan types, badges.
+- `event_templates.plan_ids` / `plan_availability` JSON (21 rows) still name the deleted plan ids 1–7. New plans get new auto-increment ids, so those templates must be re-pointed when plans are rebuilt.
+
+Consequences: every §507 QA credential, Ismail (#16) and Jamal's own client accounts are gone; any installed app session is dead (sessions + device tokens removed). New plans start at id 8, new clients at 26 (AUTO_INCREMENT not reset).
+
+### 510. Four simple plans on production — Free / Basic / Standard / Premium (Wedding)
+
+Jamal: "create 4 simple plan". Scope picked: **Wedding category, any type / religion** (`event_type_id` / `religion_id` NULL = all). Created through `planType.service.create` and `subscriptionPlan.service.create` as Super Admin (#2), company 1, so validation and the activity log ran as if from the admin.
+
+| Plan | Code | ₹/yr | Badge | Menus |
+|---|---|---|---|---|
+| #8 Free | FREE | 0 | — | 6: Home, Gallery, RSVP, Guests |
+| #9 Basic | BASIC | 499 | — | 11: + Venue, Contact Us, Messages, Invite & Share, Participants |
+| #10 Standard | STANDARD | 999 | Most Popular | 17: + Agenda, Splash Screens, Analytics, Family, Chat, Wishes |
+| #11 Premium | PREMIUM | 1999 | Premium | 21: + Notification Templates, Near By, Social Wall, Downloads |
+
+- Home and Gallery are granted as ALL wedding variants (`home` + `home-2`, `gallery` + `gallery-2`): Nikah's are `home` / `gallery-2`, Thirumanam's `gallery`, Christian's `home-2`. Buddhist Wedding (type 7) has no core menus on production at all.
+- Each grant's W/M follows the menu's own `is_website` / `is_mobile`: core both, portal sections website (Guests both), app features mobile.
+- No limits set (`limits_json` NULL = unlimited). All yearly, no trial, visible + active.
+- Plan types: new #4 Free, #5 Basic, #6 Standard; the existing #3 "Premium" was reused and updated (₹999 → 1999, validity 365, colour). The junk #1 "Sample Gold" / #2 "sample yellow" left alone — delete from the admin if unwanted.
+- ⚠ `event_templates.plan_ids` still name the deleted plans 1–7 (§509); templates need re-linking to 8–11.
+
+### 511. Production: every event category except Wedding soft-deleted (to be reverted later)
+
+Jamal: "event category other then wedding all that dlt now soft dlt later we revert". 17 categories got `deleted_at = '2026-09-18 12:00:00'`, a fixed marker so the revert touches exactly these rows: #1 Birthday, #3 Anniversary, #4 Celebration, #7 Corporate, #8 Engagement, #9 Baby Shower, #10 Housewarming, #11 Graduation, #12 Conference, #13 Festival, #14 Religious, #15 Sports, #16 School & College, #17 Concert, #18 Memorial, #19 Social & Community, #20 Exhibition. Only #2 Wedding is live. #5 "gfgsdfh" and #6 "Circumcision" were already deleted in August and are NOT part of this.
+
+**Revert (production):**
+```sql
+UPDATE event_categories SET deleted_at = NULL WHERE deleted_at = '2026-09-18 12:00:00';
+```
+
+Categories only — children untouched on purpose so the revert is one statement: 9 event types, 6 religions, 5 event menus, 11 event templates, 8 notification templates, 173 relationship + 142 food-preference options still point at the hidden categories. No plan or event used them (plans #8–#11 are Wedding).
+
+Then the event types, same marker (Jamal: "event type also … wedding hold else soft dlt"): 8 rows — #10 First Birthday, #11 Milestone Birthday, #12 Kids Birthday, #13 Wedding Anniversary, #14 Silver, #15 Golden, #16 Diamond Anniversary, #17 Anniversary Party. Live now: only Wedding's #4 Nikah, #5 Thirumanam, #6 Christian Wedding, #7 Buddhist Wedding.
+⚠ #9 "Birthday Party" was already deleted at `2026-09-18 11:17:31` — not by this tool (from the admin, minutes earlier), so the marker revert does NOT bring it back; restore it by id if wanted.
+
+```sql
+UPDATE event_types SET deleted_at = NULL WHERE deleted_at = '2026-09-18 12:00:00';
+```
+
+### 512. Production: all event-feature menus HARD deleted — Jamal is building a new menu section
+
+Jamal: "dlt all menu now i will new menu section". Scope confirmed: **event menus only** (menu_group core/additional/custom), **hard delete**. 19 `event_menus` rows (ids 1–15, 29–32: every Home/Gallery variant, About the Celebration, Memories, Agenda, Venue, RSVP, Contact Us, and 6 junk copies already soft-deleted in August) + their 28 `subscription_plan_menus` grants. One transaction.
+
+Backup: `D:\Jamal\prod-backups\prod-event-menus-1789730690703.json` (menus + grants). No event carried `menu_ids` and every `plan_types.menu_ids` was `[]`, so nothing else referenced them.
+
+KEPT: the 5 portal sections (guests, messages, splash-screens, analytics, notification-templates) and 8 app features (family, participants, invite-share, near-by, chat, wishes, social-wall, downloads) — the portal sidebar and the app's Explore tiles key on those exact slugs.
+
+Plans now hold only those: Free 1 (guests), Basic 4, Standard 9, Premium 13. New menus must be ticked on plans 8–11 in Manage Plan Menus.
+⚠ The app's Explore grid maps tiles by slug (`event-information`/`home`/`about-the-celebration` → Event Info, `gallery`/`memories` → Gallery, `agenda`, `venue`, `rsvp`, `contact-us`), and RSVP registration gating looks for slug `rsvp` (§492). New menus need those slugs or the tiles and RSVP stay off.
+
+### 513. Wedding menus rebuilt per religion, and the wizard finally filters menus by religion
+
+Jamal: "update that plan new menu list" + "event menu duplication happen based on event category" + "after we select that religion show that menu we have filter — why that is not happen".
+
+**Why duplication:** Menu Management requires a religion on every menu (`assertReligionMatchesScope`), and each Wedding religion sits under one type — so every menu exists once per type/religion, and `buildUniqueSlug` suffixes the copies (`gallery`, `gallery-2`, …).
+
+**Created on production** (through `eventMenu.service.create` as Super Admin, core group, W+M, Wedding):
+
+| Type / Religion | Menu ids | Slugs |
+|---|---|---|
+| Nikah / Islam | 33–38 | `event-information`, `gallery`, `rsvp`, `venue`, `contact-us`, `agenda` |
+| Thirumanam / Hinduism | 39–44 | same with `-2` |
+| Christian Wedding / Christianity | 45–50 | `-3` |
+| Buddhist Wedding / Buddhism | 51–56 | `-4` |
+
+Granted to plans (all 4 religions' copies, W+M): Free = Event Information, Gallery, RSVP · Basic = + Venue, Contact Us · Standard / Premium = + Agenda. Totals incl. portal/app: Free 13, Basic 24, Standard 33, Premium 37.
+
+**The filter was missing — two gaps fixed in code:**
+1. **Portal wizard offered every granted menu**, regardless of what was picked in step 1 — a deliberate comment said the menu's scope columns were "unrelated to plan curation". With per-religion menus that listed Gallery ×4. Now `menuRows` = plan grants narrowed by `suitsScope` (the rule templates already used — NULL on the menu = any). `getEventOptions` returns each menu's `event_category_id` / `event_type_id` / `religion_id`; `clientEvent.normalise` rejects an off-scope menu on save when the taxonomy is in the request.
+   Files: backend `clientPortal.service.js`, `clientEvent.service.js`; portal `event-wizard.tsx`, `lib/event-templates.ts` (`suitsScope` exported), `hooks/use-client-portal.ts` (`MenuOption` scope fields).
+2. **RSVP gating matched only slug `rsvp`** (`rsvpEnabledFor`, `findOne`) — Thirumanam / Christian / Buddhist events carry `rsvp-2/3/4` and would never ask. Now any `^rsvp(-\d+)?$` menu on the event counts, if the owner's plan grants it on mobile. The app already strips the suffix (`_baseSlug`).
+
+Verified read-only on production: for every plan and every religion the filtered offer is exactly that religion's set once (Free 3, Basic 5, Standard/Premium 6), each with its own RSVP slug. Portal `tsc --noEmit` clean.
+
+⚠ **Not deployed** — the filter and RSVP fix are live only after a backend + portal deploy. Until then the live wizard shows every religion's copy.
+⚠ `tests/plan-menu-gating.test.js` now fails 11 checks (27 pass) — none from this change: they are all "plan edited → server still answers the old menus". The test edits plans in ITS OWN process, which clears its own `invalidatePlanGrants` cache, not the running server's 60 s cache added in `362676a` (2026-09-12, the day after the test last passed 38/38). Needs the test to wait out the TTL or edit plans through the admin API.
+
+### 514. Four real clients on production, one per plan
+
+Jamal: "create new 4 new client names are Jamal, Ismail, Arsath, Najeeb — each subscribe each plan". Created through `websiteClient.service.create` (the admin Clients path: Super Admin #2, company 1, `source = 'admin'`), then `clientBilling.getOverview` so the subscription record exists (the same self-heal the Billing page runs).
+
+| Client | Email | Mobile | Plan | Subscription |
+|---|---|---|---|---|
+| #26 Jamal | jamaludheen779@gmail.com | 9884699436 | #8 Free | #3 active, yearly ₹0 |
+| #27 Ismail | ismail@eventinvit.in | 7010051951 | #9 Basic | #4 active, yearly ₹499 |
+| #28 Arsath | arsath@eventinvit.in | — | #10 Standard | #5 active, yearly ₹999 |
+| #29 Najeeb | najeeb@eventinvit.in | — | #11 Premium | #6 active, yearly ₹1999 |
+
+Portal password for all four: `Event@123`. All periods end 2027-09-18.
+Jamal's and Ismail's email/mobile are their real ones from the §509 backup (Ismail had no email — `ismail@eventinvit.in` is a placeholder). Arsath / Najeeb emails are placeholders and they have NO mobile, so they cannot use the app (mobile OTP) until a number is added in admin Clients.
+Verified against the LIVE server: `POST /public/website-clients/login` → 200 for all four, and `/client/me` shows each one's own plan.
