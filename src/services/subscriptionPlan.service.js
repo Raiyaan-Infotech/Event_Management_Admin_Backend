@@ -113,7 +113,19 @@ const MENU_INCLUDE = {
     as: 'planMenus',
     required: false,
     include: [
-        { model: EventMenu, as: 'menu', attributes: ['id', 'name', 'slug', 'menu_group', 'icon', 'color'], required: false },
+        {
+            model: EventMenu,
+            as: 'menu',
+            attributes: ['id', 'name', 'slug', 'menu_group', 'icon', 'color', 'event_type_id', 'religion_id'],
+            required: false,
+            // Menus exist once per type/religion (Menu Management requires a
+            // religion), so the plan screens label each copy — "Gallery ·
+            // Nikah · Islam" — or the four Gallery tiles are indistinguishable.
+            include: [
+                { model: EventType, as: 'eventType', attributes: ['id', 'name'], required: false },
+                { model: Religion, as: 'religion', attributes: ['id', 'name'], required: false },
+            ],
+        },
     ],
 };
 

@@ -12681,3 +12681,11 @@ Jamal: "create new 4 new client names are Jamal, Ismail, Arsath, Najeeb — each
 Portal password for all four: `Event@123`. All periods end 2027-09-18.
 Jamal's and Ismail's email/mobile are their real ones from the §509 backup (Ismail had no email — `ismail@eventinvit.in` is a placeholder). Arsath / Najeeb emails are placeholders and they have NO mobile, so they cannot use the app (mobile OTP) until a number is added in admin Clients.
 Verified against the LIVE server: `POST /public/website-clients/login` → 200 for all four, and `/client/me` shows each one's own plan.
+
+### 515. Admin plan screens now say which type / religion each menu copy belongs to
+
+Jamal (screenshots of plan detail "Included Menus (13)" and the plan's menu table): "it repeated … unable to find which category that belongs … looks like duplicate". They were the four per-religion copies from §513, labelled only by name.
+
+- Backend `subscriptionPlan.service` `MENU_INCLUDE`: each plan menu's `menu` now carries `eventType { name }` and `religion { name }`.
+- Admin FE: new `src/lib/menu-scope.ts` `menuScopeLabel(menu)` → "Nikah · Islam" (empty for portal / app menus, which apply to every event). Shown on plan detail tiles, Manage Plan Menus cards, and the plan wizard's menu table + limits cards. `use-subscription-plans.ts` `PlanMenuRow.menu` gained the two fields. The wizard/Manage pages read `useEventMenus`, which already joined type/religion.
+- Admin `tsc --noEmit` clean. Not committed at time of writing.
