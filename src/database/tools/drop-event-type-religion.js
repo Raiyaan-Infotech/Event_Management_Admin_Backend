@@ -9,7 +9,10 @@
  *        events, event_templates, subscription_plans ... event_type_id, religion_id
  *        notification_templates ....................... event_type_id
  *        event_menus ................................... event_type_id, religion_id,
- *                                                        is_website, is_mobile
+ *                                                        is_website, is_mobile,
+ *                                                        display_website, display_mobile
+ *      (Display/Hide was removed from Menu Management; the per-platform
+ *      Active switch is what hides a menu.)
  *      (MySQL trims a dropped column out of any composite index it was part of.)
  *   2. The `religions` and `event_types` tables.
  *   3. RBAC: the `event_types` / `religions` modules, their permissions and
@@ -53,7 +56,7 @@ const COLUMNS = {
     event_templates: ['event_type_id', 'religion_id'],
     subscription_plans: ['event_type_id', 'religion_id'],
     notification_templates: ['event_type_id'],
-    event_menus: ['event_type_id', 'religion_id', 'is_website', 'is_mobile'],
+    event_menus: ['event_type_id', 'religion_id', 'is_website', 'is_mobile', 'display_website', 'display_mobile'],
 };
 const TABLES = ['religions', 'event_types']; // religions first: it references event_types
 const MODULE_SLUGS = ['event_types', 'religions'];

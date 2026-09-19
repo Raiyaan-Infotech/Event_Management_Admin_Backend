@@ -295,18 +295,25 @@ const platformFromHeader = (value) =>
  * The menu ids a plan grants ON ONE PLATFORM.
  *
  * `subscription_plan_menus` carries `for_website` / `for_mobile` per menu — the
- * admin wizard picks each menu per platform — and until now nothing read them,
- * so a web-only menu reached the app as well.
+ * admin wizard picks each menu per platform. The menu's own per-platform Active
+ * switch in Menu Management (`active_website` / `active_mobile`) must also be
+ * on: switching a menu off for the app hides it there for every plan.
  */
 const grantedMenuIds = async (planId, platform = 'website') => {
     const flag = platform === 'mobile' ? 'for_mobile' : 'for_website';
     // Cached: the same answer for every guest of every event on this plan, and
     // it only changes when an admin saves the plan — which busts it explicitly
-    // (see `invalidatePlanGrants`, called from subscriptionPlan.service).
+    // (see `invalidatePlanGrants`, called from subscriptionPlan.service and
+    // eventMenu.service).
+    const activeFlag = platform === 'mobile' ? 'active_mobile' : 'active_website';
     return planGrantsCache.wrap(`${planId}:${platform}`, async () => {
         const grants = await SubscriptionPlanMenu.findAll({
             where: { plan_id: planId, [flag]: 1 },
             attributes: ['menu_id'],
+            include: [{
+                model: EventMenu, as: 'menu', attributes: [], required: true,
+                where: { [activeFlag]: 1 },
+            }],
         });
         return grants.map((g) => Number(g.menu_id));
     });

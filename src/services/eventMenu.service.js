@@ -5,6 +5,13 @@ const ApiError = require('../utils/apiError');
 const logger = require('../utils/logger');
 
 const MODEL_NAME = 'EventMenu';
+
+/**
+ * A menu's per-platform Active switch decides whether a plan's grant reaches
+ * that platform, and the portal caches those grants — so every save here drops
+ * the cache. Required lazily: clientPortal.service is a heavier module.
+ */
+const invalidateGrants = () => require('./clientPortal.service').invalidatePlanGrants();
 const MODULE_SLUG = 'event_menus';
 
 // Whitelist, so a stray body key can never write company_id, created_by or an id.
@@ -19,8 +26,6 @@ const WRITABLE_FIELDS = [
     'remarks',
     'menu_group',
     'event_category_id',
-    'display_website',
-    'display_mobile',
     'active_website',
     'active_mobile',
     'icon',
@@ -166,6 +171,7 @@ const update = async (id, data, userId = null, companyId = undefined) => {
     }
 
     await baseService.update(EventMenu, MODEL_NAME, id, payload, userId, companyId);
+    invalidateGrants();
     return getById(id, companyId);
 };
 
@@ -176,18 +182,19 @@ const updateStatus = async (id, is_active, userId = null, companyId = undefined)
 };
 
 /**
- * One endpoint for the four per-platform switches on the list screen, so a
- * switch flip writes a single column instead of round-tripping the whole row.
+ * One endpoint for the per-platform Active switches, so a switch flip writes a
+ * single column instead of round-tripping the whole row.
  * The field name is checked against this whitelist, so the route's `:field`
  * cannot be used to write an arbitrary column.
  */
-const TOGGLE_FIELDS = ['display_website', 'display_mobile', 'active_website', 'active_mobile'];
+const TOGGLE_FIELDS = ['active_website', 'active_mobile'];
 
 const updateToggle = async (id, field, value, userId = null, companyId = undefined) => {
     if (!TOGGLE_FIELDS.includes(field)) {
         throw ApiError.badRequest(`Unknown toggle "${field}".`);
     }
     await baseService.update(EventMenu, MODEL_NAME, id, { [field]: toBit(value, 1) }, userId, companyId);
+    invalidateGrants();
     return getById(id, companyId);
 };
 

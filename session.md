@@ -12798,3 +12798,13 @@ Verified: backend service smoke on local 9/9 (event created with no type, old fi
 **Phase 2 live (2026-09-19):** Render served the new code ~60 s after push. Live API, all 4 clients, website + app: `/client/event-options` has no `types` / `religions`, templates carry no type / religion, event list OK; `/event-types` and `/religions` → 404. Live event CREATE not exercised (production has no events; tested on local only).
 
 **Phase 3 tool ready, NOT run:** `src/database/tools/drop-event-type-religion.js` (dry-run default, `--apply`, `--prod`; JSON backup to `D:\Jamal\prod-backups\` first; idempotent). Dry run identical on local and production: 11 columns (incl. `event_menus.is_website` / `is_mobile`), 10 FKs, 6 type/religion-only indexes, tables `religions` + `event_types`, 2 modules / 8 permissions / 16 role grants, 2 nav translation keys + 2 values, 0 approval requests. `initial_setup.sql` still to be updated when Phase 3 runs.
+
+### 522. Menu Display/Hide removed; the per-platform Active switch now actually works
+
+Jamal: "display / hide menu off and on remove … we can do based on active and inactive".
+- Found: NEITHER Display nor the per-platform Active switches were read anywhere outside Menu Management — only the row's overall `is_active` gated the portal / app. Turning "active in mobile app" off did nothing.
+- Now: `clientPortal.grantedMenuIds(plan, platform)` (the single path event-options, existing events and RSVP gating all go through) joins `event_menus` and requires `active_website` / `active_mobile` for that platform. `eventMenu.service` update + toggle drop the grant cache, so a switch takes effect immediately.
+- Display/Hide removed: admin form panel, view page ("Platform Status" card shows Active only), hook types, `WRITABLE_FIELDS`, `TOGGLE_FIELDS` (display_* now refused), model. `display_website` / `display_mobile` added to the Phase 3 drop list (`drop-event-type-religion.js`).
+- Local check 5/5: mobile off → gone from mobile, still on website; website off via the form → gone from website; display toggle refused; cache drops on save. Admin source tsc clean.
+
+"Remove old menus without event category": NOT done — on production every menu with no category is one of the 5 portal sections (Guests, Messages, Splash Screens, Analytics, Notification Templates) or 8 app features (Family, Participants, Invite & Share, Near By, Chat, Wishes, Social Wall, Downloads), all granted to plans; NULL category is by design (they apply to every event). The 18 per-religion copies were already removed (§520). Asked Jamal.
