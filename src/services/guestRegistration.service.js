@@ -48,9 +48,9 @@ const rsvpEnabledFor = async (event) => {
     }
     if (!Array.isArray(menuIds) || !menuIds.length) return false;
 
-    // Menus are duplicated per religion in Menu Management and a duplicate's
-    // slug gets a numeric suffix, so RSVP is `rsvp`, `rsvp-2`, `rsvp-3`… — any
-    // of them on the event counts (the app's Explore grid strips the same suffix).
+    // Slugs are unique per company, so the same menu in another event category
+    // gets a numeric suffix: RSVP is `rsvp`, `rsvp-2`… — any of them on the
+    // event counts (the app's Explore grid strips the same suffix).
     const onEvent = await EventMenu.findAll({
         where: { id: { [Op.in]: menuIds.map(Number) }, is_active: 1 },
         attributes: ['id', 'slug'],

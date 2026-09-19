@@ -64,7 +64,7 @@ module.exports = (sequelize) => {
              * The plan the admin assigned this client.
              *
              * Drives what the client may create in the portal: the plan is
-             * scoped to an event category/type/religion and grants a specific
+             * scoped to an event category and grants a specific
              * set of menus via subscription_plan_menus. NULL = no plan yet.
              */
             subscription_plan_id: {

@@ -36,8 +36,8 @@ const ownerPlanCache = new TtlCache(PLAN_CACHE_TTL_MS);
  * ── THE RULE ─────────────────────────────────────────────────────────────────
  * The client's SUBSCRIPTION PLAN is the gatekeeper, not the raw catalogue:
  *
- *   subscription_plans        scoped by (event_category_id, event_type_id,
- *                             religion_id) — NULL on any one means "all"
+ *   subscription_plans        scoped by event_category_id only — NULL means
+ *                             "all" (type / religion are picked per event)
  *   subscription_plan_menus   the exact menus that plan grants
  *
  * So the Create Event wizard must offer the plan's scope, not every taxonomy

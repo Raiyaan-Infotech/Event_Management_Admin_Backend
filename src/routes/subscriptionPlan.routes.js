@@ -8,8 +8,8 @@ const { checkApprovalRequired } = require('../middleware/approval');
 router.use(isAuthenticated);
 router.use(extractCompanyContext);
 
-// Filters: ?search= &event_category_id= &event_type_id= &religion_id=
-//          &plan_type_id= &billing_cycle= &is_active= &page= &limit=
+// Filters: ?search= &event_category_id= &plan_type_id= &billing_cycle=
+//          &is_active= &page= &limit=
 router.get('/', hasPermission('subscription_plans.view'), controller.getAll);
 // Before /:id, or "limit-catalog" is swallowed as an id.
 router.get('/limit-catalog', hasPermission('subscription_plans.view'), controller.getLimitCatalog);

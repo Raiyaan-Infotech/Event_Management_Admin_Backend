@@ -3,9 +3,10 @@ const { DataTypes } = require('sequelize');
 /**
  * A subscription plan, built through the 6-step wizard.
  *
- * The event_category_id / event_type_id / religion_id scope is NULLABLE on
- * purpose: NULL means "applies to all", which is what the list screen renders
- * as "All Categories" / "All Types" / "All Religions".
+ * Scoped by event_category_id only, NULLABLE on purpose: NULL means "applies
+ * to all", which the list screen renders as "All Categories".
+ * event_type_id / religion_id are retired — kept NULL for reversibility, never
+ * written (see subscriptionPlan.service WRITABLE_FIELDS).
  */
 module.exports = (sequelize) => {
     const SubscriptionPlan = sequelize.define('SubscriptionPlan', {

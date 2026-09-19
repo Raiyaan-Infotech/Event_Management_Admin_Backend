@@ -12778,3 +12778,5 @@ Jamal decided (instead of waiting on §519's manager options): "we don't need th
 
 **API check, new code against PRODUCTION data (read-only):** Menu list 19 menus (6 features), no type / religion, no duplicates. Plans #8–11 menus 4 / 9 / 15 / 19 (were 13 / 24 / 33 / 37), no duplicates. `getEventOptions` for all 4 clients, website + mobile: 1 category, 4 types, 4 religions, menus Free 3 / Basic 5 / Standard + Premium 6, each once. Same check on local (20 menus, 9 plans, 15 clients): passed.
 Admin FE + portal `tsc --noEmit` clean. Not browser-tested.
+
+**Leftover sweep (all 4 repos):** grep for menu_type / type / religion / is_website on menus and plans — no functional leftovers; 7 stale comments fixed (clientPortal header, SubscriptionPlan + WebsiteClient models, guestRegistration RSVP note, plan routes filter list, admin client-form + website-clients hook). Remaining type / religion code is events, templates and the religion master — kept on purpose. `check-plan-menus.js` (Jamal's uncommitted tool) still prints plan type; harmless.
