@@ -6,8 +6,6 @@ const {
     PlanType,
     PlanBadge,
     EventCategory,
-    EventType,
-    Religion,
     EventMenu,
     sequelize,
 } = require('../models');
@@ -20,10 +18,14 @@ const MODEL_NAME = 'SubscriptionPlan';
 const MODULE_SLUG = 'subscription_plans';
 
 // Whitelist, so a stray body key can never write company_id, created_by or an id.
+//
+// A plan is scoped by CATEGORY only, like its menus. event_type_id / religion_id
+// are deliberately not writable; the columns stay (NULL = all) so the change is
+// reversible — see src/database/tools/apply-menu-category-only.js.
 const WRITABLE_FIELDS = [
     'name', 'plan_code', 'plan_type_id', 'billing_cycle', 'short_description',
     'for_website', 'for_mobile',
-    'event_category_id', 'event_type_id', 'religion_id',
+    'event_category_id',
     'currency_code', 'price', 'trial_days',
     'is_visible', 'is_active', 'sort_order',
     'plan_badge_id',
@@ -103,8 +105,6 @@ const getLimitCatalog = () => LIMIT_CATALOG;
 const PLAN_INCLUDE = [
     { model: PlanType, as: 'planType', attributes: ['id', 'name'], required: false },
     { model: EventCategory, as: 'category', attributes: ['id', 'name', 'color'], required: false },
-    { model: EventType, as: 'eventType', attributes: ['id', 'name', 'color'], required: false },
-    { model: Religion, as: 'religion', attributes: ['id', 'name', 'color'], required: false },
     { model: PlanBadge, as: 'planBadge', attributes: ['id', 'text', 'style', 'color'], required: false },
 ];
 
@@ -116,15 +116,8 @@ const MENU_INCLUDE = {
         {
             model: EventMenu,
             as: 'menu',
-            attributes: ['id', 'name', 'slug', 'menu_group', 'icon', 'color', 'event_type_id', 'religion_id'],
+            attributes: ['id', 'name', 'slug', 'menu_group', 'icon', 'color'],
             required: false,
-            // Menus exist once per type/religion (Menu Management requires a
-            // religion), so the plan screens label each copy — "Gallery ·
-            // Nikah · Islam" — or the four Gallery tiles are indistinguishable.
-            include: [
-                { model: EventType, as: 'eventType', attributes: ['id', 'name'], required: false },
-                { model: Religion, as: 'religion', attributes: ['id', 'name'], required: false },
-            ],
         },
     ],
 };
@@ -237,12 +230,6 @@ const getAll = async (query = {}, companyId = undefined) => {
     const where = {};
     const categoryId = numericFilter(query.event_category_id);
     if (categoryId !== undefined) where.event_category_id = categoryId;
-
-    const typeId = numericFilter(query.event_type_id);
-    if (typeId !== undefined) where.event_type_id = typeId;
-
-    const religionId = numericFilter(query.religion_id);
-    if (religionId !== undefined) where.religion_id = religionId;
 
     const planTypeId = numericFilter(query.plan_type_id);
     if (planTypeId !== undefined) where.plan_type_id = planTypeId;

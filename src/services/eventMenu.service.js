@@ -1,4 +1,4 @@
-const { Sequelize, User, EventMenu, EventCategory, EventType, Religion, sequelize } = require('../models');
+const { Sequelize, User, EventMenu, EventCategory, sequelize } = require('../models');
 const { Op } = Sequelize;
 const baseService = require('./base.service');
 const ApiError = require('../utils/apiError');
@@ -8,6 +8,14 @@ const MODEL_NAME = 'EventMenu';
 const MODULE_SLUG = 'event_menus';
 
 // Whitelist, so a stray body key can never write company_id, created_by or an id.
+//
+// A menu is scoped by CATEGORY only. event_type_id / religion_id and the
+// Website/Mobile "menu type" (is_website / is_mobile) are deliberately NOT
+// writable: requiring them made every menu exist once per religion, and the
+// plan screens listed each copy. The columns stay in the table (NULL, and 1/1
+// for the platform flags) so the change is reversible — see
+// src/database/tools/apply-menu-category-only.js. Which platform a menu shows
+// on is decided by the PLAN's W/M switch in Manage Plan Menus.
 const WRITABLE_FIELDS = [
     'name',
     'slug',
@@ -15,10 +23,6 @@ const WRITABLE_FIELDS = [
     'remarks',
     'menu_group',
     'event_category_id',
-    'event_type_id',
-    'religion_id',
-    'is_website',
-    'is_mobile',
     'display_website',
     'display_mobile',
     'active_website',
@@ -32,8 +36,6 @@ const WRITABLE_FIELDS = [
 // Only what the list and form render — no SELECT * on the joined tables.
 const MENU_INCLUDE = [
     { model: EventCategory, as: 'category', attributes: ['id', 'name', 'color'], required: false },
-    { model: EventType, as: 'eventType', attributes: ['id', 'name', 'color'], required: false },
-    { model: Religion, as: 'religion', attributes: ['id', 'name', 'color'], required: false },
 ];
 
 const toBit = (value, fallback = 1) => {
@@ -51,41 +53,13 @@ const slugify = (value) =>
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '');
 
-/**
- * The API speaks `menu_type: ['website','mobile']` — what the form's multi-select
- * produces — while the table stores two indexed booleans (a SET column could not
- * use an index for the list's menu-type filter). Both directions live here so
- * nothing else has to know about the split.
- */
-const applyMenuType = (payload, data) => {
-    if (data.menu_type === undefined) return payload;
-
-    const list = Array.isArray(data.menu_type) ? data.menu_type : String(data.menu_type).split(',');
-    const selected = new Set(list.map((v) => String(v).trim().toLowerCase()).filter(Boolean));
-
-    payload.is_website = selected.has('website') ? 1 : 0;
-    payload.is_mobile =
-        selected.has('mobile') || selected.has('mobile_app') || selected.has('mobileapp') ? 1 : 0;
-
-    return payload;
-};
-
-const withMenuType = (row) => {
-    const plain = row && row.toJSON ? row.toJSON() : { ...row };
-    const types = [];
-    if (plain.is_website) types.push('website');
-    if (plain.is_mobile) types.push('mobile');
-    plain.menu_type = types;
-    return plain;
-};
-
-const pickWritable = (data = {}) => {
-    const payload = WRITABLE_FIELDS.reduce((acc, key) => {
+const pickWritable = (data = {}) =>
+    WRITABLE_FIELDS.reduce((acc, key) => {
         if (data[key] !== undefined) acc[key] = data[key];
         return acc;
     }, {});
-    return applyMenuType(payload, data);
-};
+
+const plainRow = (row) => (row && row.toJSON ? row.toJSON() : { ...row });
 
 const numericFilter = (raw) => {
     if (raw === undefined || raw === null || raw === '' || raw === 'all') return undefined;
@@ -117,54 +91,6 @@ const buildUniqueSlug = async (base, companyId, excludeId = null) => {
     return `${root}-${Date.now()}`;
 };
 
-/**
- * A menu's event type must belong to its event category, or the list shows a row
- * whose Event Type contradicts its Event Category.
- */
-const assertTypeMatchesCategory = async (categoryId, typeId, companyId) => {
-    if (!typeId || !categoryId) return;
-
-    const eventType = await EventType.findByPk(typeId, {
-        attributes: ['id', 'event_category_id', 'company_id'],
-    });
-    if (!eventType) throw ApiError.badRequest('Selected event type does not exist.');
-
-    if (companyId !== undefined && companyId !== null && eventType.company_id && eventType.company_id !== companyId) {
-        throw ApiError.badRequest('Selected event type does not exist.');
-    }
-    if (Number(eventType.event_category_id) !== Number(categoryId)) {
-        throw ApiError.badRequest('The selected event type does not belong to the selected event category.');
-    }
-};
-
-/**
- * Religions are scoped under (category, type) too, so the chosen religion has
- * to sit under the menu's own scope — otherwise the Menu List would show a
- * religion that its own cascade could never offer.
- *
- * The column stays nullable in the DB: existing menus predate this rule, and
- * the mockup's list legitimately shows "—" for non-religious events. "Required"
- * is enforced here on write, not by the schema, so it stays reversible.
- */
-const assertReligionMatchesScope = async (categoryId, typeId, religionId, companyId) => {
-    if (!religionId) throw ApiError.badRequest('Religion is required.');
-
-    const religion = await Religion.findByPk(religionId, {
-        attributes: ['id', 'event_category_id', 'event_type_id', 'company_id'],
-    });
-    if (!religion) throw ApiError.badRequest('Selected religion does not exist.');
-
-    if (companyId !== undefined && companyId !== null && religion.company_id && religion.company_id !== companyId) {
-        throw ApiError.badRequest('Selected religion does not exist.');
-    }
-    if (categoryId && Number(religion.event_category_id) !== Number(categoryId)) {
-        throw ApiError.badRequest('The selected religion does not belong to the selected event category.');
-    }
-    if (typeId && Number(religion.event_type_id) !== Number(typeId)) {
-        throw ApiError.badRequest('The selected religion does not belong to the selected event type.');
-    }
-};
-
 const getAll = async (query = {}, companyId = undefined) => {
     // Default to sort_order so the list matches idx_event_menus_listing;
     // an explicit sort_by in the query still wins.
@@ -175,22 +101,9 @@ const getAll = async (query = {}, companyId = undefined) => {
     const categoryId = numericFilter(query.event_category_id);
     if (categoryId !== undefined) where.event_category_id = categoryId;
 
-    const typeId = numericFilter(query.event_type_id);
-    if (typeId !== undefined) where.event_type_id = typeId;
-
-    const religionId = numericFilter(query.religion_id);
-    if (religionId !== undefined) where.religion_id = religionId;
-
     // Core / Additional / Custom section filter — idx_event_menus_group
     if (query.menu_group && query.menu_group !== 'all') {
         where.menu_group = String(query.menu_group).toLowerCase();
-    }
-
-    // menu_type=website|mobile — indexed via idx_event_menus_platform
-    if (query.menu_type && query.menu_type !== 'all') {
-        const t = String(query.menu_type).toLowerCase();
-        if (t === 'website') where.is_website = 1;
-        else if (t === 'mobile' || t === 'mobile_app') where.is_mobile = 1;
     }
 
     const result = await baseService.getAll(EventMenu, MODEL_NAME, listQuery, {
@@ -202,7 +115,7 @@ const getAll = async (query = {}, companyId = undefined) => {
         where,
     });
 
-    return { ...result, data: result.data.map(withMenuType) };
+    return { ...result, data: result.data.map(plainRow) };
 };
 
 /** Detail-only joins, so the view page can show Created By / Updated By. */
@@ -216,7 +129,7 @@ const getById = async (id, companyId = undefined) => {
         companyId,
         include: [...MENU_INCLUDE, ...AUDIT_INCLUDE],
     });
-    return withMenuType(menu);
+    return plainRow(menu);
 };
 
 const create = async (data, userId = null, companyId = undefined) => {
@@ -226,18 +139,6 @@ const create = async (data, userId = null, companyId = undefined) => {
         throw ApiError.badRequest('Menu name is required');
     }
     payload.name = String(payload.name).trim();
-
-    if (!payload.is_website && !payload.is_mobile) {
-        throw ApiError.badRequest('Select at least one menu type (Website or Mobile App).');
-    }
-
-    await assertTypeMatchesCategory(payload.event_category_id, payload.event_type_id, companyId);
-    await assertReligionMatchesScope(
-        payload.event_category_id,
-        payload.event_type_id,
-        payload.religion_id,
-        companyId
-    );
 
     payload.slug = await buildUniqueSlug(payload.slug || payload.name, companyId);
 
@@ -257,36 +158,6 @@ const update = async (id, data, userId = null, companyId = undefined) => {
     if (payload.name !== undefined) {
         if (!String(payload.name).trim()) throw ApiError.badRequest('Menu name is required');
         payload.name = String(payload.name).trim();
-    }
-
-    // Only validated when the request actually touches menu type — a PATCH that
-    // just flips a display toggle must not be rejected for not resending it.
-    if (payload.is_website !== undefined || payload.is_mobile !== undefined) {
-        const website = payload.is_website ?? menu.is_website;
-        const mobile = payload.is_mobile ?? menu.is_mobile;
-        if (!website && !mobile) {
-            throw ApiError.badRequest('Select at least one menu type (Website or Mobile App).');
-        }
-    }
-
-    const nextCategoryId = payload.event_category_id ?? menu.event_category_id;
-    const nextTypeId = payload.event_type_id ?? menu.event_type_id;
-    await assertTypeMatchesCategory(nextCategoryId, nextTypeId, companyId);
-
-    // Only revalidate the religion when the request touches the scope or the
-    // religion itself. A PATCH flipping one display toggle must not be rejected
-    // because a pre-existing menu has no religion yet.
-    const touchesScope = payload.event_category_id !== undefined
-        || payload.event_type_id !== undefined
-        || payload.religion_id !== undefined;
-
-    if (touchesScope) {
-        await assertReligionMatchesScope(
-            nextCategoryId,
-            nextTypeId,
-            payload.religion_id ?? menu.religion_id,
-            companyId
-        );
     }
 
     // Regenerate only when the slug was explicitly sent, or the name changed and

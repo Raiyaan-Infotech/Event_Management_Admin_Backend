@@ -317,21 +317,18 @@ const normalise = async (clientId, body, { partial = false } = {}) => {
             throw ApiError.badRequest('One or more selected menus are not included in your subscription plan.');
         }
 
-        // A menu tagged for another category / type / religion does not belong
-        // on this event (the wizard hides those). NULL on the menu = suits all.
-        // Checked only when the taxonomy is in this request, so a partial update
+        // A menu tagged for another category does not belong on this event (the
+        // wizard hides those). Menus carry a category only; NULL = suits all.
+        // Checked only when the category is in this request, so a partial update
         // that leaves the taxonomy alone is not judged against a guess.
         if (data.event_category_id) {
-            const suits = (want, has) => !has || !want || Number(has) === Number(want);
             const byId = new Map(options.menus.map((m) => [m.id, m]));
             const offScope = ids.filter((id) => {
-                const m = byId.get(id);
-                return !(suits(data.event_category_id, m.event_category_id)
-                    && suits(data.event_type_id, m.event_type_id)
-                    && suits(data.religion_id, m.religion_id));
+                const cat = byId.get(id).event_category_id;
+                return cat && Number(cat) !== Number(data.event_category_id);
             });
             if (offScope.length) {
-                throw ApiError.badRequest('One or more selected menus do not match the event category, type or religion.');
+                throw ApiError.badRequest('One or more selected menus do not match the event category.');
             }
         }
         data.menu_ids = ids;

@@ -4,13 +4,14 @@ const { DataTypes } = require('sequelize');
  * Event menu catalogue (Menu Management).
  *
  * Distinct from the `menus` model, which is the admin panel's own menu-item
- * registry. This one is scoped by event category / type / religion and is what
- * the website and the mobile app read their menu list from.
+ * registry. This one is what the website and the mobile app read their menu
+ * list from.
  *
- * Platform targeting lives in two booleans rather than a SET column so the list
- * filters can use an index — see scratch/setup_menu_management.js. The service
- * layer maps them to and from the `menu_type: ['website','mobile']` array the
- * API speaks.
+ * Scoped by event CATEGORY only. `event_type_id`, `religion_id`, `is_website`
+ * and `is_mobile` are retired — kept in the table (NULL / 1) so the change is
+ * reversible, but the service no longer writes or reads them. Requiring a
+ * religion made every menu exist once per religion. The PLAN's W/M switch
+ * (subscription_plan_menus) decides which platform a menu shows on.
  */
 module.exports = (sequelize) => {
     const EventMenu = sequelize.define('EventMenu', {

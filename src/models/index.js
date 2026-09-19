@@ -371,8 +371,6 @@ db.GuestRelationshipOption.belongsTo(db.EventCategory, { foreignKey: 'event_cate
 db.GuestFoodPreferenceOption.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'category' });
 
 db.EventMenu.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'category' });
-db.EventMenu.belongsTo(db.EventType, { foreignKey: 'event_type_id', as: 'eventType' });
-db.EventMenu.belongsTo(db.Religion, { foreignKey: 'religion_id', as: 'religion' });
 db.EventMenu.belongsTo(db.User, { foreignKey: 'created_by', as: 'creator' });
 db.EventMenu.belongsTo(db.User, { foreignKey: 'updated_by', as: 'updater' });
 
@@ -531,8 +529,6 @@ db.ClientNotification.belongsTo(db.EventGuest, { foreignKey: 'guest_id', as: 'gu
 // Subscription Plans
 db.SubscriptionPlan.belongsTo(db.PlanType, { foreignKey: 'plan_type_id', as: 'planType' });
 db.SubscriptionPlan.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'category' });
-db.SubscriptionPlan.belongsTo(db.EventType, { foreignKey: 'event_type_id', as: 'eventType' });
-db.SubscriptionPlan.belongsTo(db.Religion, { foreignKey: 'religion_id', as: 'religion' });
 
 // Audit users, so the view screen can show "Created By / Updated By" as names
 // rather than raw ids.

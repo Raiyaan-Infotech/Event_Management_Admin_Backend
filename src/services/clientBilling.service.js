@@ -51,7 +51,7 @@ const PLAN_ATTRS = [
     'id', 'name', 'plan_code', 'short_description', 'billing_cycle',
     'currency_code', 'price', 'trial_days', 'is_active', 'is_visible',
     'sort_order', 'plan_badge_id',
-    'event_category_id', 'event_type_id', 'religion_id',
+    'event_category_id',
 ];
 
 const SUBSCRIPTION_INCLUDE = [

@@ -51,7 +51,7 @@ const ownerPlanCache = new TtlCache(PLAN_CACHE_TTL_MS);
 
 const PLAN_ATTRS = [
     'id', 'name', 'plan_code', 'billing_cycle', 'short_description',
-    'event_category_id', 'event_type_id', 'religion_id',
+    'event_category_id',
     'currency_code', 'price', 'trial_days', 'is_active',
 ];
 
@@ -184,22 +184,14 @@ const templatesForPlan = async (companyId, plan) => {
         ...(companyId ? { company_id: companyId } : {}),
     };
 
-    // A NULL scope column on the PLAN means "all", so each narrowing is applied
-    // only when the plan actually names a value — matching the taxonomy above.
-    // A NULL scope column on the TEMPLATE also means "all", which is why every
-    // one of these is an OR against NULL rather than a plain equals: a general
-    // template must not be filtered out by a plan that names a category.
-    const scope = [];
+    // A plan is scoped by category only (NULL = all). A NULL category on the
+    // TEMPLATE also means "all", which is why this is an OR against NULL rather
+    // than a plain equals: a general template must not be filtered out by a
+    // plan that names a category. The wizard narrows templates further by the
+    // type / religion the client picks for the event.
     if (plan.event_category_id) {
-        scope.push({ [Op.or]: [{ event_category_id: null }, { event_category_id: plan.event_category_id }] });
+        where[Op.or] = [{ event_category_id: null }, { event_category_id: plan.event_category_id }];
     }
-    if (plan.event_type_id) {
-        scope.push({ [Op.or]: [{ event_type_id: null }, { event_type_id: plan.event_type_id }] });
-    }
-    if (plan.religion_id) {
-        scope.push({ [Op.or]: [{ religion_id: null }, { religion_id: plan.religion_id }] });
-    }
-    if (scope.length) where[Op.and] = scope;
 
     const rows = await EventTemplate.findAll({
         where,
@@ -413,8 +405,9 @@ const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
         };
     }
 
-    // A NULL scope column on the plan means "all", which is why each filter is
-    // applied only when the plan actually names a value.
+    // A plan is scoped by category only; NULL means "all categories". Types and
+    // religions are every one under the offered category — the client picks
+    // them per event.
     const catWhere = activeWhere(companyId);
     if (plan.event_category_id) catWhere.id = plan.event_category_id;
 
@@ -423,8 +416,7 @@ const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
     });
 
     const typeWhere = activeWhere(companyId);
-    if (plan.event_type_id) typeWhere.id = plan.event_type_id;
-    else if (plan.event_category_id) typeWhere.event_category_id = plan.event_category_id;
+    if (plan.event_category_id) typeWhere.event_category_id = plan.event_category_id;
 
     const types = await EventType.findAll({
         where: typeWhere, attributes: [...TAXONOMY_ATTRS, 'event_category_id'],
@@ -432,11 +424,7 @@ const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
     });
 
     const relWhere = activeWhere(companyId);
-    if (plan.religion_id) relWhere.id = plan.religion_id;
-    else {
-        if (plan.event_category_id) relWhere.event_category_id = plan.event_category_id;
-        if (plan.event_type_id) relWhere.event_type_id = plan.event_type_id;
-    }
+    if (plan.event_category_id) relWhere.event_category_id = plan.event_category_id;
 
     const religions = await Religion.findAll({
         where: relWhere, attributes: [...TAXONOMY_ATTRS, 'event_category_id', 'event_type_id'],
@@ -451,11 +439,9 @@ const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
     const granted = menuIds.length
         ? await EventMenu.findAll({
             where: activeWhere(companyId, { id: { [Op.in]: menuIds } }),
-            // The scope columns let the wizard offer only the menus that suit the
-            // category / type / religion picked in step 1 (menus are duplicated
-            // per religion in Menu Management, so unfiltered a Nikah event would
-            // list every religion's copy).
-            attributes: [...TAXONOMY_ATTRS, 'slug', 'menu_group', 'event_category_id', 'event_type_id', 'religion_id'],
+            // A menu is scoped by category only (NULL = every category), so the
+            // wizard offers just the menus that suit the category picked in step 1.
+            attributes: [...TAXONOMY_ATTRS, 'slug', 'menu_group', 'event_category_id'],
             order: [['sort_order', 'ASC'], ['id', 'ASC']],
         })
         : [];

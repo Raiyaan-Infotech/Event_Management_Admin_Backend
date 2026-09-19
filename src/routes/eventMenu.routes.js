@@ -8,8 +8,7 @@ const { checkApprovalRequired } = require('../middleware/approval');
 router.use(isAuthenticated);
 router.use(extractCompanyContext);
 
-// Filters: ?search= &event_category_id= &event_type_id= &religion_id=
-//          &menu_type=website|mobile &is_active= &page= &limit=
+// Filters: ?search= &event_category_id= &menu_group= &is_active= &page= &limit=
 router.get('/', hasPermission('event_menus.view'), controller.getAll);
 router.get('/:id', hasPermission('event_menus.view'), controller.getById);
 

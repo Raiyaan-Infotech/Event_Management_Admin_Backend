@@ -12745,3 +12745,36 @@ Verified on local through the services: group created → guest saved with `grou
 Waiting on the manager: (A) the 4 tiers for one religion, (B) 4 tiers × each religion, or (C) keep all-religion plans; and whether Religion should become a standalone list.
 
 **Not done:** "live create that guest" — production has no events (all wiped §509), and a guest belongs to an event; asked Jamal which client / event.
+
+### 520. Menus are scoped by category only — Menu Type, Event Type and Religion removed
+
+Jamal decided (instead of waiting on §519's manager options): "we don't need that menu type, event type and religion". That removes the cause of the duplication — one menu per category, not one per religion.
+
+**Columns kept, not dropped** — `event_type_id` / `religion_id` set NULL, `is_website` / `is_mobile` set 1 on event-feature menus, and none of the four is writable any more. Reversible, and every reader already treats NULL as "any".
+
+| Where | Change |
+|---|---|
+| Backend `eventMenu.service` | four fields out of `WRITABLE_FIELDS`; `assertTypeMatchesCategory` / `assertReligionMatchesScope` / `menu_type` mapping and filters removed; `eventType` / `religion` joins removed (also the model associations in `models/index.js`) |
+| Backend `subscriptionPlan.service` `MENU_INCLUDE` | §515's type / religion join on plan menus removed |
+| Backend `clientPortal.getEventOptions` / `clientEvent.normalise` | menus scoped + validated by category only |
+| Admin FE Menu form | Menu Type checkboxes, Event Type, Religion gone; row 1 = Name + Category; both platforms' Display / Active switches always shown |
+| Admin FE Menu List / View | Menu Type, Event Type, Religion filters + columns + rows gone |
+| Admin FE plan wizard + Manage Plan Menus | menus fetched by the plan's category only (were also filtered by type, which would have hidden every menu once type is NULL); `lib/menu-scope.ts` (§515) deleted |
+| Portal `event-wizard.tsx` | `menuRows` filters by category only; `MenuOption` lost the type / religion fields |
+| App | comments only — `baseSlug` still needed: the same name in a second category gets `gallery-2` |
+
+**Data tool `src/database/tools/apply-menu-category-only.js`** (dry-run default, `--apply`, `--prod`): folds copies per (company, category, group, name) — survivor = un-suffixed slug; grants moved or merged (W/M OR-ed, survivor limits kept, copy's if survivor had none); `events.menu_ids` + `plan_types.menu_ids` re-pointed; copies soft-deleted; backup JSON to `D:\Jamal\prod-backups\` first.
+- Local: applied (8 menus' type/religion cleared; no copies). Re-run = no-op.
+- Merge path verified locally with throwaway rows (3 copies, 2 plans, 1 event): 10/10 — one survivor with bare slug, W+M OR-ed, limits carried, grant moved, event ids re-pointed + de-duplicated. Rows removed after.
+- **Production** (applied, see below): 24 menus (33–56) → 6 (33–38 keep `event-information`, `gallery`, `rsvp`, `venue`, `contact-us`, `agenda`); 60 grants merged; 0 events / plan types reference the copies.
+
+**Plans too** (Jamal: "admin portal in plan has so change that also"): a plan is scoped by category only.
+- Backend: `subscriptionPlan.service` — type / religion out of `WRITABLE_FIELDS`, list filters and `PLAN_INCLUDE` (+ model associations); `clientPortal` — `PLAN_ATTRS`, `getEventOptions` offers every type / religion under the plan's category, `templatesForPlan` narrows by category only; `clientBilling` `PLAN_ATTRS`.
+- Admin FE: plan wizard step 2 (Event Type / Religion fields + review rows), plans list (filters, columns, CSV), "Applies To" rows on detail / duplicated / pricing / action screens.
+- Portal: `ClientPlan` type; dead `useEventMenuOptions` / `EventMenuRow` (still sent menu_type / type / religion) deleted.
+- Tool step 6 NULLs plan type / religion. Production had none; local had 7 (#3–7, #10, #24), applied.
+
+**Production migration applied 2026-09-19** — backup `D:\Jamal\prod-backups\prod-menu-category-only-1789797648634.json`. Re-run = no-op.
+
+**API check, new code against PRODUCTION data (read-only):** Menu list 19 menus (6 features), no type / religion, no duplicates. Plans #8–11 menus 4 / 9 / 15 / 19 (were 13 / 24 / 33 / 37), no duplicates. `getEventOptions` for all 4 clients, website + mobile: 1 category, 4 types, 4 religions, menus Free 3 / Basic 5 / Standard + Premium 6, each once. Same check on local (20 menus, 9 plans, 15 clients): passed.
+Admin FE + portal `tsc --noEmit` clean. Not browser-tested.
