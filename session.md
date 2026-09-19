@@ -12819,3 +12819,11 @@ Jamal: "display / hide menu off and on remove … we can do based on active and 
 - 13 category-less menus (portal sections + app features) left as they are — Jamal did not choose an option.
 
 **Production Phase 3 applied by Jamal (2026-09-19)** — same output as the dry run; backup `D:\Jamal\prod-backups\prod-drop-event-type-religion-1789812650997.json`. Verified after: live API for all 4 clients, website + app — event-options, events, me, guest groups all 200, menus / portal sections / templates as before (Agenda back on mobile). `schema-audit`: no missing tables or columns between local and production. Event type and religion are fully out of the project (code, schema, RBAC, translations).
+
+### 524. All event menus deleted and rebuilt — one clean catalogue of 19
+
+Jamal: "delete all menu, create new one … Event Info, Agenda, Venue, Gallery, Family, Participants, Near By, Chat, Wishes, Social Wall, Downloads, Contact Us … client portal sidebar slugs — if anything missing add that".
+- Added the 7 slugs the code needs that his list did not have: `rsvp` (portal RSVPs section, QR-registration RSVP gating, app tile), `invite-share` (app tile), and the 5 portal sections `guests`, `messages`, `splash-screens`, `analytics`, `notification-templates`.
+- `src/database/tools/rebuild-event-menus.js` (dry-run default): backs up all menus / grants / menu_ids, then in one transaction hard-deletes every menu (live + soft-deleted) and grant, inserts ids 1–19 (core 6 · app 8 · portal 5), all under the Wedding category, per-platform Active set (core both, app mobile, portal website — Guests both), icons / colours kept from the old row with the same slug else Iconify defaults; re-creates each plan's grants BY SLUG (W/M + limits kept); re-points events / plan_types menu_ids.
+- LOCAL applied: 29 rows → 19; grants 173 → 169 (4 were the old `speakers` menu, dropped); 23 events re-pointed. Checks: smoke 10/10; slug check 7/7 (every expected slug once, all categorised, ids 1–19, no orphan grants, all 3 plan-holding clients still offered menus).
+- PRODUCTION dry run: 37 rows (19 live + 18 soft-deleted) → 19; grants 47 → 47, none dropped; 0 events.
