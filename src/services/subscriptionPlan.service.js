@@ -19,9 +19,7 @@ const MODULE_SLUG = 'subscription_plans';
 
 // Whitelist, so a stray body key can never write company_id, created_by or an id.
 //
-// A plan is scoped by CATEGORY only, like its menus. event_type_id / religion_id
-// are deliberately not writable; the columns stay (NULL = all) so the change is
-// reversible — see src/database/tools/apply-menu-category-only.js.
+// A plan is scoped by CATEGORY only, like its menus (NULL = all categories).
 const WRITABLE_FIELDS = [
     'name', 'plan_code', 'plan_type_id', 'billing_cycle', 'short_description',
     'for_website', 'for_mobile',

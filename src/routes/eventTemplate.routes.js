@@ -8,7 +8,7 @@ const { checkApprovalRequired } = require('../middleware/approval');
 router.use(isAuthenticated);
 router.use(extractCompanyContext);
 
-// Filters: ?search= &event_category_id= &event_type_id= &religion_id=
+// Filters: ?search= &event_category_id=
 //          &style= &status=active|inactive|draft|published &is_featured=
 //          &publish_status=draft|published &page= &limit=
 

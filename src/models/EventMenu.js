@@ -7,10 +7,7 @@ const { DataTypes } = require('sequelize');
  * registry. This one is what the website and the mobile app read their menu
  * list from.
  *
- * Scoped by event CATEGORY only. `event_type_id`, `religion_id`, `is_website`
- * and `is_mobile` are retired — kept in the table (NULL / 1) so the change is
- * reversible, but the service no longer writes or reads them. Requiring a
- * religion made every menu exist once per religion. The PLAN's W/M switch
+ * Scoped by event CATEGORY only. The PLAN's W/M switch
  * (subscription_plan_menus) decides which platform a menu shows on.
  */
 module.exports = (sequelize) => {
@@ -51,24 +48,6 @@ module.exports = (sequelize) => {
         event_category_id: {
             type: DataTypes.INTEGER.UNSIGNED,
             allowNull: true,
-        },
-        event_type_id: {
-            type: DataTypes.INTEGER.UNSIGNED,
-            allowNull: true,
-        },
-        religion_id: {
-            type: DataTypes.INTEGER.UNSIGNED,
-            allowNull: true,
-        },
-        is_website: {
-            type: DataTypes.TINYINT,
-            allowNull: false,
-            defaultValue: 1,
-        },
-        is_mobile: {
-            type: DataTypes.TINYINT,
-            allowNull: false,
-            defaultValue: 1,
         },
         display_website: {
             type: DataTypes.TINYINT,

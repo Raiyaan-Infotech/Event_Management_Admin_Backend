@@ -3,6 +3,10 @@
  * Event menus are scoped by CATEGORY only — no event type, no religion, no
  * Website/Mobile "menu type".
  *
+ * ⚠ HISTORICAL — applied to production 2026-09-19. It reads event_type_id /
+ * religion_id / is_website / is_mobile, which were later dropped when event
+ * type and religion left the project, so it fails on a current schema.
+ *
  * ── WHY ─────────────────────────────────────────────────────────────────────
  * Menu Management used to require a type + religion on every menu, so each
  * Wedding menu existed once per religion (Gallery for Nikah, Gallery for

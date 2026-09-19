@@ -36,10 +36,8 @@ module.exports = (sequelize) => {
              */
             subscription_plan_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
 
-            // ── Step 1 — taxonomy, already plan-narrowed by the API ─────────
+            // ── Step 1 — category, already plan-narrowed by the API ─────────
             event_category_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
-            event_type_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
-            religion_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
 
             // ── Step 2 — details and schedule ───────────────────────────────
             name: { type: DataTypes.STRING(200), allowNull: false },

@@ -6,8 +6,6 @@ const {
     SubscriptionPlan,
     EventGuest,
     EventCategory,
-    EventType,
-    Religion,
     EventMenu,
     EventTemplate,
     FrameStyle,
@@ -47,7 +45,8 @@ const mediaService = require('./media.service');
  * kept in the same order as the wizard steps that fill it.
  */
 const WRITABLE_FIELDS = [
-    'event_category_id', 'event_type_id', 'religion_id',
+    // Category only: event type and religion were removed from the project.
+    'event_category_id',
     'name', 'host_one', 'host_two', 'tagline', 'description',
     'start_date', 'end_date', 'start_time', 'end_time', 'timezone',
     'venue_name', 'venue_address',
@@ -90,8 +89,6 @@ const TIME_ONLY = /^\d{2}:\d{2}(:\d{2})?$/;
 const EVENT_INCLUDE = [
     { model: SubscriptionPlan, as: 'plan', attributes: ['id', 'name', 'plan_code'], required: false },
     { model: EventCategory, as: 'category', attributes: ['id', 'name', 'color', 'icon'], required: false },
-    { model: EventType, as: 'eventType', attributes: ['id', 'name', 'color', 'icon'], required: false },
-    { model: Religion, as: 'religion', attributes: ['id', 'name'], required: false },
 ];
 
 /**
@@ -185,10 +182,8 @@ const normalise = async (clientId, body, { partial = false } = {}) => {
     const has = (field) => Object.prototype.hasOwnProperty.call(picked, field);
     const required = (field) => !partial || has(field);
 
-    // ── Step 1 — taxonomy, checked against the plan's own scope ─────────────
+    // ── Step 1 — category, checked against the plan's own scope ─────────────
     const allowedCategories = new Set(options.categories.map((r) => r.id));
-    const allowedTypes = new Set(options.types.map((r) => r.id));
-    const allowedReligions = new Set(options.religions.map((r) => r.id));
 
     if (required('event_category_id')) {
         const id = Number(picked.event_category_id);
@@ -197,37 +192,6 @@ const normalise = async (clientId, body, { partial = false } = {}) => {
             throw ApiError.badRequest('That event category is not included in your subscription plan.');
         }
         data.event_category_id = id;
-    }
-
-    if (required('event_type_id')) {
-        const id = Number(picked.event_type_id);
-        if (!id) throw ApiError.badRequest('Please select an event type.');
-        if (!allowedTypes.has(id)) {
-            throw ApiError.badRequest('That event type is not included in your subscription plan.');
-        }
-        // The type must also sit under the chosen category. A plan scoped to
-        // "all" returns every type, so without this a valid-looking pair could
-        // still be a category and a type that have nothing to do with each other.
-        const type = options.types.find((t) => t.id === id);
-        const categoryId = data.event_category_id;
-        if (categoryId && type?.event_category_id && type.event_category_id !== categoryId) {
-            throw ApiError.badRequest('That event type does not belong to the selected category.');
-        }
-        data.event_type_id = id;
-    }
-
-    if (has('religion_id')) {
-        // Optional on the form — '' and null both mean "not applicable".
-        const raw = picked.religion_id;
-        if (raw === '' || raw === null || raw === undefined) {
-            data.religion_id = null;
-        } else {
-            const id = Number(raw);
-            if (!id || !allowedReligions.has(id)) {
-                throw ApiError.badRequest('That religion is not included in your subscription plan.');
-            }
-            data.religion_id = id;
-        }
     }
 
     // ── Step 2 — details ────────────────────────────────────────────────────
@@ -974,11 +938,10 @@ const getAnalytics = async (clientId, query = {}) => {
         where: { website_client_id: clientId },
         attributes: [
             'id', 'name', 'status', 'start_date', 'end_date', 'created_at',
-            'privacy', 'theme_id', 'menu_ids', 'event_category_id', 'event_type_id',
+            'privacy', 'theme_id', 'menu_ids', 'event_category_id',
         ],
         include: [
             { model: EventCategory, as: 'category', attributes: ['id', 'name', 'color'], required: false },
-            { model: EventType, as: 'eventType', attributes: ['id', 'name'], required: false },
         ],
         order: [['start_date', 'DESC'], ['id', 'DESC']],
     });

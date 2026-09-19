@@ -40,14 +40,6 @@ module.exports = (sequelize) => {
             type: DataTypes.INTEGER.UNSIGNED,
             allowNull: true,
         },
-        event_type_id: {
-            type: DataTypes.INTEGER.UNSIGNED,
-            allowNull: true,
-        },
-        religion_id: {
-            type: DataTypes.INTEGER.UNSIGNED,
-            allowNull: true,
-        },
         /**
          * Step 1's "Template Style".
          *

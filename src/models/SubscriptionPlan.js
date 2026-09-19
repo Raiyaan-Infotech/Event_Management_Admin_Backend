@@ -5,8 +5,6 @@ const { DataTypes } = require('sequelize');
  *
  * Scoped by event_category_id only, NULLABLE on purpose: NULL means "applies
  * to all", which the list screen renders as "All Categories".
- * event_type_id / religion_id are retired — kept NULL for reversibility, never
- * written (see subscriptionPlan.service WRITABLE_FIELDS).
  */
 module.exports = (sequelize) => {
     const SubscriptionPlan = sequelize.define('SubscriptionPlan', {
@@ -49,14 +47,6 @@ module.exports = (sequelize) => {
             defaultValue: 1,
         },
         event_category_id: {
-            type: DataTypes.INTEGER.UNSIGNED,
-            allowNull: true,
-        },
-        event_type_id: {
-            type: DataTypes.INTEGER.UNSIGNED,
-            allowNull: true,
-        },
-        religion_id: {
             type: DataTypes.INTEGER.UNSIGNED,
             allowNull: true,
         },

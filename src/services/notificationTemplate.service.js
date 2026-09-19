@@ -1,5 +1,5 @@
 const { Op } = require('sequelize');
-const { NotificationTemplate, NotificationCategory, EventCategory, EventType } = require('../models');
+const { NotificationTemplate, NotificationCategory, EventCategory } = require('../models');
 const baseService = require('./base.service');
 const ApiError = require('../utils/apiError');
 
@@ -34,7 +34,7 @@ const SYSTEM_TRIGGERS = [
 const SYSTEM_TRIGGER_KEYS = new Set(SYSTEM_TRIGGERS.map((t) => t.key));
 
 const WRITABLE_FIELDS = [
-    'name', 'trigger_key', 'notification_category_id', 'event_category_id', 'event_type_id',
+    'name', 'trigger_key', 'notification_category_id', 'event_category_id',
     'title', 'content', 'image_url', 'channels', 'is_active', 'sort_order',
 ];
 
@@ -66,15 +66,6 @@ const extractVariablesUsed = (title = '', content = '') => {
 const assertNotificationCategoryExists = async (notificationCategoryId) => {
     const cat = await NotificationCategory.findByPk(notificationCategoryId, { attributes: ['id'] });
     if (!cat) throw ApiError.badRequest('That notification category does not exist.');
-};
-
-const assertEventTypeMatchesCategory = async (eventCategoryId, eventTypeId) => {
-    if (!eventTypeId) return;
-    const eventType = await EventType.findByPk(eventTypeId, { attributes: ['id', 'event_category_id'] });
-    if (!eventType) throw ApiError.badRequest('That event type does not exist.');
-    if (eventCategoryId && eventType.event_category_id !== eventCategoryId) {
-        throw ApiError.badRequest('That event type does not belong to the selected event category.');
-    }
 };
 
 const normalizeTriggerKey = (value) => {
@@ -113,9 +104,6 @@ const getAll = async (query = {}, companyId = undefined) => {
     const eventCategoryId = toNullableId(query.event_category_id);
     if (eventCategoryId !== undefined) where.event_category_id = eventCategoryId;
 
-    const eventTypeId = toNullableId(query.event_type_id);
-    if (eventTypeId !== undefined) where.event_type_id = eventTypeId;
-
     return baseService.getAll(NotificationTemplate, MODEL_NAME, query, {
         searchFields: ['name', 'title', 'content'],
         sortableFields: ['sort_order', 'name', 'created_at'],
@@ -125,7 +113,6 @@ const getAll = async (query = {}, companyId = undefined) => {
         include: [
             { model: NotificationCategory, as: 'notificationCategory', attributes: ['id', 'name', 'icon', 'color'], required: false },
             { model: EventCategory, as: 'category', attributes: ['id', 'name'], required: false },
-            { model: EventType, as: 'eventType', attributes: ['id', 'name'], required: false },
         ],
     });
 };
@@ -136,7 +123,6 @@ const getById = async (id, companyId = undefined) =>
         include: [
             { model: NotificationCategory, as: 'notificationCategory', attributes: ['id', 'name', 'icon', 'color'], required: false },
             { model: EventCategory, as: 'category', attributes: ['id', 'name'], required: false },
-            { model: EventType, as: 'eventType', attributes: ['id', 'name'], required: false },
         ],
     });
 
@@ -161,8 +147,6 @@ const create = async (data, userId = null, companyId = undefined) => {
     payload.notification_category_id = toNullableId(payload.notification_category_id);
     await assertNotificationCategoryExists(payload.notification_category_id);
     payload.event_category_id = toNullableId(payload.event_category_id) ?? null;
-    payload.event_type_id = toNullableId(payload.event_type_id) ?? null;
-    await assertEventTypeMatchesCategory(payload.event_category_id, payload.event_type_id);
 
     payload.channels = normalizeChannels(payload.channels);
     payload.variables_used = extractVariablesUsed(payload.title, payload.content);
@@ -198,11 +182,6 @@ const update = async (id, data, userId = null, companyId = undefined) => {
     }
 
     if (payload.event_category_id !== undefined) payload.event_category_id = toNullableId(payload.event_category_id);
-    if (payload.event_type_id !== undefined) payload.event_type_id = toNullableId(payload.event_type_id);
-
-    const targetCategoryId = payload.event_category_id !== undefined ? payload.event_category_id : row.event_category_id;
-    const targetTypeId = payload.event_type_id !== undefined ? payload.event_type_id : row.event_type_id;
-    await assertEventTypeMatchesCategory(targetCategoryId, targetTypeId);
 
     if (payload.channels !== undefined) payload.channels = normalizeChannels(payload.channels);
 

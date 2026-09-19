@@ -65,17 +65,14 @@ const renderPlaceholders = (text, vars = {}) =>
 
 /**
  * Finds the active template tagged with this trigger_key, applicable to this
- * event's category/type. trigger_key is unique, so at most one row can match.
+ * event's category. trigger_key is unique, so at most one row can match.
  */
 const findApplicableTemplate = async (triggerKey, event) => {
     return NotificationTemplate.findOne({
         where: {
             trigger_key: triggerKey,
             is_active: 1,
-            [Op.and]: [
-                { [Op.or]: [{ event_category_id: null }, { event_category_id: event.event_category_id }] },
-                { [Op.or]: [{ event_type_id: null }, { event_type_id: event.event_type_id }] },
-            ],
+            [Op.or]: [{ event_category_id: null }, { event_category_id: event.event_category_id }],
         },
         include: [
             { association: 'notificationCategory', attributes: ['id', 'name', 'icon', 'color'] },
@@ -146,7 +143,7 @@ const triggerWelcomeInvitation = async ({
                 attributes: [
                     'id', 'name', 'start_date', 'start_time', 'venue_name',
                     'venue_address', 'website_client_id', 'company_id',
-                    'event_category_id', 'event_type_id',
+                    'event_category_id',
                 ],
             });
         }

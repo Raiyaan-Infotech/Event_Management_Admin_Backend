@@ -35,21 +35,10 @@ const ok = (label, cond, extra = '') =>
     ok('login', login.status === 200, `status ${login.status} ${login.json?.message ?? ''}`);
     if (login.status !== 200) return;
 
-    // Taxonomy the template needs — pick a real (category, type) pair, since the
-    // service rejects a type that does not belong to its category.
+    // A template is scoped by event category only.
     const cats = await call('GET', '/event-categories?limit=50&is_active=true');
-    const categories = cats.json?.data ?? [];
-    let categoryId = null;
-    let typeId = null;
-    for (const c of categories) {
-        const types = await call('GET', `/event-types?limit=50&is_active=true&event_category_id=${c.id}`);
-        if ((types.json?.data ?? []).length) {
-            categoryId = c.id;
-            typeId = types.json.data[0].id;
-            break;
-        }
-    }
-    ok('found a category/type pair', !!categoryId && !!typeId, `cat ${categoryId} type ${typeId}`);
+    const categoryId = (cats.json?.data ?? [])[0]?.id ?? null;
+    ok('found a category', !!categoryId, `cat ${categoryId}`);
     if (!categoryId) return;
 
     /* ---------------------------------------------------------- create -- */
@@ -57,7 +46,6 @@ const ok = (label, cond, extra = '') =>
         name: 'Floral Wedding Classic',
         code: 'FWE-001',
         event_category_id: categoryId,
-        event_type_id: typeId,
         style: 'floral',
         tags: ['wedding', 'floral', 'wedding'],           // duplicate on purpose
         description: 'A soft floral invitation.',
@@ -100,35 +88,31 @@ const ok = (label, cond, extra = '') =>
         JSON.stringify(t.available_for) === '["individual","company"]', JSON.stringify(t.available_for));
     ok('selected+empty fell back to all', t.plan_availability === 'all', t.plan_availability);
     ok('pricing fields NOT stored', t.pricing_type === undefined && t.price === undefined);
-    ok('joins resolved', !!t.category && !!t.eventType, `${t.category?.name} / ${t.eventType?.name}`);
+    ok('category joined, no type / religion', !!t.category && t.eventType === undefined && t.event_type_id === undefined,
+        `${t.category?.name}`);
 
     /* -------------------------------------------------- duplicate code -- */
     const dupeCode = await call('POST', '/event-templates', {
         name: 'Another One',
         code: 'FWE-001',
         event_category_id: categoryId,
-        event_type_id: typeId,
     });
     ok('duplicate code gets a suffix',
         dupeCode.json?.data?.template?.code === 'fwe-001-2',
         dupeCode.json?.data?.template?.code);
 
     /* ------------------------------------------------------ validation -- */
-    const noName = await call('POST', '/event-templates', { code: 'x', event_category_id: categoryId, event_type_id: typeId });
+    const noName = await call('POST', '/event-templates', { code: 'x', event_category_id: categoryId });
     ok('name required', noName.status === 400, noName.json?.message);
 
     const noCat = await call('POST', '/event-templates', { name: 'X' });
     ok('category required', noCat.status === 400, noCat.json?.message);
 
-    // A type from a DIFFERENT category must be refused.
-    const otherType = await call('GET', '/event-types?limit=50');
-    const mismatched = (otherType.json?.data ?? []).find((x) => x.event_category_id !== categoryId);
-    if (mismatched) {
-        const bad = await call('POST', '/event-templates', {
-            name: 'Mismatch', event_category_id: categoryId, event_type_id: mismatched.id,
-        });
-        ok('type must belong to category', bad.status === 400, bad.json?.message);
-    }
+    // The Event Types / Religions APIs are gone.
+    const types = await call('GET', '/event-types?limit=5');
+    ok('/event-types removed', types.status === 404, `status ${types.status}`);
+    const religions = await call('GET', '/religions?limit=5');
+    ok('/religions removed', religions.status === 404, `status ${religions.status}`);
 
     /* ------------------------------------------------------------ read -- */
     const list = await call('GET', '/event-templates?limit=50');
@@ -190,7 +174,7 @@ const ok = (label, cond, extra = '') =>
     // The code freed by a soft delete must be reusable — the whole reason it is
     // not a UNIQUE index.
     const reuse = await call('POST', '/event-templates', {
-        name: 'Reuse Code', code: 'FWE-001', event_category_id: categoryId, event_type_id: typeId,
+        name: 'Reuse Code', code: 'FWE-001', event_category_id: categoryId,
     });
     ok('a soft-deleted code is reusable',
         reuse.json?.data?.template?.code === 'fwe-001',

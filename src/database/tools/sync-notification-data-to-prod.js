@@ -5,10 +5,9 @@
  * migration (both already ran via apply-notification-*.js).
  *
  * ── WHY THIS CANNOT BE A RAW ID COPY ─────────────────────────────────────────
- * local Wedding = event_categories.id 1, prod Wedding = id 2. Local Christian
- * Wedding = event_types.id 2, prod = id 6. Copying a template's
- * event_category_id/event_type_id verbatim would silently attach it to
- * whatever category/type happens to hold that id on prod — a different,
+ * local Wedding = event_categories.id 1, prod Wedding = id 2. Copying a
+ * template's event_category_id verbatim would silently attach it to
+ * whatever category happens to hold that id on prod — a different,
  * wrong one. Every foreign id is re-resolved by NAME against prod, never
  * copied as a number.
  *
@@ -136,11 +135,10 @@ async function findIdByName(conn, table, name, extraWhere = '') {
         console.log('');
         console.log('  notification_templates');
         const [localTemplates] = await local.query(`
-            SELECT t.*, nc.name AS category_name, ec.name AS event_category_name, et.name AS event_type_name
+            SELECT t.*, nc.name AS category_name, ec.name AS event_category_name
               FROM notification_templates t
               LEFT JOIN notification_categories nc ON nc.id = t.notification_category_id
               LEFT JOIN event_categories ec ON ec.id = t.event_category_id
-              LEFT JOIN event_types et ON et.id = t.event_type_id
              WHERE t.deleted_at IS NULL
         `);
 
@@ -171,19 +169,6 @@ async function findIdByName(conn, table, name, extraWhere = '') {
                 prodEventCategoryId = id;
             }
 
-            let prodEventTypeId = null;
-            if (t.event_type_name) {
-                const id = await findIdByName(
-                    prod, 'event_types', t.event_type_name,
-                    prodEventCategoryId ? `AND event_category_id = ${Number(prodEventCategoryId)}` : '',
-                );
-                if (id === undefined) {
-                    console.log(`  ! ${t.name.padEnd(30)} SKIPPED — event type "${t.event_type_name}" not found on prod`);
-                    continue;
-                }
-                prodEventTypeId = id;
-            }
-
             // trigger_key is UNIQUE on prod too — carry it over as-is (it's a
             // fixed machine key, not per-environment) but never silently steal
             // it from a template that already owns it there.
@@ -199,17 +184,17 @@ async function findIdByName(conn, table, name, extraWhere = '') {
             }
 
             if (!APPLY) {
-                console.log(`  + ${t.name.padEnd(30)} WOULD INSERT (category -> ${prodCategoryId}, event_category -> ${prodEventCategoryId}, event_type -> ${prodEventTypeId})`);
+                console.log(`  + ${t.name.padEnd(30)} WOULD INSERT (category -> ${prodCategoryId}, event_category -> ${prodEventCategoryId})`);
                 continue;
             }
 
             await prod.query(
                 `INSERT INTO notification_templates
-                   (name, trigger_key, notification_category_id, event_category_id, event_type_id, title, content,
+                   (name, trigger_key, notification_category_id, event_category_id, title, content,
                     variables_used, image_url, channels, is_active, sort_order, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
                 [
-                    t.name, t.trigger_key ?? null, prodCategoryId, prodEventCategoryId, prodEventTypeId, t.title, t.content,
+                    t.name, t.trigger_key ?? null, prodCategoryId, prodEventCategoryId, t.title, t.content,
                     // JSON columns: mysql2 returns these already parsed on SELECT, but a raw
                     // INSERT (unlike Sequelize) needs them re-stringified by hand.
                     JSON.stringify(t.variables_used), t.image_url, JSON.stringify(t.channels),

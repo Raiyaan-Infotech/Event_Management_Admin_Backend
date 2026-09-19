@@ -14,23 +14,19 @@ const { Event, NotificationTemplate, EventNotificationTemplatePref } = require('
 const findOwnedEvent = async (clientId, eventId) =>
     Event.findOne({
         where: { id: eventId, website_client_id: clientId },
-        attributes: ['id', 'website_client_id', 'event_category_id', 'event_type_id', 'name', 'status', 'updated_at'],
+        attributes: ['id', 'website_client_id', 'event_category_id', 'name', 'status', 'updated_at'],
     });
 
-/** Templates admin has scoped to apply to this event's category/type (or globally). */
+/** Templates admin has scoped to apply to this event's category (or globally). */
 const applicableTemplatesFor = (event) =>
     NotificationTemplate.findAll({
         where: {
             is_active: 1,
-            [Op.and]: [
-                { [Op.or]: [{ event_category_id: null }, { event_category_id: event.event_category_id }] },
-                { [Op.or]: [{ event_type_id: null }, { event_type_id: event.event_type_id }] },
-            ],
+            [Op.or]: [{ event_category_id: null }, { event_category_id: event.event_category_id }],
         },
         include: [
             { association: 'notificationCategory', attributes: ['id', 'name', 'icon', 'color'] },
             { association: 'category', attributes: ['id', 'name'] },
-            { association: 'eventType', attributes: ['id', 'name'] },
         ],
         order: [['sort_order', 'ASC'], ['name', 'ASC']],
     });
@@ -65,7 +61,6 @@ const listApplicable = async (clientId, eventId) => {
                 image_url: t.image_url,
                 notificationCategory: t.notificationCategory,
                 category: t.category,
-                eventType: t.eventType,
                 enabled: override ? override.enabled : true,
                 is_set: Boolean(override),
             };
@@ -109,16 +104,15 @@ const summaryForClient = async (clientId) => {
     const [events, templates, overrides] = await Promise.all([
         Event.findAll({
             where: { website_client_id: clientId },
-            attributes: ['id', 'name', 'event_category_id', 'event_type_id', 'status', 'updated_at'],
+            attributes: ['id', 'name', 'event_category_id', 'status', 'updated_at'],
             include: [
                 { association: 'category', attributes: ['id', 'name'] },
-                { association: 'eventType', attributes: ['id', 'name'] },
             ],
             order: [['updated_at', 'DESC']],
         }),
         NotificationTemplate.findAll({
             where: { is_active: 1 },
-            attributes: ['id', 'event_category_id', 'event_type_id'],
+            attributes: ['id', 'event_category_id'],
         }),
         EventNotificationTemplatePref.findAll({
             where: { website_client_id: clientId },
@@ -133,8 +127,7 @@ const summaryForClient = async (clientId) => {
     });
 
     const matches = (template, event) =>
-        (template.event_category_id === null || template.event_category_id === event.event_category_id) &&
-        (template.event_type_id === null || template.event_type_id === event.event_type_id);
+        template.event_category_id === null || template.event_category_id === event.event_category_id;
 
     const rows = events.map((event) => {
         const applicable = templates.filter((t) => matches(t, event));
@@ -146,7 +139,6 @@ const summaryForClient = async (clientId) => {
             name: event.name,
             status: event.status,
             category: event.category ?? null,
-            eventType: event.eventType ?? null,
             templates_count: applicable.length,
             active_count: applicable.length - inactiveCount,
             inactive_count: inactiveCount,

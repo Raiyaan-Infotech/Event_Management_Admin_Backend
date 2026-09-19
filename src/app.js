@@ -105,8 +105,6 @@ app.use('/api/v1/vendors', require('./routes/vendor.routes'));
 app.use('/api/v1/menus', require('./routes/menu.routes'));
 // Menu Management
 app.use('/api/v1/event-categories', require('./routes/eventCategory.routes'));
-app.use('/api/v1/event-types', require('./routes/eventType.routes'));
-app.use('/api/v1/religions', require('./routes/religion.routes'));
 app.use('/api/v1/event-menus', require('./routes/eventMenu.routes'));
 app.use('/api/v1/notification-categories', require('./routes/notificationCategory.routes'));
 app.use('/api/v1/notification-templates', require('./routes/notificationTemplate.routes'));

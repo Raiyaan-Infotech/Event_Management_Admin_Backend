@@ -1,4 +1,4 @@
-const { Sequelize, User, EventTemplate, EventCategory, EventType, Religion,
+const { Sequelize, User, EventTemplate, EventCategory,
     TemplateCategory, FrameStyle, Decoration, sequelize } = require('../models');
 const { Op } = Sequelize;
 const baseService = require('./base.service');
@@ -28,7 +28,8 @@ const MODULE_SLUG = 'event_templates';
 // Whitelist, so a stray body key can never write company_id, created_by or an id.
 const WRITABLE_FIELDS = [
     // step 1
-    'name', 'code', 'event_category_id', 'event_type_id', 'religion_id',
+    // Category only — event type and religion were removed from the project.
+    'name', 'code', 'event_category_id',
     // `template_category_id` IS the Style now; `style` is still accepted so an
     // older client that only knows the slug keeps working.
     'template_category_id', 'style', 'tags', 'description',
@@ -134,8 +135,6 @@ const STATUSES = ['draft', 'published'];
 // Only what the list and form render — no SELECT * on the joined tables.
 const TEMPLATE_INCLUDE = [
     { model: EventCategory, as: 'category', attributes: ['id', 'name', 'color'], required: false },
-    { model: EventType, as: 'eventType', attributes: ['id', 'name', 'color'], required: false },
-    { model: Religion, as: 'religion', attributes: ['id', 'name', 'color'], required: false },
     // Step 1's Style and step 2's frame artwork. Joined rather than looked up
     // per row: the list renders the style badge and the preview needs the URL.
     { model: TemplateCategory, as: 'templateCategory', attributes: ['id', 'name', 'slug'], required: false },
@@ -288,7 +287,7 @@ const pickWritable = (data = {}) => {
     }
     if (payload.style !== undefined) payload.style = oneOf(payload.style, STYLES, 'classic');
     if (payload.tags !== undefined) payload.tags = toStringList(payload.tags, { max: 20, maxLength: 40 });
-    for (const key of ['event_category_id', 'event_type_id', 'religion_id']) {
+    for (const key of ['event_category_id']) {
         if (payload[key] !== undefined) {
             const n = parseInt(payload[key], 10);
             payload[key] = Number.isNaN(n) ? null : n;
@@ -509,12 +508,6 @@ const getAll = async (query = {}, companyId = undefined) => {
     const categoryId = numericFilter(query.event_category_id);
     if (categoryId !== undefined) where.event_category_id = categoryId;
 
-    const typeId = numericFilter(query.event_type_id);
-    if (typeId !== undefined) where.event_type_id = typeId;
-
-    const religionId = numericFilter(query.religion_id);
-    if (religionId !== undefined) where.religion_id = religionId;
-
     if (query.style && query.style !== 'all') where.style = String(query.style).toLowerCase();
 
     if (query.is_featured !== undefined && query.is_featured !== '' && query.is_featured !== 'all') {
@@ -626,51 +619,6 @@ const buildUniqueCode = async (base, companyId, excludeId = null) => {
 };
 
 /**
- * A template's event type must belong to its event category, or the list shows
- * a row whose Event Type contradicts its Event Category. Same rule the menu
- * catalogue enforces.
- */
-const assertTypeMatchesCategory = async (categoryId, typeId, companyId) => {
-    if (!typeId || !categoryId) return;
-
-    const eventType = await EventType.findByPk(typeId, {
-        attributes: ['id', 'event_category_id', 'company_id'],
-    });
-    if (!eventType) throw ApiError.badRequest('Selected event type does not exist.');
-
-    if (companyId !== undefined && companyId !== null && eventType.company_id && eventType.company_id !== companyId) {
-        throw ApiError.badRequest('Selected event type does not exist.');
-    }
-    if (Number(eventType.event_category_id) !== Number(categoryId)) {
-        throw ApiError.badRequest('The selected event type does not belong to the selected event category.');
-    }
-};
-
-/**
- * Religion is OPTIONAL here — the form marks it so, and plenty of templates are
- * not religious. But when one IS chosen it has to sit inside the template's own
- * scope, or the list shows a religion the cascade could never have offered.
- */
-const assertReligionMatchesScope = async (categoryId, typeId, religionId, companyId) => {
-    if (!religionId) return;
-
-    const religion = await Religion.findByPk(religionId, {
-        attributes: ['id', 'event_category_id', 'event_type_id', 'company_id'],
-    });
-    if (!religion) throw ApiError.badRequest('Selected religion does not exist.');
-
-    if (companyId !== undefined && companyId !== null && religion.company_id && religion.company_id !== companyId) {
-        throw ApiError.badRequest('Selected religion does not exist.');
-    }
-    if (categoryId && religion.event_category_id && Number(religion.event_category_id) !== Number(categoryId)) {
-        throw ApiError.badRequest('The selected religion does not belong to the selected event category.');
-    }
-    if (typeId && religion.event_type_id && Number(religion.event_type_id) !== Number(typeId)) {
-        throw ApiError.badRequest('The selected religion does not belong to the selected event type.');
-    }
-};
-
-/**
  * Step 1's Style, resolved to a real category row.
  *
  * Accepts EITHER `template_category_id` or the legacy `style` slug, and keeps
@@ -758,15 +706,6 @@ const create = async (data, userId = null, companyId = undefined) => {
 
     if (!payload.name) throw ApiError.badRequest('Template name is required.');
     if (!payload.event_category_id) throw ApiError.badRequest('Event category is required.');
-    if (!payload.event_type_id) throw ApiError.badRequest('Event type is required.');
-
-    await assertTypeMatchesCategory(payload.event_category_id, payload.event_type_id, companyId);
-    await assertReligionMatchesScope(
-        payload.event_category_id,
-        payload.event_type_id,
-        payload.religion_id,
-        companyId
-    );
 
     await syncStyleAndCategory(payload, null, companyId);
     await assertFrameStyle(payload.frame_style_id, companyId);
@@ -796,26 +735,6 @@ const update = async (id, data, userId = null, companyId = undefined) => {
 
     if (payload.name !== undefined && !payload.name) {
         throw ApiError.badRequest('Template name is required.');
-    }
-
-    const nextCategoryId = payload.event_category_id ?? template.event_category_id;
-    const nextTypeId = payload.event_type_id ?? template.event_type_id;
-
-    // Only revalidated when the request actually touches the scope — a PATCH
-    // that flips one switch must not be rejected because a pre-existing row
-    // predates the rule.
-    const touchesScope = payload.event_category_id !== undefined
-        || payload.event_type_id !== undefined
-        || payload.religion_id !== undefined;
-
-    if (touchesScope) {
-        await assertTypeMatchesCategory(nextCategoryId, nextTypeId, companyId);
-        await assertReligionMatchesScope(
-            nextCategoryId,
-            nextTypeId,
-            payload.religion_id ?? template.religion_id,
-            companyId
-        );
     }
 
     if (payload.template_category_id !== undefined || payload.style !== undefined) {

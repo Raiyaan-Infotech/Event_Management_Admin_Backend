@@ -4,7 +4,7 @@ const { DataTypes } = require('sequelize');
  * Admin-authored transactional message template — e.g. "RSVP Confirmation",
  * "Event Reminder". Distinct from `EventMessageCampaign` (one AD-HOC compose
  * sent to an audience): a template is a reusable blueprint, scoped by
- * notification category / event category / event type, meant to be picked up
+ * notification category / event category, meant to be picked up
  * later by system-triggered sends (RSVP confirm, reminders) rather than
  * composed by hand each time.
  */
@@ -35,10 +35,6 @@ module.exports = (sequelize) => {
             allowNull: false,
         },
         event_category_id: {
-            type: DataTypes.INTEGER.UNSIGNED,
-            allowNull: true,
-        },
-        event_type_id: {
             type: DataTypes.INTEGER.UNSIGNED,
             allowNull: true,
         },

@@ -4,11 +4,11 @@ const { DataTypes } = require('sequelize');
  * One value in the "Relationship with Invitor" dropdown on the mobile app's
  * guest registration form.
  *
- * Scoped per event category, the same way `Religion` is: a wedding offers
+ * Scoped per event category: a wedding offers
  * "Bride's Father", a corporate event offers "Delegate", and offering both
  * everywhere would make the list useless in either.
  *
- * ── `event_category_id` IS NULLABLE, AND RELIGION'S IS NOT ───────────────────
+ * ── `event_category_id` IS NULLABLE ─────────────────────────────────────────
  * `events.event_category_id` is itself nullable, so an event can exist with no
  * category. NULL rows here are the fallback list those events fall back to —
  * without them a guest opens the form and finds an empty dropdown.
@@ -19,7 +19,7 @@ const { DataTypes } = require('sequelize');
  * deleting an option here must not retroactively change what somebody answered
  * six months ago.
  *
- * Shape deliberately mirrors `Religion` / `EventCategory` field for field, so
+ * Shape deliberately mirrors `EventCategory` field for field, so
  * the shared admin list components work against it without special-casing.
  */
 module.exports = (sequelize) => {

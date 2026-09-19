@@ -77,7 +77,6 @@ async function columnType(conn, table, column) {
         } else {
             const notifCategoryIdType = await columnType(conn, 'notification_categories', 'id');
             const categoryIdType = await columnType(conn, 'event_categories', 'id');
-            const typeIdType = await columnType(conn, 'event_types', 'id');
 
             await conn.query(`
                 CREATE TABLE \`${TABLE}\` (
@@ -85,7 +84,6 @@ async function columnType(conn, table, column) {
                     \`name\` VARCHAR(150) NOT NULL,
                     \`notification_category_id\` ${notifCategoryIdType} NOT NULL,
                     \`event_category_id\` ${categoryIdType} NULL,
-                    \`event_type_id\` ${typeIdType} NULL,
                     \`title\` VARCHAR(100) NOT NULL,
                     \`content\` TEXT NOT NULL,
                     \`variables_used\` JSON NULL,
@@ -103,16 +101,12 @@ async function columnType(conn, table, column) {
                     PRIMARY KEY (\`id\`),
                     KEY \`idx_notification_templates_category\` (\`notification_category_id\`, \`is_active\`),
                     KEY \`idx_notification_templates_event_category\` (\`event_category_id\`),
-                    KEY \`idx_notification_templates_event_type\` (\`event_type_id\`),
                     CONSTRAINT \`fk_notification_templates_notification_category\`
                         FOREIGN KEY (\`notification_category_id\`)
                         REFERENCES \`notification_categories\` (\`id\`),
                     CONSTRAINT \`fk_notification_templates_event_category\`
                         FOREIGN KEY (\`event_category_id\`)
-                        REFERENCES \`event_categories\` (\`id\`) ON DELETE SET NULL,
-                    CONSTRAINT \`fk_notification_templates_event_type\`
-                        FOREIGN KEY (\`event_type_id\`)
-                        REFERENCES \`event_types\` (\`id\`) ON DELETE SET NULL
+                        REFERENCES \`event_categories\` (\`id\`) ON DELETE SET NULL
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             `);
             console.log(`  + ${TABLE.padEnd(38)} created`);

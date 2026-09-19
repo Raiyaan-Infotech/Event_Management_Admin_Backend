@@ -9,13 +9,9 @@ const MODULE_SLUG = 'event_menus';
 
 // Whitelist, so a stray body key can never write company_id, created_by or an id.
 //
-// A menu is scoped by CATEGORY only. event_type_id / religion_id and the
-// Website/Mobile "menu type" (is_website / is_mobile) are deliberately NOT
-// writable: requiring them made every menu exist once per religion, and the
-// plan screens listed each copy. The columns stay in the table (NULL, and 1/1
-// for the platform flags) so the change is reversible — see
-// src/database/tools/apply-menu-category-only.js. Which platform a menu shows
-// on is decided by the PLAN's W/M switch in Manage Plan Menus.
+// A menu is scoped by CATEGORY only — event type, religion and the
+// Website/Mobile "menu type" were removed from the project. Which platform a
+// menu shows on is decided by the PLAN's W/M switch in Manage Plan Menus.
 const WRITABLE_FIELDS = [
     'name',
     'slug',

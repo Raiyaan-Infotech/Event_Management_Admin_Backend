@@ -170,15 +170,14 @@ async function cleanup() {
     ok('portal offered exactly the plan\'s menus', same(ids(webMenus), [M['event-information'], M.agenda, M.rsvp]));
 
     const category = (webOpts.data?.categories ?? [])[0];
-    const type = (webOpts.data?.types ?? []).find((t) => !category || !t.event_category_id || t.event_category_id === category.id);
-    ok('plan scope offers a category and a type', Boolean(category && type));
+    ok('plan scope offers a category (and no types / religions)', Boolean(category) && webOpts.data?.types === undefined && webOpts.data?.religions === undefined);
     ok('portal_sections is returned and kept out of menus',
         Array.isArray(webOpts.data?.portal_sections)
         && !(webMenus || []).some((m) => m.menu_group === 'portal'),
         JSON.stringify(webOpts.data?.portal_sections));
 
     const eventBody = (menuIds, name) => ({
-        name, event_category_id: category?.id, event_type_id: type?.id,
+        name, event_category_id: category?.id,
         start_date: '2026-12-20', end_date: '2026-12-20', start_time: '18:00', end_time: '22:00',
         venue_name: 'QA Hall', venue_address: 'Chennai',
         organizer: 'ZZ QA Family', contact_phone: '+91 98840 00000', contact_email: email,

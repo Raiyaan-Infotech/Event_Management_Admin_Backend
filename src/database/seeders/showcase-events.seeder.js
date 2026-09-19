@@ -26,8 +26,8 @@
  *
  * ── THROUGH THE REAL SERVICES, NOT RAW INSERTS ──────────────────────────────
  * Events go through `clientEvent.service.createEvent`, so they are validated
- * against the account's PLAN exactly like the portal wizard (category, type,
- * religion, menus must be granted) and get a real QR token. Splashes go through
+ * against the account's PLAN exactly like the portal wizard (category and
+ * menus must be granted) and get a real QR token. Splashes go through
  * `clientSplashScreen.service`, so the one-splash-per-event rule and the event
  * name copy apply. Nothing here can create an event the portal could not.
  *
@@ -564,16 +564,10 @@ async function uploadCover(item, client) {
 /** One event body, scoped to what the account's plan offers. */
 function eventBody(item, options, client, templateCode, coverUrl) {
     const category = options.categories[0];
-    const type = options.types.find((t) => !t.event_category_id || t.event_category_id === category.id);
-    const religion = options.religions.find((r) =>
-        (!r.event_category_id || r.event_category_id === category.id)
-        && (!r.event_type_id || r.event_type_id === type?.id));
 
     return {
         ...item.event,
         event_category_id: category.id,
-        event_type_id: type?.id,
-        religion_id: religion ? religion.id : null,
         timezone: 'Asia/Kolkata',
         contact_email: client.email || null,
         contact_phone: client.mobile ? `+91 ${client.mobile}` : null,

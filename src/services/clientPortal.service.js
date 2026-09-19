@@ -6,8 +6,6 @@ const {
     SubscriptionPlanMenu,
     EventMenu,
     EventCategory,
-    EventType,
-    Religion,
     EventTemplate,
     FrameStyle,
     Decoration,
@@ -37,7 +35,7 @@ const ownerPlanCache = new TtlCache(PLAN_CACHE_TTL_MS);
  * The client's SUBSCRIPTION PLAN is the gatekeeper, not the raw catalogue:
  *
  *   subscription_plans        scoped by event_category_id only — NULL means
- *                             "all" (type / religion are picked per event)
+ *                             "all"
  *   subscription_plan_menus   the exact menus that plan grants
  *
  * So the Create Event wizard must offer the plan's scope, not every taxonomy
@@ -86,7 +84,7 @@ const TEMPLATE_ATTRS = [
     // template disagreed completely.
     'frame_style_id', 'decoration_ids',
     'components', 'component_order',
-    'event_category_id', 'event_type_id', 'religion_id',
+    'event_category_id',
     'is_featured', 'sort_order',
 ];
 
@@ -187,8 +185,7 @@ const templatesForPlan = async (companyId, plan) => {
     // A plan is scoped by category only (NULL = all). A NULL category on the
     // TEMPLATE also means "all", which is why this is an OR against NULL rather
     // than a plain equals: a general template must not be filtered out by a
-    // plan that names a category. The wizard narrows templates further by the
-    // type / religion the client picks for the event.
+    // plan that names a category.
     if (plan.event_category_id) {
         where[Op.or] = [{ event_category_id: null }, { event_category_id: plan.event_category_id }];
     }
@@ -376,7 +373,7 @@ const ownerGrantedMenuIds = async (ownerClientId, platform = 'website') => {
 const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
     const client = await WebsiteClient.findByPk(clientId);
     if (!client) {
-        return { plan: null, reason: 'Account not found.', categories: [], types: [], religions: [], menus: [], portal_sections: [], templates: [] };
+        return { plan: null, reason: 'Account not found.', categories: [], menus: [], portal_sections: [], templates: [] };
     }
 
     const companyId = client.company_id ?? null;
@@ -385,7 +382,7 @@ const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
         return {
             plan: null,
             reason: 'No subscription plan is assigned to your account yet. Please contact us.',
-            categories: [], types: [], religions: [], menus: [], portal_sections: [], templates: [],
+            categories: [], menus: [], portal_sections: [], templates: [],
         };
     }
 
@@ -394,41 +391,23 @@ const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
         return {
             plan: null,
             reason: 'Your subscription plan is no longer available. Please contact us.',
-            categories: [], types: [], religions: [], menus: [], portal_sections: [], templates: [],
+            categories: [], menus: [], portal_sections: [], templates: [],
         };
     }
     if (Number(plan.is_active) !== 1) {
         return {
             plan: plan.toJSON(),
             reason: 'Your subscription plan is inactive. Please contact us.',
-            categories: [], types: [], religions: [], menus: [], portal_sections: [], templates: [],
+            categories: [], menus: [], portal_sections: [], templates: [],
         };
     }
 
-    // A plan is scoped by category only; NULL means "all categories". Types and
-    // religions are every one under the offered category — the client picks
-    // them per event.
+    // A plan is scoped by category only; NULL means "all categories".
     const catWhere = activeWhere(companyId);
     if (plan.event_category_id) catWhere.id = plan.event_category_id;
 
     const categories = await EventCategory.findAll({
         where: catWhere, attributes: TAXONOMY_ATTRS, order: [['sort_order', 'ASC'], ['id', 'ASC']],
-    });
-
-    const typeWhere = activeWhere(companyId);
-    if (plan.event_category_id) typeWhere.event_category_id = plan.event_category_id;
-
-    const types = await EventType.findAll({
-        where: typeWhere, attributes: [...TAXONOMY_ATTRS, 'event_category_id'],
-        order: [['sort_order', 'ASC'], ['id', 'ASC']],
-    });
-
-    const relWhere = activeWhere(companyId);
-    if (plan.event_category_id) relWhere.event_category_id = plan.event_category_id;
-
-    const religions = await Religion.findAll({
-        where: relWhere, attributes: [...TAXONOMY_ATTRS, 'event_category_id', 'event_type_id'],
-        order: [['sort_order', 'ASC'], ['id', 'ASC']],
     });
 
     // The menus the PLAN grants ON THIS PLATFORM — not the catalogue. Read
@@ -457,7 +436,7 @@ const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
     const portalSections = granted.filter((m) => m.menu_group === 'portal').map((m) => m.slug);
 
     // The admin-authored invitation templates this plan entitles them to. The
-    // wizard narrows these further by the category/type actually chosen in
+    // wizard narrows these further by the category actually chosen in
     // step 1 — done there rather than here so changing the category does not
     // cost a round trip mid-wizard.
     const templates = await templatesForPlan(companyId, plan);
@@ -466,8 +445,6 @@ const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
         plan: plan.toJSON(),
         reason: menus.length ? null : 'Your plan does not include any menus yet. Please contact us.',
         categories: categories.map((r) => r.toJSON()),
-        types: types.map((r) => r.toJSON()),
-        religions: religions.map((r) => r.toJSON()),
         menus: menus.map((r) => r.toJSON()),
         /** Slugs of the portal sidebar sections this plan grants on this platform. */
         portal_sections: portalSections,

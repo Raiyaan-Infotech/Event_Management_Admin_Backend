@@ -38,7 +38,7 @@ require('dotenv').config({
 const db = require('../../models');
 const mediaService = require('../../services/media.service');
 
-const { EventTemplate, EventCategory, EventType, Religion, sequelize } = db;
+const { EventTemplate, EventCategory, sequelize } = db;
 
 const PROD = process.argv.includes('--prod');
 const APPLY = process.argv.includes('--apply');
@@ -227,10 +227,8 @@ const norm = (s) => String(s || '').trim().toLowerCase();
         process.exit(0);
     }
 
-    const [cats, types, religions, frames, decos, tcats] = await Promise.all([
+    const [cats, frames, decos, tcats] = await Promise.all([
         EventCategory.findAll({ where: { company_id: COMPANY_ID } }),
-        EventType.findAll({ where: { company_id: COMPANY_ID } }),
-        Religion.findAll({ where: { company_id: COMPANY_ID } }),
         sequelize.query('SELECT id, name, template_category_id FROM frame_styles WHERE is_active = 1 ORDER BY id',
             { type: sequelize.QueryTypes.SELECT }),
         sequelize.query('SELECT id, type FROM decorations WHERE is_active = 1 ORDER BY id',
@@ -241,11 +239,8 @@ const norm = (s) => String(s || '').trim().toLowerCase();
 
     const cat = cats.find((c) => norm(c.name) === 'wedding') || cats[0];
     if (!cat) { console.log('  FAIL  no event categories exist — seed the taxonomy first.\n'); process.exit(1); }
-    const type = types.find((t) => t.event_category_id === cat.id) || types[0];
-    if (!type) { console.log('  FAIL  no event types exist — seed the taxonomy first.\n'); process.exit(1); }
-    const religion = religions.find((r) => r.event_type_id === type.id) || null;
 
-    console.log(`  taxonomy   ${cat.name} / ${type.name}${religion ? ` / ${religion.name}` : ''}`);
+    console.log(`  category   ${cat.name}`);
     console.log(`  catalogue  ${frames.length} frames · ${decos.length} decorations · ${tcats.length} categories\n`);
 
     if (REPLACE) {
@@ -291,8 +286,6 @@ const norm = (s) => String(s || '').trim().toLowerCase();
                 name: `Matrix ${style[0].toUpperCase()}${style.slice(1)} · ${bg[0].toUpperCase()}${bg.slice(1)}`,
                 code,
                 event_category_id: cat.id,
-                event_type_id: type.id,
-                religion_id: religion?.id ?? null,
                 template_category_id: tcat?.id ?? null,
                 style,
                 tags: ['matrix', style, bg],

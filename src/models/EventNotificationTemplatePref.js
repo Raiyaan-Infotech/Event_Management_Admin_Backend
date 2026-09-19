@@ -4,8 +4,8 @@ const { DataTypes } = require('sequelize');
  * A CLIENT's per-event override of one notification template.
  *
  * ── NO ROW = "ON" ────────────────────────────────────────────────────────
- * Every template that applies to an event (matched by event_category_id /
- * event_type_id in notificationTemplate.service.js) is on by default. A row
+ * Every template that applies to an event (matched by event_category_id in
+ * clientEventNotificationTemplate.service.js) is on by default. A row
  * here only exists once the client has actually flipped a switch — same
  * "no row = inherit default" convention as ClientNotificationPref. Never
  * snapshot the template's own is_active into this row: if the admin later

@@ -59,7 +59,7 @@ const TEMPLATES = [
     {
         name: 'Floral Wedding Classic',
         code: 'floral-wedding-classic',
-        category: 'Wedding', type: 'Hindu Wedding', religion: 'Hindu',
+        category: 'Wedding',
         style: 'floral', layout_style: 'classic',
         description: 'Soft roses and gold detailing for a traditional Hindu ceremony.',
         tags: ['wedding', 'floral', 'traditional', 'gold'],
@@ -72,7 +72,7 @@ const TEMPLATES = [
     {
         name: 'Royal Elegance',
         code: 'royal-elegance',
-        category: 'Wedding', type: 'Hindu Wedding', religion: 'Hindu',
+        category: 'Wedding',
         style: 'royal', layout_style: 'elegant',
         description: 'Deep jewel tones and an ornate frame for a grand reception.',
         tags: ['wedding', 'royal', 'reception', 'luxury'],
@@ -85,7 +85,7 @@ const TEMPLATES = [
     {
         name: 'Chapel Christian Wedding',
         code: 'chapel-christian-wedding',
-        category: 'Wedding', type: 'Christian Wedding', religion: 'Christian',
+        category: 'Wedding',
         style: 'classic', layout_style: 'traditional',
         description: 'Understated and formal, built around a church ceremony.',
         tags: ['wedding', 'christian', 'church', 'formal'],
@@ -98,7 +98,7 @@ const TEMPLATES = [
     {
         name: 'Minimal Greenery',
         code: 'minimal-greenery',
-        category: 'Wedding', type: 'Christian Wedding', religion: 'Christian',
+        category: 'Wedding',
         style: 'minimal', layout_style: 'minimal',
         description: 'Eucalyptus and plenty of white space, for an outdoor ceremony.',
         tags: ['wedding', 'minimal', 'greenery', 'outdoor'],
@@ -114,7 +114,7 @@ const TEMPLATES = [
     {
         name: 'Confetti Birthday',
         code: 'confetti-birthday',
-        category: 'Birthday', type: 'Birthday Party', religion: null,
+        category: 'Birthday',
         style: 'modern', layout_style: 'modern',
         description: 'Bright and playful, for a birthday party of any age.',
         tags: ['birthday', 'party', 'colourful', 'fun'],
@@ -131,7 +131,7 @@ const TEMPLATES = [
     {
         name: 'Golden Anniversary',
         code: 'golden-anniversary',
-        category: 'Anniversary', type: 'Anniversary', religion: null,
+        category: 'Anniversary',
         style: 'traditional', layout_style: 'elegant',
         description: 'Warm gold and script for a milestone anniversary.',
         tags: ['anniversary', 'gold', 'milestone'],
@@ -144,7 +144,7 @@ const TEMPLATES = [
     {
         name: 'Corporate Conference',
         code: 'corporate-conference',
-        category: 'Corporate', type: 'Conference', religion: 'Secular',
+        category: 'Corporate',
         style: 'modern', layout_style: 'minimal',
         description: 'Clean and professional, for conferences and summits.',
         tags: ['corporate', 'conference', 'professional'],
@@ -162,7 +162,7 @@ const TEMPLATES = [
     {
         name: 'Executive Seminar',
         code: 'executive-seminar',
-        category: 'Corporate', type: 'Seminar', religion: 'Secular',
+        category: 'Corporate',
         style: 'minimal', layout_style: 'modern',
         description: 'A restrained one-page layout for seminars and workshops.',
         tags: ['corporate', 'seminar', 'workshop'],
@@ -176,7 +176,7 @@ const TEMPLATES = [
     {
         name: 'Sangeet Night',
         code: 'sangeet-night',
-        category: 'Wedding', type: 'Hindu Wedding', religion: 'Hindu',
+        category: 'Wedding',
         style: 'royal', layout_style: 'traditional',
         description: 'Vivid colour and mandala work for the sangeet.',
         tags: ['wedding', 'sangeet', 'music', 'colourful'],
@@ -189,7 +189,7 @@ const TEMPLATES = [
     {
         name: 'Garden Reception',
         code: 'garden-reception',
-        category: 'Wedding', type: 'Christian Wedding', religion: 'Christian',
+        category: 'Wedding',
         style: 'floral', layout_style: 'classic',
         description: 'Daylight, foliage and script, for a garden reception.',
         tags: ['wedding', 'garden', 'reception', 'outdoor'],
@@ -247,7 +247,7 @@ async function uploadToStorage(name, { buffer, mimetype }) {
 (async () => {
     console.log(`\n${TARGET}  ${process.env.DB_NAME}${FORCE ? '  *** --force: existing rows will be rewritten ***' : ''}\n`);
 
-    const { EventTemplate, EventCategory, EventType, Religion, Setting } = db;
+    const { EventTemplate, EventCategory, Setting } = db;
 
     const driver = await Setting.findOne({
         where: { group: 'media', key: 'driver', company_id: COMPANY_ID },
@@ -255,23 +255,9 @@ async function uploadToStorage(name, { buffer, mimetype }) {
     });
     console.log(`  storage driver: ${driver?.value ?? 'local (default)'}\n`);
 
-    const [cats, types, religions] = await Promise.all([
-        EventCategory.findAll({ attributes: ['id', 'name'], raw: true }),
-        EventType.findAll({ attributes: ['id', 'name', 'event_category_id'], raw: true }),
-        Religion.findAll({ attributes: ['id', 'name', 'event_category_id', 'event_type_id'], raw: true }),
-    ]);
+    const cats = await EventCategory.findAll({ attributes: ['id', 'name'], raw: true });
 
     const findCat = (name) => cats.find((c) => c.name.toLowerCase() === name.toLowerCase());
-    const findType = (name, catId) =>
-        types.find((t) => t.name.toLowerCase() === name.toLowerCase() && t.event_category_id === catId);
-    // Religion is scoped to (category, type), so the lookup has to match all
-    // three or the API's own validation would reject the row this writes.
-    const findReligion = (name, catId, typeId) =>
-        religions.find(
-            (r) => r.name.toLowerCase() === name.toLowerCase()
-                && r.event_category_id === catId
-                && r.event_type_id === typeId
-        );
 
     let created = 0, skipped = 0, failed = 0;
 
@@ -285,16 +271,6 @@ async function uploadToStorage(name, { buffer, mimetype }) {
 
         const cat = findCat(t.category);
         if (!cat) { console.log(`  FAIL    ${t.code.padEnd(28)} no category "${t.category}"`); failed += 1; continue; }
-
-        const type = findType(t.type, cat.id);
-        if (!type) { console.log(`  FAIL    ${t.code.padEnd(28)} no type "${t.type}" under ${t.category}`); failed += 1; continue; }
-
-        const religion = t.religion ? findReligion(t.religion, cat.id, type.id) : null;
-        if (t.religion && !religion) {
-            // Not fatal: religion is optional on a template, and writing the row
-            // without it beats refusing to seed at all.
-            console.log(`  note    ${t.code.padEnd(28)} no religion "${t.religion}" in this scope — left blank`);
-        }
 
         // Download, then upload. Falls back to a second photo id if the first
         // has gone away, and only then gives up on the row.
@@ -316,8 +292,6 @@ async function uploadToStorage(name, { buffer, mimetype }) {
             name: t.name,
             code: t.code,
             event_category_id: cat.id,
-            event_type_id: type.id,
-            religion_id: religion?.id ?? null,
             style: t.style,
             tags: t.tags,
             description: t.description,

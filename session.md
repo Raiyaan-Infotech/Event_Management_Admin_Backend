@@ -12780,3 +12780,17 @@ Jamal decided (instead of waiting on §519's manager options): "we don't need th
 Admin FE + portal `tsc --noEmit` clean. Not browser-tested.
 
 **Leftover sweep (all 4 repos):** grep for menu_type / type / religion / is_website on menus and plans — no functional leftovers; 7 stale comments fixed (clientPortal header, SubscriptionPlan + WebsiteClient models, guestRegistration RSVP note, plan routes filter list, admin client-form + website-clients hook). Remaining type / religion code is events, templates and the religion master — kept on purpose. `check-plan-menus.js` (Jamal's uncommitted tool) still prints plan type; harmless.
+
+### 521. Event Type and Religion removed from the whole project — Phase 1 + 2 (code)
+
+Jamal chose "remove everywhere", phased: code + deploy first, schema drop (Phase 3) only after a live check and his OK.
+
+**Backend:** `/event-types` and `/religions` APIs gone (routes, controllers, services, `EventType` / `Religion` models, all associations, approval registries). `event_type_id` / `religion_id` dropped from the `Event`, `EventTemplate`, `NotificationTemplate`, `EventMenu` (+ `is_website` / `is_mobile`) and `SubscriptionPlan` models — the DB columns still exist until Phase 3, all nullable, so inserts work. Events: category only (an old client still sending type / religion is ignored). `/client/event-options` no longer returns `types` / `religions`. Templates, notification templates, the notification trigger and per-event template prefs match by category only. New QR payloads drop `typ` / `rel`; old codes still decode. Seeders, two notification tools and both tests updated; `apply-menu-category-only.js` marked historical.
+
+**Admin FE:** Event Types + Religions pages and sidebar entries deleted; hooks removed; `TaxonomyManager` category-scope only; template wizard / list / detail and notification template wizard / list / preview lose Type (and Religion). Client-form hint says "event categories".
+**Portal:** wizard step 1 = Event Category only; event detail (fact box now shows Category), dashboard card, notification-templates filter + column, hooks / types; dead `use-event-taxonomy.ts` deleted.
+**App:** `typeName` / `religionName` gone; every label that fell back from type to category now reads category. The CURRENT APK already fell back to category, so it keeps working.
+
+Verified: backend service smoke on local 9/9 (event created with no type, old fields ignored, event-options / templates / notification templates carry no type / religion); admin + portal source `tsc` clean (`.next/types` still lists the two deleted pages until the dev server regenerates — not deleted, server running); app `dart analyze` clean.
+
+**Phase 3 (not done, needs Jamal's OK):** backup, then drop FKs / indexes / columns on events, event_templates, notification_templates, event_menus (+ is_website / is_mobile), subscription_plans; drop `religions`, `event_types`; remove `event_types.*` / `religions.*` permissions, modules, role grants, `nav.event_types` / `nav.religions` translations; update `initial_setup.sql`.

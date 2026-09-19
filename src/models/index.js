@@ -90,8 +90,6 @@ db.PlanBadgePlan = require('./PlanBadgePlan')(sequelize, Sequelize);
 
 // Menu Management — event menu catalogue and its taxonomies
 db.EventCategory = require('./EventCategory')(sequelize, Sequelize);
-db.EventType = require('./EventType')(sequelize, Sequelize);
-db.Religion = require('./Religion')(sequelize, Sequelize);
 db.EventMenu = require('./EventMenu')(sequelize, Sequelize);
 db.NotificationCategory = require('./NotificationCategory')(sequelize, Sequelize);
 db.NotificationTemplate = require('./NotificationTemplate')(sequelize, Sequelize);
@@ -349,15 +347,8 @@ db.ChatReadState.belongsTo(db.ChatConversation, { foreignKey: 'conversation_id',
 // Vendor Theme Colors — per (vendor, theme) override
 
 // Menu Management
-db.EventCategory.hasMany(db.EventType, { foreignKey: 'event_category_id', as: 'eventTypes' });
-db.EventType.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'category' });
-
-db.Religion.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'category' });
-db.Religion.belongsTo(db.EventType, { foreignKey: 'event_type_id', as: 'eventType' });
-db.EventType.hasMany(db.Religion, { foreignKey: 'event_type_id', as: 'religions' });
 
 db.NotificationTemplate.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'category' });
-db.NotificationTemplate.belongsTo(db.EventType, { foreignKey: 'event_type_id', as: 'eventType' });
 db.NotificationTemplate.belongsTo(db.NotificationCategory, { foreignKey: 'notification_category_id', as: 'notificationCategory' });
 
 db.EventNotificationTemplatePref.belongsTo(db.Event, { foreignKey: 'event_id', as: 'event' });
@@ -375,8 +366,6 @@ db.EventMenu.belongsTo(db.User, { foreignKey: 'created_by', as: 'creator' });
 db.EventMenu.belongsTo(db.User, { foreignKey: 'updated_by', as: 'updater' });
 
 db.EventTemplate.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'category' });
-db.EventTemplate.belongsTo(db.EventType, { foreignKey: 'event_type_id', as: 'eventType' });
-db.EventTemplate.belongsTo(db.Religion, { foreignKey: 'religion_id', as: 'religion' });
 // Step 1's Style, and step 2's Border / Frame Style. Both SET NULL on delete —
 // removing a category or a frame must never destroy somebody's template.
 db.EventTemplate.belongsTo(db.TemplateCategory, { foreignKey: 'template_category_id', as: 'templateCategory' });
@@ -471,8 +460,6 @@ db.WebsiteClient.hasMany(db.Event, { foreignKey: 'website_client_id', as: 'event
 db.Event.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
 db.Event.belongsTo(db.SubscriptionPlan, { foreignKey: 'subscription_plan_id', as: 'plan' });
 db.Event.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'category' });
-db.Event.belongsTo(db.EventType, { foreignKey: 'event_type_id', as: 'eventType' });
-db.Event.belongsTo(db.Religion, { foreignKey: 'religion_id', as: 'religion' });
 
 // Guests and messages. Both CASCADE from the event at the DB level: a guest of
 // a deleted event is not a guest of anything, and a message about one has
