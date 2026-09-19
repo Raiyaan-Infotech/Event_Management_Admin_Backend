@@ -1441,12 +1441,6 @@ CREATE TABLE IF NOT EXISTS `event_menus` (
   `description` text COLLATE utf8mb4_unicode_ci COMMENT 'what this menu is for — shown on the view page',
   `menu_group` enum('core','additional','custom') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'core',
   `event_category_id` int unsigned DEFAULT NULL,
-  `event_type_id` int unsigned DEFAULT NULL,
-  `religion_id` int unsigned DEFAULT NULL,
-  `is_website` tinyint NOT NULL DEFAULT '1' COMMENT 'menu type: website',
-  `is_mobile` tinyint NOT NULL DEFAULT '1' COMMENT 'menu type: mobile app',
-  `display_website` tinyint NOT NULL DEFAULT '1' COMMENT 'show/hide on website',
-  `display_mobile` tinyint NOT NULL DEFAULT '1' COMMENT 'show/hide on mobile app',
   `active_website` tinyint NOT NULL DEFAULT '1' COMMENT 'active/inactive on website',
   `active_mobile` tinyint NOT NULL DEFAULT '1' COMMENT 'active/inactive on mobile app',
   `icon` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT '',
@@ -1462,17 +1456,10 @@ CREATE TABLE IF NOT EXISTS `event_menus` (
   PRIMARY KEY (`id`),
   KEY `idx_event_menus_listing` (`company_id`,`deleted_at`,`sort_order`),
   KEY `idx_event_menus_category` (`company_id`,`event_category_id`,`deleted_at`),
-  KEY `idx_event_menus_type` (`company_id`,`event_type_id`,`deleted_at`),
-  KEY `idx_event_menus_religion` (`company_id`,`religion_id`,`deleted_at`),
-  KEY `idx_event_menus_platform` (`company_id`,`is_website`,`is_mobile`,`deleted_at`),
   KEY `idx_event_menus_slug` (`company_id`,`slug`),
   KEY `fk_event_menus_category` (`event_category_id`),
-  KEY `fk_event_menus_type` (`event_type_id`),
-  KEY `fk_event_menus_religion` (`religion_id`),
   KEY `idx_event_menus_group` (`company_id`,`menu_group`,`deleted_at`),
-  CONSTRAINT `fk_event_menus_category` FOREIGN KEY (`event_category_id`) REFERENCES `event_categories` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
-  CONSTRAINT `fk_event_menus_religion` FOREIGN KEY (`religion_id`) REFERENCES `religions` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
-  CONSTRAINT `fk_event_menus_type` FOREIGN KEY (`event_type_id`) REFERENCES `event_types` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
+  CONSTRAINT `fk_event_menus_category` FOREIGN KEY (`event_category_id`) REFERENCES `event_categories` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB AUTO_INCREMENT=18 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table structure for `event_message_campaigns`
@@ -1547,8 +1534,6 @@ CREATE TABLE IF NOT EXISTS `event_templates` (
   `name` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
   `code` varchar(120) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Template code / slug, e.g. FWE-001. Unique per company, enforced in the service so a soft-deleted row cannot hold one hostage',
   `event_category_id` int unsigned DEFAULT NULL,
-  `event_type_id` int unsigned DEFAULT NULL,
-  `religion_id` int unsigned DEFAULT NULL COMMENT 'Optional - not every event is religious',
   `template_category_id` int unsigned DEFAULT NULL COMMENT 'Step 1 Style — replaces the hardcoded enum',
   `style` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'classic' COMMENT 'Template style/theme: classic|floral|royal|minimal|modern|traditional',
   `tags` json DEFAULT NULL COMMENT 'Free-text tags, for search only',
@@ -1601,8 +1586,6 @@ CREATE TABLE IF NOT EXISTS `event_templates` (
   KEY `idx_event_templates_company` (`company_id`,`deleted_at`),
   KEY `idx_event_templates_code` (`company_id`,`code`,`deleted_at`),
   KEY `idx_event_templates_category` (`event_category_id`,`deleted_at`),
-  KEY `idx_event_templates_type` (`event_type_id`,`deleted_at`),
-  KEY `idx_event_templates_religion` (`religion_id`,`deleted_at`),
   KEY `idx_event_templates_status` (`is_active`,`deleted_at`),
   KEY `idx_event_templates_featured` (`is_featured`,`deleted_at`),
   KEY `idx_event_templates_listing` (`company_id`,`sort_order`,`deleted_at`),
@@ -1610,33 +1593,9 @@ CREATE TABLE IF NOT EXISTS `event_templates` (
   KEY `idx_event_templates_frame` (`frame_style_id`),
   CONSTRAINT `fk_event_templates_category` FOREIGN KEY (`event_category_id`) REFERENCES `event_categories` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_event_templates_frame` FOREIGN KEY (`frame_style_id`) REFERENCES `frame_styles` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
-  CONSTRAINT `fk_event_templates_religion` FOREIGN KEY (`religion_id`) REFERENCES `religions` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
-  CONSTRAINT `fk_event_templates_tpl_category` FOREIGN KEY (`template_category_id`) REFERENCES `template_categories` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
-  CONSTRAINT `fk_event_templates_type` FOREIGN KEY (`event_type_id`) REFERENCES `event_types` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
+  CONSTRAINT `fk_event_templates_tpl_category` FOREIGN KEY (`template_category_id`) REFERENCES `template_categories` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB AUTO_INCREMENT=148 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Table structure for `event_types`
-CREATE TABLE IF NOT EXISTS `event_types` (
-  `id` int unsigned NOT NULL AUTO_INCREMENT,
-  `event_category_id` int unsigned NOT NULL,
-  `name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `description` text COLLATE utf8mb4_unicode_ci,
-  `icon` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT '',
-  `color` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `sort_order` int NOT NULL DEFAULT '0',
-  `is_active` tinyint NOT NULL DEFAULT '1' COMMENT '0=inactive, 1=active, 2=pending approval',
-  `company_id` int unsigned DEFAULT NULL,
-  `created_by` int unsigned DEFAULT NULL,
-  `updated_by` int unsigned DEFAULT NULL,
-  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `deleted_at` datetime DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  KEY `idx_event_types_listing` (`company_id`,`deleted_at`,`is_active`,`sort_order`),
-  KEY `idx_event_types_category` (`company_id`,`event_category_id`,`deleted_at`),
-  KEY `fk_event_types_category` (`event_category_id`),
-  CONSTRAINT `fk_event_types_category` FOREIGN KEY (`event_category_id`) REFERENCES `event_categories` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=13 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table structure for `notification_categories`
 CREATE TABLE IF NOT EXISTS `notification_categories` (
@@ -1669,7 +1628,6 @@ CREATE TABLE IF NOT EXISTS `notification_templates` (
   `name` varchar(150) COLLATE utf8mb4_unicode_ci NOT NULL,
   `notification_category_id` int unsigned NOT NULL,
   `event_category_id` int unsigned DEFAULT NULL,
-  `event_type_id` int unsigned DEFAULT NULL,
   `title` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
   `content` text COLLATE utf8mb4_unicode_ci NOT NULL,
   `variables_used` json DEFAULT NULL,
@@ -1686,10 +1644,8 @@ CREATE TABLE IF NOT EXISTS `notification_templates` (
   PRIMARY KEY (`id`),
   KEY `idx_notification_templates_category` (`notification_category_id`,`is_active`),
   KEY `idx_notification_templates_event_category` (`event_category_id`),
-  KEY `idx_notification_templates_event_type` (`event_type_id`),
   CONSTRAINT `fk_notification_templates_notification_category` FOREIGN KEY (`notification_category_id`) REFERENCES `notification_categories` (`id`),
-  CONSTRAINT `fk_notification_templates_event_category` FOREIGN KEY (`event_category_id`) REFERENCES `event_categories` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `fk_notification_templates_event_type` FOREIGN KEY (`event_type_id`) REFERENCES `event_types` (`id`) ON DELETE SET NULL
+  CONSTRAINT `fk_notification_templates_event_category` FOREIGN KEY (`event_category_id`) REFERENCES `event_categories` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table structure for `events`
@@ -1700,8 +1656,6 @@ CREATE TABLE IF NOT EXISTS `events` (
   `company_id` int DEFAULT NULL COMMENT 'Same scoping every other admin module uses',
   `subscription_plan_id` int unsigned DEFAULT NULL,
   `event_category_id` int unsigned DEFAULT NULL,
-  `event_type_id` int unsigned DEFAULT NULL,
-  `religion_id` int unsigned DEFAULT NULL,
   `name` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
   `tagline` varchar(150) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `description` text COLLATE utf8mb4_unicode_ci,
@@ -1732,13 +1686,9 @@ CREATE TABLE IF NOT EXISTS `events` (
   KEY `idx_events_start` (`start_date`),
   KEY `fk_events_plan` (`subscription_plan_id`),
   KEY `fk_events_category` (`event_category_id`),
-  KEY `fk_events_type` (`event_type_id`),
-  KEY `fk_events_religion` (`religion_id`),
   CONSTRAINT `fk_events_category` FOREIGN KEY (`event_category_id`) REFERENCES `event_categories` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_events_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
-  CONSTRAINT `fk_events_plan` FOREIGN KEY (`subscription_plan_id`) REFERENCES `subscription_plans` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
-  CONSTRAINT `fk_events_religion` FOREIGN KEY (`religion_id`) REFERENCES `religions` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
-  CONSTRAINT `fk_events_type` FOREIGN KEY (`event_type_id`) REFERENCES `event_types` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
+  CONSTRAINT `fk_events_plan` FOREIGN KEY (`subscription_plan_id`) REFERENCES `subscription_plans` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB AUTO_INCREMENT=22 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table structure for `event_notification_template_prefs`
@@ -2144,31 +2094,6 @@ CREATE TABLE IF NOT EXISTS `refresh_tokens` (
   CONSTRAINT `fk_refresh_tokens_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB AUTO_INCREMENT=64 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Table structure for `religions`
-CREATE TABLE IF NOT EXISTS `religions` (
-  `id` int unsigned NOT NULL AUTO_INCREMENT,
-  `event_type_id` int unsigned NOT NULL,
-  `event_category_id` int unsigned NOT NULL,
-  `name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `description` text COLLATE utf8mb4_unicode_ci,
-  `icon` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT '',
-  `color` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `sort_order` int NOT NULL DEFAULT '0',
-  `is_active` tinyint NOT NULL DEFAULT '1' COMMENT '0=inactive, 1=active, 2=pending approval',
-  `company_id` int unsigned DEFAULT NULL,
-  `created_by` int unsigned DEFAULT NULL,
-  `updated_by` int unsigned DEFAULT NULL,
-  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `deleted_at` datetime DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  KEY `idx_religions_listing` (`company_id`,`deleted_at`,`is_active`,`sort_order`),
-  KEY `idx_religions_scope` (`company_id`,`event_category_id`,`event_type_id`,`deleted_at`),
-  KEY `fk_religions_category` (`event_category_id`),
-  KEY `fk_religions_type` (`event_type_id`),
-  CONSTRAINT `fk_religions_category` FOREIGN KEY (`event_category_id`) REFERENCES `event_categories` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
-  CONSTRAINT `fk_religions_type` FOREIGN KEY (`event_type_id`) REFERENCES `event_types` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=14 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table structure for `role_permissions`
 CREATE TABLE IF NOT EXISTS `role_permissions` (
@@ -2286,8 +2211,6 @@ CREATE TABLE IF NOT EXISTS `subscription_plans` (
   `for_website` tinyint NOT NULL DEFAULT '1',
   `for_mobile` tinyint NOT NULL DEFAULT '1',
   `event_category_id` int unsigned DEFAULT NULL,
-  `event_type_id` int unsigned DEFAULT NULL,
-  `religion_id` int unsigned DEFAULT NULL,
   `currency_code` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'INR',
   `price` decimal(10,2) NOT NULL DEFAULT '0.00',
   `trial_days` int NOT NULL DEFAULT '0' COMMENT '0 = no trial',
@@ -2311,18 +2234,14 @@ CREATE TABLE IF NOT EXISTS `subscription_plans` (
   PRIMARY KEY (`id`),
   KEY `idx_subscription_plans_listing` (`company_id`,`deleted_at`,`sort_order`),
   KEY `idx_subscription_plans_code` (`company_id`,`plan_code`),
-  KEY `idx_subscription_plans_scope` (`company_id`,`event_category_id`,`event_type_id`,`religion_id`),
+  KEY `idx_subscription_plans_scope` (`company_id`,`event_category_id`),
   KEY `idx_subscription_plans_cycle` (`company_id`,`billing_cycle`,`is_active`),
   KEY `fk_sub_plans_category` (`event_category_id`),
-  KEY `fk_sub_plans_type` (`event_type_id`),
-  KEY `fk_sub_plans_religion` (`religion_id`),
   KEY `fk_sub_plans_plan_type` (`plan_type_id`),
   KEY `idx_subscription_plans_badge` (`company_id`,`plan_badge_id`),
   KEY `fk_subscription_plans_badge` (`plan_badge_id`),
   CONSTRAINT `fk_sub_plans_category` FOREIGN KEY (`event_category_id`) REFERENCES `event_categories` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_sub_plans_plan_type` FOREIGN KEY (`plan_type_id`) REFERENCES `plan_types` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
-  CONSTRAINT `fk_sub_plans_religion` FOREIGN KEY (`religion_id`) REFERENCES `religions` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
-  CONSTRAINT `fk_sub_plans_type` FOREIGN KEY (`event_type_id`) REFERENCES `event_types` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_subscription_plans_badge` FOREIGN KEY (`plan_badge_id`) REFERENCES `plan_badges` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB AUTO_INCREMENT=18 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -3420,8 +3339,6 @@ INSERT IGNORE INTO `modules` (`id`, `name`, `slug`, `description`, `company_id`,
 (53, 'Footer', 'footer', 'Website footer management', NULL, NULL, 1, NULL, NULL, '2026-04-14 04:00:18', '2026-04-14 04:00:18', NULL),
 (55, 'Color Palettes', 'color_palettes', 'Manage website builder color palettes', 1, NULL, 1, NULL, NULL, '2026-06-22 09:42:10', '2026-06-22 09:42:10', NULL),
 (56, 'Event Categories', 'event_categories', 'Manage event categories', 1, NULL, 1, NULL, NULL, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
-(57, 'Event Types', 'event_types', 'Manage event types', 1, NULL, 1, NULL, NULL, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
-(58, 'Religions', 'religions', 'Manage religions', 1, NULL, 1, NULL, NULL, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
 (59, 'Event Menus', 'event_menus', 'Manage event menus', 1, NULL, 1, NULL, NULL, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
 (64, 'Subscription Plans', 'subscription_plans', 'Manage subscription plans', 1, NULL, 1, NULL, NULL, '2026-08-14 12:24:24', '2026-08-14 12:24:24', NULL),
 (68, 'Plan Badges', 'plan_badges', 'Manage subscription plan badges', 1, NULL, 1, NULL, NULL, '2026-08-17 03:47:22', '2026-08-17 03:47:22', NULL),
@@ -3503,14 +3420,6 @@ INSERT IGNORE INTO `permissions` (`id`, `name`, `slug`, `company_id`, `vendor_id
 (201, 'Create Event Categories', 'event_categories.create', 1, NULL, 56, 'event_categories', 'Create new event categories', 1, NULL, NULL, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
 (202, 'Edit Event Categories', 'event_categories.edit', 1, NULL, 56, 'event_categories', 'Edit existing event categories', 1, NULL, NULL, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
 (203, 'Delete Event Categories', 'event_categories.delete', 1, NULL, 56, 'event_categories', 'Delete event categories', 1, NULL, NULL, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
-(204, 'View Event Types', 'event_types.view', 1, NULL, 57, 'event_types', 'View event types', 1, NULL, NULL, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
-(205, 'Create Event Types', 'event_types.create', 1, NULL, 57, 'event_types', 'Create new event types', 1, NULL, NULL, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
-(206, 'Edit Event Types', 'event_types.edit', 1, NULL, 57, 'event_types', 'Edit existing event types', 1, NULL, NULL, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
-(207, 'Delete Event Types', 'event_types.delete', 1, NULL, 57, 'event_types', 'Delete event types', 1, NULL, NULL, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
-(208, 'View Religions', 'religions.view', 1, NULL, 58, 'religions', 'View religions', 1, NULL, NULL, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
-(209, 'Create Religions', 'religions.create', 1, NULL, 58, 'religions', 'Create new religions', 1, NULL, NULL, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
-(210, 'Edit Religions', 'religions.edit', 1, NULL, 58, 'religions', 'Edit existing religions', 1, NULL, NULL, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
-(211, 'Delete Religions', 'religions.delete', 1, NULL, 58, 'religions', 'Delete religions', 1, NULL, NULL, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
 (212, 'View Event Menus', 'event_menus.view', 1, NULL, 59, 'event_menus', 'View event menus', 1, NULL, NULL, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
 (213, 'Create Event Menus', 'event_menus.create', 1, NULL, 59, 'event_menus', 'Create new event menus', 1, NULL, NULL, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
 (214, 'Edit Event Menus', 'event_menus.edit', 1, NULL, 59, 'event_menus', 'Edit existing event menus', 1, NULL, NULL, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
@@ -3701,14 +3610,6 @@ INSERT IGNORE INTO `role_permissions` (`id`, `role_id`, `permission_id`, `compan
 (1355, 2, 213, 1, NULL, 0, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
 (1356, 2, 214, 1, NULL, 0, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
 (1357, 2, 215, 1, NULL, 0, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
-(1358, 2, 204, 1, NULL, 0, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
-(1359, 2, 205, 1, NULL, 0, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
-(1360, 2, 206, 1, NULL, 0, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
-(1361, 2, 207, 1, NULL, 0, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
-(1362, 2, 208, 1, NULL, 0, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
-(1363, 2, 209, 1, NULL, 0, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
-(1364, 2, 210, 1, NULL, 0, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
-(1365, 2, 211, 1, NULL, 0, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
 (1381, 3, 200, 1, NULL, 0, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
 (1382, 3, 201, 1, NULL, 1, '2026-08-13 11:20:29', '2026-08-25 06:42:41', NULL),
 (1383, 3, 202, 1, NULL, 1, '2026-08-13 11:20:29', '2026-08-25 06:42:41', NULL),
@@ -3717,14 +3618,6 @@ INSERT IGNORE INTO `role_permissions` (`id`, `role_id`, `permission_id`, `compan
 (1386, 3, 213, 1, NULL, 1, '2026-08-13 11:20:29', '2026-08-25 06:42:41', NULL),
 (1387, 3, 214, 1, NULL, 1, '2026-08-13 11:20:29', '2026-08-25 06:42:41', NULL),
 (1388, 3, 215, 1, NULL, 1, '2026-08-13 11:20:29', '2026-08-25 06:42:41', NULL),
-(1389, 3, 204, 1, NULL, 0, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
-(1390, 3, 205, 1, NULL, 1, '2026-08-13 11:20:29', '2026-08-25 06:42:41', NULL),
-(1391, 3, 206, 1, NULL, 1, '2026-08-13 11:20:29', '2026-08-25 06:42:41', NULL),
-(1392, 3, 207, 1, NULL, 1, '2026-08-13 11:20:29', '2026-08-25 06:42:41', NULL),
-(1393, 3, 208, 1, NULL, 0, '2026-08-13 11:20:29', '2026-08-13 11:20:29', NULL),
-(1394, 3, 209, 1, NULL, 1, '2026-08-13 11:20:29', '2026-08-25 06:42:41', NULL),
-(1395, 3, 210, 1, NULL, 1, '2026-08-13 11:20:29', '2026-08-25 06:42:41', NULL),
-(1396, 3, 211, 1, NULL, 1, '2026-08-13 11:20:29', '2026-08-25 06:42:41', NULL),
 (1414, 2, 232, 1, NULL, 0, '2026-08-14 12:24:24', '2026-08-14 12:24:24', NULL),
 (1415, 2, 233, 1, NULL, 0, '2026-08-14 12:24:24', '2026-08-14 12:24:24', NULL),
 (1416, 2, 234, 1, NULL, 0, '2026-08-14 12:24:24', '2026-08-14 12:24:24', NULL),
@@ -9300,36 +9193,6 @@ INSERT IGNORE INTO `event_categories` (`id`, `name`, `description`, `icon`, `col
 (10, 'Smoke Wedding 1786701921204', 'Updated description', 'mdi:ring', '#7C5AED', 1, 0, 1, 2, 2, '2026-08-14 04:35:21', '2026-08-14 04:35:22', '2026-08-14 04:35:22'),
 (11, 'Smoke Corporate 1786701922062', NULL, '', NULL, 0, 0, 1, 2, NULL, '2026-08-14 04:35:22', '2026-08-14 04:35:22', '2026-08-14 04:35:22');
 
--- Seed data for `event_types` (12 rows)
-INSERT IGNORE INTO `event_types` (`id`, `event_category_id`, `name`, `description`, `icon`, `color`, `sort_order`, `is_active`, `company_id`, `created_by`, `updated_by`, `created_at`, `updated_at`, `deleted_at`) VALUES
-(1, 1, 'Hindu Wedding', 'Traditional Hindu wedding', 'mdi:om', '#7C5AED', 1, 1, 1, NULL, NULL, '2026-08-13 12:10:44', '2026-08-13 12:10:44', NULL),
-(2, 1, 'Christian Wedding', 'Christian marriage ceremony', 'mdi:cross', '#3B82F6', 2, 1, 1, NULL, NULL, '2026-08-13 12:10:44', '2026-08-13 12:10:44', NULL),
-(3, 2, 'Corporate Meeting', 'Business meetings and conferences', 'mdi:account-group', '#3B82F6', 3, 1, 1, NULL, NULL, '2026-08-13 12:10:44', '2026-08-13 12:10:44', NULL),
-(4, 2, 'Team Building', 'Team building activities', 'mdi:account-multiple', '#06B6D4', 4, 1, 1, NULL, NULL, '2026-08-13 12:10:44', '2026-08-13 12:10:44', NULL),
-(5, 2, 'Conference', 'Large scale conferences', 'mdi:presentation', '#8B5CF6', 5, 1, 1, NULL, NULL, '2026-08-13 12:10:44', '2026-08-13 12:10:44', NULL),
-(6, 2, 'Seminar', 'Seminars and workshops', 'mdi:school', '#0EA5E9', 6, 1, 1, NULL, NULL, '2026-08-13 12:10:44', '2026-08-13 12:10:44', NULL),
-(7, 3, 'Birthday Party', 'Birthday celebrations', 'mdi:party-popper', '#EC4899', 7, 1, 1, NULL, NULL, '2026-08-13 12:10:44', '2026-08-13 12:10:44', NULL),
-(8, 4, 'Anniversary', 'Anniversary celebrations', 'mdi:heart-multiple', '#06B6D4', 8, 1, 1, NULL, NULL, '2026-08-13 12:10:44', '2026-08-13 12:10:44', NULL),
-(9, 6, 'Hindu Wedding 1786679757270', 'Traditional Hindu wedding', 'mdi:om', '#6366F1', 1, 0, 1, 2, NULL, '2026-08-13 22:25:57', '2026-08-13 22:25:58', '2026-08-13 22:25:58'),
-(10, 8, 'Hindu Wedding 1786683104568', 'Traditional Hindu wedding', 'mdi:om', '#6366F1', 1, 0, 1, 2, NULL, '2026-08-13 23:21:44', '2026-08-13 23:21:45', '2026-08-13 23:21:45'),
-(11, 10, 'Hindu Wedding 1786701921440', 'Traditional Hindu wedding', 'mdi:om', '#6366F1', 1, 0, 1, 2, NULL, '2026-08-14 04:35:21', '2026-08-14 04:35:22', '2026-08-14 04:35:22'),
-(12, 11, 'Other Type 1786701922100', NULL, '', NULL, 0, 0, 1, 2, NULL, '2026-08-14 04:35:22', '2026-08-14 04:35:22', '2026-08-14 04:35:22');
-
--- Seed data for `religions` (13 rows)
-INSERT IGNORE INTO `religions` (`id`, `event_type_id`, `event_category_id`, `name`, `description`, `icon`, `color`, `sort_order`, `is_active`, `company_id`, `created_by`, `updated_by`, `created_at`, `updated_at`, `deleted_at`) VALUES
-(1, 1, 1, 'Hindu', 'Hindu religion', 'mdi:om', '#7C5AED', 1, 1, 1, NULL, NULL, '2026-08-13 12:10:44', '2026-08-14 09:32:16', NULL),
-(2, 1, 1, 'Christian', 'Christian religion', 'mdi:cross', '#3B82F6', 2, 1, 1, NULL, NULL, '2026-08-13 12:10:44', '2026-08-14 09:32:16', NULL),
-(3, 1, 1, 'Muslim', 'Islamic religion', 'mdi:star-crescent', '#10B981', 3, 1, 1, NULL, NULL, '2026-08-13 12:10:44', '2026-08-14 09:32:16', NULL),
-(4, 1, 1, 'Sikh', 'Sikh religion', 'mdi:khanda', '#F59E0B', 4, 1, 1, NULL, NULL, '2026-08-13 12:10:44', '2026-08-14 09:32:16', NULL),
-(5, 1, 1, 'Jain', 'Jain religion', 'mdi:hand-peace', '#EC4899', 5, 1, 1, NULL, NULL, '2026-08-13 12:10:44', '2026-08-14 09:32:16', NULL),
-(6, 1, 1, 'Hindu 1786679757359', 'Hindu religion', 'mdi:om', '#8B5CF6', 1, 0, 1, 2, NULL, '2026-08-13 22:25:57', '2026-08-14 09:32:16', '2026-08-13 22:25:58'),
-(7, 1, 1, 'Hindu 1786683104626', 'Hindu religion', 'mdi:om', '#8B5CF6', 1, 0, 1, 2, NULL, '2026-08-13 23:21:44', '2026-08-14 09:32:16', '2026-08-13 23:21:45'),
-(8, 11, 10, 'Hindu 1786701921530', 'Hindu religion', 'mdi:om', '#8B5CF6', 1, 0, 1, 2, NULL, '2026-08-14 04:35:21', '2026-08-14 04:35:22', '2026-08-14 04:35:22'),
-(9, 2, 1, 'Christian', 'Christian religion', 'mdi:cross', '#3B82F6', 2, 1, 1, NULL, NULL, '2026-08-14 10:10:13', '2026-08-14 10:10:13', NULL),
-(10, 5, 2, 'Secular', 'No religious observance', 'mdi:handshake', '#64748B', 6, 1, 1, NULL, NULL, '2026-08-14 10:10:13', '2026-08-14 10:10:13', NULL),
-(11, 6, 2, 'Secular', 'No religious observance', 'mdi:handshake', '#64748B', 7, 1, 1, NULL, NULL, '2026-08-14 10:10:13', '2026-08-14 10:10:13', NULL),
-(12, 7, 5, 'Secular', 'No religious observance', 'mdi:handshake', '#64748B', 8, 1, 1, NULL, NULL, '2026-08-14 10:10:13', '2026-08-14 10:10:13', NULL),
-(13, 8, 5, 'Secular', 'No religious observance', 'mdi:handshake', '#64748B', 9, 1, 1, NULL, NULL, '2026-08-14 10:10:13', '2026-08-14 10:10:13', NULL);
 
 -- Seed data for `frame_styles` (10 rows)
 INSERT IGNORE INTO `frame_styles` (`id`, `name`, `template_category_id`, `file_url`, `file_name`, `supported_layouts`, `status`, `is_active`, `sort_order`, `company_id`, `created_by`, `updated_by`, `created_at`, `updated_at`, `deleted_at`) VALUES
@@ -9856,8 +9719,6 @@ INSERT IGNORE INTO `translation_keys` (`id`, `key`, `company_id`, `default_value
 (498, 'nav.menu_management', 1, 'Menu Management', NULL, 'nav', NULL, NULL, '2026-08-13 12:08:33', '2026-08-13 12:08:33', NULL),
 (499, 'nav.event_menus', 1, 'Menu List', NULL, 'nav', NULL, NULL, '2026-08-13 12:08:33', '2026-08-13 12:08:33', NULL),
 (500, 'nav.event_categories', 1, 'Event Category', NULL, 'nav', NULL, NULL, '2026-08-13 12:08:33', '2026-08-13 12:08:33', NULL),
-(501, 'nav.event_types', 1, 'Event Type', NULL, 'nav', NULL, NULL, '2026-08-13 12:08:33', '2026-08-13 12:08:33', NULL),
-(502, 'nav.religions', 1, 'Religion', NULL, 'nav', NULL, NULL, '2026-08-13 12:08:33', '2026-08-13 12:08:33', NULL),
 (503, 'nav.plan_types', 1, 'Plan Types', NULL, 'nav', NULL, NULL, '2026-08-14 12:13:30', '2026-08-14 12:13:30', NULL),
 (504, 'nav.subscription_management', 1, 'Subscription Management', NULL, 'nav', NULL, NULL, '2026-08-14 12:24:24', '2026-08-14 12:24:24', NULL),
 (505, 'nav.subscription_plans', 1, 'Plans', NULL, 'nav', NULL, NULL, '2026-08-14 12:24:24', '2026-08-14 12:24:24', NULL),
@@ -10361,9 +10222,7 @@ INSERT IGNORE INTO `translations` (`id`, `company_id`, `translation_key_id`, `la
 (685, 1, 496, 1, 'Manage website builder color palettes', 'reviewed', 1, NULL, NULL, '2026-06-22 09:42:10', '2026-06-22 09:42:10', NULL),
 (686, 1, 500, 1, 'Event Category', 'reviewed', 1, NULL, NULL, '2026-08-13 12:08:33', '2026-08-13 12:08:33', NULL),
 (687, 1, 499, 1, 'Menu List', 'reviewed', 1, NULL, NULL, '2026-08-13 12:08:33', '2026-08-13 12:08:33', NULL),
-(688, 1, 501, 1, 'Event Type', 'reviewed', 1, NULL, NULL, '2026-08-13 12:08:33', '2026-08-13 12:08:33', NULL),
 (689, 1, 498, 1, 'Menu Management', 'reviewed', 1, NULL, NULL, '2026-08-13 12:08:33', '2026-08-13 12:08:33', NULL),
-(690, 1, 502, 1, 'Religion', 'reviewed', 1, NULL, NULL, '2026-08-13 12:08:33', '2026-08-13 12:08:33', NULL),
 (691, 1, 503, 1, 'Plan Types', 'reviewed', 1, NULL, NULL, '2026-08-14 12:13:30', '2026-08-14 12:13:30', NULL),
 (692, 1, 504, 1, 'Subscription Management', 'reviewed', 1, NULL, NULL, '2026-08-14 12:24:24', '2026-08-14 12:24:24', NULL),
 (693, 1, 505, 1, 'Plans', 'reviewed', 1, NULL, NULL, '2026-08-14 12:24:24', '2026-08-14 12:24:24', NULL),
@@ -10661,7 +10520,6 @@ CREATE TABLE IF NOT EXISTS `client_notification_prefs` (
   KEY `client_notification_prefs_lookup` (`website_client_id`,`channel`,`enabled`),
   CONSTRAINT `fk_client_notification_prefs_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 
 
 -- ---------------------------------------------------------------------------

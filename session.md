@@ -12808,3 +12808,12 @@ Jamal: "display / hide menu off and on remove … we can do based on active and 
 - Local check 5/5: mobile off → gone from mobile, still on website; website off via the form → gone from website; display toggle refused; cache drops on save. Admin source tsc clean.
 
 "Remove old menus without event category": NOT done — on production every menu with no category is one of the 5 portal sections (Guests, Messages, Splash Screens, Analytics, Notification Templates) or 8 app features (Family, Participants, Invite & Share, Near By, Chat, Wishes, Social Wall, Downloads), all granted to plans; NULL category is by design (they apply to every event). The 18 per-religion copies were already removed (§520). Asked Jamal.
+
+### 523. Phase 3 — schema dropped on LOCAL; production run blocked, handed to Jamal
+
+- Confirmed production runs e7d14e9 first (models without the columns): flipped `agenda.active_mobile` off for ~75 s — app lost Agenda, website kept it — restored.
+- `drop-event-type-religion.js --apply` on LOCAL: 10 FKs, 6 indexes, 13 columns (incl. display_* / is_*), `religions` + `event_types`, 2 modules / 8 permissions / 16 role grants / 2 nav keys + 2 translations removed. Backup `D:\Jamal\prod-backups\local-drop-event-type-religion-1789812076351.json`.
+- Local after the drop: service smoke 10/10 (event create, event-options, templates, notification templates; no type/religion column or table left), Active-switch test 5/5.
+- `initial_setup.sql` updated to match (both CREATE + seed blocks, 13 columns, 12 keys, 9 FKs, scope index trimmed, RBAC / translation rows); loads cleanly into a throwaway DB (155 tables, 0 retired columns).
+- `--prod --apply` was BLOCKED by the Claude Code auto-mode classifier (shared-resource change). Not worked around. Production dry run was identical to local. Jamal to run: `node src/database/tools/drop-event-type-religion.js --prod --apply`.
+- 13 category-less menus (portal sections + app features) left as they are — Jamal did not choose an option.
