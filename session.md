@@ -12829,3 +12829,8 @@ Jamal: "delete all menu, create new one … Event Info, Agenda, Venue, Gallery, 
 - PRODUCTION dry run: 37 rows (19 live + 18 soft-deleted) → 19; grants 47 → 47, none dropped; 0 events.
 
 **Production applied by Jamal (2026-09-19)** — 37 rows → 19 (ids 1–19), grants 47 → 47, backup `D:\Jamal\prod-backups\prod-rebuild-event-menus-1789813359038.json`. Live check, 4 clients × website / app: event-options returns the new ids with the same tiers as before (Free 3 · Basic 5 · Standard / Premium 6) and the same portal sections (Free guests · Basic + messages · Standard + splash-screens, analytics · Premium all 5). App features (chat, wishes, …) reach the app through an event's menus — production has no events, so that path was not exercised; their grants were carried over 1:1.
+
+### 525. Analytics is no longer a plan menu — the portal always shows it
+
+Jamal: "Analytics remove that from menu, client portal show always". Portal `lib/navigation.ts`: Analytics entry has no `section`, so both the sidebar and `PlanSectionGate` show it to every client (the API was never plan-gated). New `src/database/tools/remove-event-menu.js --slug <slug>` (backup, dry-run default) hard-deletes a menu + its grants + menu_ids refs. LOCAL applied (menu #18, 9 grants). PRODUCTION dry run: #18, 2 grants (plans 10 Standard, 11 Premium) — Jamal to run `--slug analytics --prod --apply`. `rebuild-event-menus.js` list no longer includes analytics (18 menus if re-run).
+Notification Templates: explained to Jamal (per-event on/off of admin-authored automatic messages); still a plan menu pending his call.
