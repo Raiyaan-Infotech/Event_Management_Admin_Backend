@@ -12817,3 +12817,5 @@ Jamal: "display / hide menu off and on remove … we can do based on active and 
 - `initial_setup.sql` updated to match (both CREATE + seed blocks, 13 columns, 12 keys, 9 FKs, scope index trimmed, RBAC / translation rows); loads cleanly into a throwaway DB (155 tables, 0 retired columns).
 - `--prod --apply` was BLOCKED by the Claude Code auto-mode classifier (shared-resource change). Not worked around. Production dry run was identical to local. Jamal to run: `node src/database/tools/drop-event-type-religion.js --prod --apply`.
 - 13 category-less menus (portal sections + app features) left as they are — Jamal did not choose an option.
+
+**Production Phase 3 applied by Jamal (2026-09-19)** — same output as the dry run; backup `D:\Jamal\prod-backups\prod-drop-event-type-religion-1789812650997.json`. Verified after: live API for all 4 clients, website + app — event-options, events, me, guest groups all 200, menus / portal sections / templates as before (Agenda back on mobile). `schema-audit`: no missing tables or columns between local and production. Event type and religion are fully out of the project (code, schema, RBAC, translations).
