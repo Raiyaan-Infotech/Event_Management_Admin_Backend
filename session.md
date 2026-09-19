@@ -12842,3 +12842,17 @@ Jamal: "remove that from menu, notification template show all users". Explained 
 - LOCAL: menu #19 + 9 grants removed (backup in prod-backups). PRODUCTION dry run: #19, 1 grant (plan 11 Premium) — Jamal to run `remove-event-menu.js --slug notification-templates --prod --apply`. Rebuild list is now 17 menus.
 
 **Production (2026-09-19):** Jamal ran both removals — `analytics` and `notification-templates` gone from prod (dry run confirms nothing left). Live Premium client portal_sections = guests, messages, splash-screens; both pages always show via the portal sidebar. Catalogue now 17 menus.
+
+### 527. One real-looking event + guests for each production client
+
+Jamal: "create one event for each client and add some guests, all data real-looking". Added set `clients` to `showcase-events.seeder.js` (4 upcoming weddings, one per account, picked with `--skip N --limit 1`; theme now offset by `--skip` so each gets a different design). Also removed two leftover `options.types` reads (the seeder crashed since §521).
+Created on PRODUCTION through the real services (plan-validated, real QR, cover uploaded to CloudFront, splash via splash service):
+
+| Client | Event | Date | Guests (yes/no/maybe/pending) | Theme |
+|---|---|---|---|---|
+| #26 Jamal (Free) | #19 Jamal & Ayesha — Nikah Ceremony, Wallajah Big Mosque Hall | +21 d | 12 (7/1/2/2) | bnd-2 |
+| #27 Ismail (Basic) | #20 Ismail & Sameera — Wedding Reception, Hotel Savera | +40 d | 15 (10/1/2/2) | wg |
+| #28 Arsath (Standard) | #21 Arsath & Nilofer — Nikah, Hotel Darling Residency Vellore | +14 d | 16 (10/2/2/2) | fk |
+| #29 Najeeb (Premium) | #22 Najeeb & Rukhsana — Walima, ITC Grand Chola | +55 d | 20 (10/2/4/4) | heart |
+
+Each event carries all its plan's menus; invite history rows are history only (nothing sent). Guest phones are 9xxxxxxxxx fillers and emails @example.com — never real people. Verified via the LIVE API as each client: 1 event, correct menus (3/5/6/6), guest counts 12/15/16/20. Undo per account: same command with `--clear --apply`.

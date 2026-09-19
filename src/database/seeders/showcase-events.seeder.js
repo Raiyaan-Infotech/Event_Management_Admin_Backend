@@ -469,10 +469,149 @@ const QA = [
     },
 ];
 
+/**
+ * One upcoming wedding per production client (§527). Run once per account,
+ * picking its own item:
+ *   --set clients --email jamaludheen779@gmail.com --skip 0 --limit 1
+ *   --set clients --email ismail@eventinvit.in     --skip 1 --limit 1
+ *   --set clients --email arsath@eventinvit.in     --skip 2 --limit 1
+ *   --set clients --email najeeb@eventinvit.in     --skip 3 --limit 1
+ */
+const CLIENTS = [
+    {
+        event: {
+            name: 'Jamal & Ayesha — Nikah Ceremony',
+            host_one: 'Jamal Mohideen',
+            host_two: 'Ayesha Siddiqa',
+            tagline: 'Two hearts, one duaa',
+            description:
+                'With the blessings of Allah and our families, we invite you to the Nikah of '
+                + 'Jamal and Ayesha. Your presence and duas will make our day complete.',
+            start_date: dayOffset(21), end_date: dayOffset(21),
+            start_time: '11:00', end_time: '14:00',
+            venue_name: 'Wallajah Big Mosque Hall',
+            venue_address: 'Triplicane High Road, Triplicane, Chennai, Tamil Nadu 600005',
+            organizer: 'The Mohideen Family',
+            footer_note: 'Lunch will be served after the Nikah',
+            primary_color: '#0F766E',
+        },
+        splash: {
+            main_title: 'NIKAH',
+            sub_title: 'Jamal & Ayesha',
+            tagline: 'Two hearts, one duaa',
+            background_type: 'couple_photo',
+            background_url: IMG.couple,
+            background_config: { fit: 'cover', overlay: 45, dark_overlay: true },
+            loader_enabled: true,
+            loader_config: { style: 'dots', color: '#5EEAD4', size: 60 },
+            button_text: 'Enter Invitation', button_style: 'filled', button_color: '#0F766E',
+        },
+        cover: IMG.couple,
+        guests: 12,
+        invitedOn: dayOffset(-5),
+    },
+    {
+        event: {
+            name: 'Ismail & Sameera — Wedding Reception',
+            host_one: 'Ismail Basha',
+            host_two: 'Sameera Banu',
+            tagline: 'Join us for an evening of celebration',
+            description:
+                'We are delighted to invite you to the wedding reception of Ismail and Sameera. '
+                + 'Come share an evening of good food, family and joy with us.',
+            start_date: dayOffset(40), end_date: dayOffset(40),
+            start_time: '19:00', end_time: '22:30',
+            venue_name: 'Hotel Savera',
+            venue_address: '146, Dr. Radhakrishnan Salai, Mylapore, Chennai, Tamil Nadu 600004',
+            organizer: 'The Basha Family',
+            footer_note: 'Dinner from 8:00 PM',
+            primary_color: '#9D174D',
+        },
+        splash: {
+            main_title: 'RECEPTION',
+            sub_title: 'Ismail & Sameera',
+            tagline: 'Join us for an evening of celebration',
+            background_type: 'image',
+            background_url: IMG.banquet,
+            background_config: { overlay: 40 },
+            loader_enabled: true,
+            loader_config: { style: 'ring', color: '#F9A8D4', size: 55 },
+            button_text: 'View Invitation', button_style: 'outline', button_color: '#F9A8D4',
+        },
+        cover: IMG.banquet,
+        guests: 15,
+        invitedOn: dayOffset(-3),
+    },
+    {
+        event: {
+            name: 'Arsath & Nilofer — Nikah',
+            host_one: 'Arsath Ali',
+            host_two: 'Nilofer Nisha',
+            tagline: 'And We created you in pairs',
+            description:
+                'By the grace of Allah, the Nikah of Arsath and Nilofer will be held in Vellore. '
+                + 'We would be honoured to have you with us and to receive your duas.',
+            start_date: dayOffset(14), end_date: dayOffset(14),
+            start_time: '10:30', end_time: '13:30',
+            venue_name: 'Hotel Darling Residency',
+            venue_address: '11/8, Officers Line, Vellore, Tamil Nadu 632001',
+            organizer: 'The Ali Family',
+            footer_note: 'Walima lunch to follow',
+            primary_color: '#1D4ED8',
+        },
+        splash: {
+            main_title: 'NIKAH',
+            sub_title: 'Arsath & Nilofer',
+            tagline: 'And We created you in pairs',
+            background_type: 'gradient',
+            background_config: { gradient_type: 'linear', color_1: '#1E3A8A', color_2: '#0EA5E9' },
+            loader_enabled: true,
+            loader_config: { style: 'dots', color: '#FFFFFF', size: 60 },
+            button_text: 'Open Invitation', button_style: 'filled', button_color: '#0EA5E9',
+        },
+        cover: IMG.chairs,
+        guests: 16,
+        invitedOn: dayOffset(-10),
+    },
+    {
+        event: {
+            name: 'Najeeb & Rukhsana — Walima',
+            host_one: 'Najeeb Rahman',
+            host_two: 'Rukhsana Parveen',
+            tagline: 'A feast of gratitude',
+            description:
+                'Alhamdulillah! Please join us for the Walima of Najeeb and Rukhsana — a dinner '
+                + 'to thank our families and friends as we begin our new life together.',
+            start_date: dayOffset(55), end_date: dayOffset(55),
+            start_time: '19:30', end_time: '23:00',
+            venue_name: 'ITC Grand Chola',
+            venue_address: 'No. 63, Mount Road, Guindy, Chennai, Tamil Nadu 600032',
+            organizer: 'The Rahman Family',
+            footer_note: 'Dress code: festive traditional',
+            primary_color: '#B45309',
+        },
+        splash: {
+            main_title: 'WALIMA',
+            sub_title: 'Najeeb & Rukhsana',
+            tagline: 'A feast of gratitude',
+            background_type: 'couple_photo',
+            background_url: IMG.rings,
+            background_config: { fit: 'cover', overlay: 40, dark_overlay: true },
+            loader_enabled: true,
+            loader_config: { style: 'ring', color: '#FBBF24', size: 55 },
+            button_text: 'Enter Invitation', button_style: 'filled', button_color: '#B45309',
+        },
+        cover: IMG.rings,
+        guests: 20,
+        invitedOn: dayOffset(-2),
+    },
+];
+
 const SETS = {
     showcase: { items: SHOWCASE, responses: false, splashExisting: true },
     ismail: { items: ISMAIL, responses: true, splashExisting: false },
     qa: { items: QA, responses: true, splashExisting: false },
+    clients: { items: CLIENTS, responses: true, splashExisting: false },
 };
 
 /** A splash for an event the account already has, if it has none. */
@@ -745,14 +884,13 @@ async function clear(client, items) {
 
         if (process.argv.includes('--list')) {
             console.log(`\nAll categories this plan offers: ${options.categories.map((c) => `${c.id}:${c.name}`).join(', ')}`);
-            console.log(`All types:      ${options.types.map((t) => `${t.id}:${t.name}(cat ${t.event_category_id || 'any'})`).join(', ')}`);
             console.log(`All menus:      ${options.menus.map((m) => `${m.id}:${m.slug}`).join(', ')}`);
             return;
         }
 
         const templates = options.templates || [];
         console.log(`Plan:    ${options.plan.name}`);
-        console.log(`Scope:   ${options.categories[0].name} / ${(options.types[0] || {}).name || '—'}`);
+        console.log(`Scope:   ${options.categories[0].name}`);
         console.log(`Menus:   ${options.menus.map((m) => m.slug).join(', ') || '(none)'}`);
         console.log(`Themes:  ${templates.map((t) => t.code).join(', ') || '(none — built-in fallback)'}\n`);
 
@@ -769,7 +907,7 @@ async function clear(client, items) {
         if (!APPLY && PROD) {
             set.items.forEach((s, i) => console.log(
                 `  WOULD CREATE  ${s.event.name}  (${s.event.start_date}, ${s.event.venue_name}) `
-                + `theme=${templates.length ? templates[i % templates.length].code : '—'}  `
+                + `theme=${templates.length ? templates[(i + SKIP) % templates.length].code : '—'}  `
                 + `+ ${s.guests} guests + ${s.splash.background_type} splash`,
             ));
             if (existingNoSplash[0]) console.log(`  WOULD ADD     splash to existing event #${existingNoSplash[0].id} ${existingNoSplash[0].name}`);
@@ -778,7 +916,7 @@ async function clear(client, items) {
         }
 
         for (const [i, item] of set.items.entries()) {
-            const theme = templates.length ? templates[i % templates.length].code : null;
+            const theme = templates.length ? templates[(i + SKIP) % templates.length].code : null;
             const cover = await uploadCover(item, client);
             const event = await eventService.createEvent(client.id, eventBody(item, options, client, theme, cover));
 
