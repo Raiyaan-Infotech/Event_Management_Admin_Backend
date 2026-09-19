@@ -12834,3 +12834,9 @@ Jamal: "delete all menu, create new one … Event Info, Agenda, Venue, Gallery, 
 
 Jamal: "Analytics remove that from menu, client portal show always". Portal `lib/navigation.ts`: Analytics entry has no `section`, so both the sidebar and `PlanSectionGate` show it to every client (the API was never plan-gated). New `src/database/tools/remove-event-menu.js --slug <slug>` (backup, dry-run default) hard-deletes a menu + its grants + menu_ids refs. LOCAL applied (menu #18, 9 grants). PRODUCTION dry run: #18, 2 grants (plans 10 Standard, 11 Premium) — Jamal to run `--slug analytics --prod --apply`. `rebuild-event-menus.js` list no longer includes analytics (18 menus if re-run).
 Notification Templates: explained to Jamal (per-event on/off of admin-authored automatic messages); still a plan menu pending his call.
+
+### 526. Notification Templates is no longer a plan menu either
+
+Jamal: "remove that from menu, notification template show all users". Explained first: the only live trigger is Welcome Invitation (guest added in the portal / guest registers via QR / portal test button); rsvp_confirmation, rsvp_declined, reminder_24h are reserved keys with no trigger. The portal page is just the per-event on/off for those.
+- Portal `lib/navigation.ts`: no `section` on Notification Templates. Found + fixed: `sectionForPath` only considered GATED entries, so `/dashboard/messages/notification-templates` would have fallen to the Messages gate (Free clients locked out of a visible link). It now takes the most specific entry, gated or not.
+- LOCAL: menu #19 + 9 grants removed (backup in prod-backups). PRODUCTION dry run: #19, 1 grant (plan 11 Premium) — Jamal to run `remove-event-menu.js --slug notification-templates --prod --apply`. Rebuild list is now 17 menus.

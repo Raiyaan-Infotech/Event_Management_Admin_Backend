@@ -8,9 +8,10 @@
  * code looks up by slug and would otherwise lose:
  *   rsvp .................. portal "RSVPs" sidebar, QR-registration RSVP gating, app tile
  *   invite-share .......... app tile
- *   guests, messages, splash-screens, notification-templates
+ *   guests, messages, splash-screens
  *                           ... client-portal sidebar sections (lib/navigation.ts)
- * (Analytics is NOT a menu — the portal always shows it. See remove-event-menu.js.)
+ * (Analytics and Notification Templates are NOT menus — the portal always
+ * shows them. See remove-event-menu.js.)
  * Slugs MUST match: event_client_single lib/navigation.ts `section`,
  * Event_Invite_Mobile_App wedding_home_screen.dart `_routes`, and
  * subscriptionPlan.service LIMIT_CATALOG keys.
@@ -69,7 +70,6 @@ const CATALOGUE = [
     { slug: 'guests', name: 'Guests', group: 'portal', web: 1, mob: 1, icon: 'mdi:account-multiple-outline', color: '#7C3AED' },
     { slug: 'messages', name: 'Messages', group: 'portal', web: 1, mob: 0, icon: 'mdi:message-text-outline', color: '#2563EB' },
     { slug: 'splash-screens', name: 'Splash Screens', group: 'portal', web: 1, mob: 0, icon: 'mdi:cellphone-screenshot', color: '#DB2777' },
-    { slug: 'notification-templates', name: 'Notification Templates', group: 'portal', web: 1, mob: 0, icon: 'mdi:bell-cog-outline', color: '#D97706' },
 ];
 
 const parseIds = (raw) => {
