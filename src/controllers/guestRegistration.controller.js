@@ -91,4 +91,13 @@ const submitMyRsvp = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, result, 'Your RSVP has been submitted');
 });
 
-module.exports = { resolve, requestOtp, verifyOtp, join, myEvents, myRsvp, submitMyRsvp };
+/**
+ * The event's family directory — name, photo, relationship only. Open to the
+ * host and to guests who are themselves family-tagged; see the service.
+ */
+const familyDirectory = asyncHandler(async (req, res) => {
+    const members = await service.familyDirectory(req.websiteClient.id, req.params.id);
+    return ApiResponse.success(res, members, 'Family retrieved');
+});
+
+module.exports = { resolve, requestOtp, verifyOtp, join, myEvents, myRsvp, submitMyRsvp, familyDirectory };

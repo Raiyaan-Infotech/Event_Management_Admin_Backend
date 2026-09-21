@@ -12856,3 +12856,172 @@ Created on PRODUCTION through the real services (plan-validated, real QR, cover 
 | #29 Najeeb (Premium) | #22 Najeeb & Rukhsana — Walima, ITC Grand Chola | +55 d | 20 (10/2/4/4) | heart |
 
 Each event carries all its plan's menus; invite history rows are history only (nothing sent). Guest phones are 9xxxxxxxxx fillers and emails @example.com — never real people. Verified via the LIVE API as each client: 1 event, correct menus (3/5/6/6), guest counts 12/15/16/20. Undo per account: same command with `--clear --apply`.
+
+## Session 46 — The app's offline gaps closed, and who each tile is actually for
+
+> **Date:** 2026-09-21 | **Mobile:** Event_Invite_Mobile_App · **Backend:** Event_Management_Admin_Backend
+> Jamal tested the live-env release APK as #26 Jamal (Free): downloaded the event, went offline, and two
+> things broke. Both fixed. Tracing them turned up a class of flow mistake the app repeats on several
+> tiles — reported here, NOT fixed, awaiting his call.
+
+### 528. A downloaded event whose RSVP page still asked for a connection
+
+Jamal: "i download event offline then turnoff my internet then i go that evtn page then rsvp page it show like that needed internet why inittaly not download".
+
+The prefetcher saved everything an event needs to open — detail, splash, guest list, images — and deliberately **skipped RSVP for an event the person owns**:
+
+```dart
+if (!owned && slugs.contains('rsvp'))   // offline_prefetch.dart
+```
+
+The reasoning was sound on its face ("a host has no guest row to answer with, so there is nothing to save") and wrong in effect: the RSVP screen only learns it is looking at a host from `is_host` **in that same response**. With nothing cached, `myRsvpProvider` fell to its failure branch and the screen read "Could not load your RSVP · Please check your connection" — on an event that had been downloaded on purpose. Every other tile worked, which is what made it look like the download had half-failed.
+
+Now fetched for host and guest alike (`offline_prefetch.dart:138`). Offline, the host's RSVP tile shows "You're hosting this event", which is what it shows online.
+
+WARNING: an event saved by the OLD build has no RSVP copy, and the background sweep will not re-save it for 3 h (`_minInterval`). The card's Download button calls `prefetchEvent` directly and bypasses that — re-download once after installing.
+
+### 529. Back online, the page stayed offline
+
+Jamal: "after i turn on go that rsvp and guest page it show offline". Two independent causes, both fixed.
+
+**a) The first request after reconnecting is handed a dead socket.** A connection returning does not make the sockets Dio already holds usable; the pool keeps the ones that died while the radio was off. That request fails instantly with NO response — byte-for-byte the shape of "no internet" — so the page reported the connection as still down while Try Again on that same page worked. `ApiClient` now repeats a **GET** once, 300 ms later, when nothing came back. Never a write, never after a timeout (`ApiException.isTimeout`, new — a second 20 s wait is not a better answer), never twice. Four tests in `test/api_client_retry_test.dart`.
+
+**b) A failed Riverpod provider never retries itself.** It keeps its error until something invalidates it, and nothing disposes it while the screen is on the stack. Home and the event screen each carried their own hand-written back-online listener; RSVP, Guests and Family had none. New `lib/core/utils/back_online.dart` (`refetchWhenBackOnline`), wired into all three.
+
+**Found while tracing (b): the listener could never have fired anyway.** Every repository reported "offline" only *after* a successful cache fallback:
+
+```dart
+if (!e.isNetwork) rethrow;
+final cached = ...;
+if (cached == null) rethrow;   // <- reported nothing at all
+onOffline?.call();
+```
+
+So on exactly the screens that had nothing saved, the app still believed it was online: connection dot green, page saying no internet, and no offline→online edge for any listener to see. Reporting moved above the cache lookup in all four reads (`rsvp_repository`, `guest_repository`, `event_repository` x4).
+
+**Verification:** `flutter analyze lib test` clean, `flutter test` 30/30 (26 + 4 new). NOT device-tested by me — no handset here. If a page still reports offline after reconnecting, the wording says which path: "No internet connection…" is the socket, "The server took too long…" is Render cold-starting past the 20 s receive timeout, which is a different fix.
+
+### 530. Who each tile is for — a flow mistake the app repeats (NOT fixed)
+
+Jamal asked whether the Guests menu behaves as he thought. It does: `guests` is `menu_group = 'portal'`, the only portal row with `active_mobile = 1`; `clientPortal.getEventOptions` keeps `portal`/`app` rows out of `menus` (so the create-event wizard cannot offer it, and create validation would reject it), and `clientEvent.presentOne` appends them for `platform=mobile` off the **owner's** plan. His conclusion — leave Guests account-level, since `event_guests.event_id` and the portal's event filter already give per-event guests — is right: a per-event toggle could only express "this host may not see their own register for this event".
+
+But the tile list is built from the owner's plan **for every viewer**, and the app draws `event.menus` unfiltered. So:
+
+| Tile | Reads | An invited participant sees |
+|---|---|---|
+| Guests | `GET /client/guests` (scoped to `website_client_id`) | empty list, no Add button |
+| Family | the same guest list | empty |
+| Participants | the same guest list | empty |
+| RSVP | `my-rsvp` | correct — and the HOST gets "You're hosting this event" on a tile they can never use |
+
+Three tiles that only work for the host, one that only works for a guest, all four shown to both. The fix is one condition: `getEventForViewer` already computes `isOwner` one line after calling `presentOne` (`clientEvent.service.js:500`) — pass it in and drop `portal`-group menus for non-owners. Backend only, no APK. Not done: Jamal has not chosen yet.
+
+**Also found, same family — plan-granted tiles that are still mockups.** `Wishes` (`const _wishes`), `Social Wall` (`const kWallPhotos`), `Downloads` (`static final _recent/_earlier`) and `Chat` (`_initialChats`) render invented content: no repository, no endpoint, plain `StatefulWidget`s. Whichever plans grant those menus on mobile are selling a tile that shows somebody else's fake photos. Related, already known and documented: the client portal's Messages composes campaigns nothing delivers, and `PlanSectionGate` is presentation-only (`/client/guests` and friends are not plan-gated server-side).
+
+### 531. Arsath and Najeeb can sign into the app
+
+Open item 3 of Session 45 closed. `#28 Arsath` and `#29 Najeeb` were created without a mobile, and the app signs in by mobile OTP only — so Standard and Premium could not be tested on a handset at all.
+
+New `src/database/tools/set-client-mobile.js` (dry-run default, `--apply`, `--prod`): refuses a number whose last 10 digits already belong to another row, because the OTP login matches on exactly that and a duplicate makes BOTH accounts unreachable. Written with `''` string literals in the SQL — production runs with `ANSI_QUOTES`, where `"..."` is an identifier and the first version died on `Unknown column ''`.
+
+**Applied to production:** `#28 Arsath -> +91 9000000028`, `#29 Najeeb -> +91 9000000029` — sample numbers, deliberately unmistakable, nobody's real one. Verified against the LIVE API: `POST /public/website-clients/login/otp/request` returns `success: true, delivered: false` for both (no SMS provider is configured; `OTP_ACCEPT_ANY` on Render is what makes any code work).
+
+**The four production accounts, complete:**
+
+| # | Client | App login (mobile + any OTP) | Portal login | Plan |
+|---|---|---|---|---|
+| 26 | Jamal | 9884699436 | jamaludheen779@gmail.com | #8 Free |
+| 27 | Ismail | 7010051951 | ismail@eventinvit.in | #9 Basic |
+| 28 | Arsath | 9000000028 | arsath@eventinvit.in | #10 Standard |
+| 29 | Najeeb | 9000000029 | najeeb@eventinvit.in | #11 Premium |
+
+Portal password for all four: `Event@123`. One upcoming wedding each (events #19-#22, §527).
+
+**Open after this session:**
+1. Rebuild the APK (`--dart-define-from-file=.env.prod --split-per-abi`) and device-test §528/§529; re-download the event once after installing.
+2. ~~§530 tile-audience fix~~ — done in §532, not deployed.
+3. The four mockup tiles (Wishes, Social Wall, Downloads, Chat) are still sold by plans that grant them.
+4. Nothing committed in either repo.
+
+### 532. The three host-only tiles are hidden from guests (§530 fixed)
+
+Jamal: "yess we have to hide that tile thing".
+
+`clientEvent.service.js`: new `HOST_ONLY_MENU_SLUGS = { guests, family, participants }` — the three whose screen is the host's guest register under another name (all read `GET /client/guests`, which is scoped to the caller's own `website_client_id`). `presentOne` takes `isOwner`, defaulting to true because the owner-scoped readers cannot be anything else, and drops those rows for anybody else. `getEventForViewer` already computed `isOwner` one line above its `presentOne` call; the wishlist reader now computes it once and uses it for both the menu filter and `HOST_ONLY_FIELDS`.
+
+Deliberately NOT a column on `event_menus`: "needs the owner's guest register" is a fact about what those three screens read, not something an admin should be able to toggle per menu.
+
+**Verified on LOCAL data** (event #23, host client #23, participant client #10, `platform=mobile`):
+
+```
+HOST  #23 : event-information, venue, gallery, rsvp, contact-us, family, participants,
+            invite-share, near-by, chat, wishes, social-wall, downloads, guests
+GUEST #10 : event-information, venue, gallery, rsvp, contact-us,
+            invite-share, near-by, chat, wishes, social-wall, downloads
+```
+
+Backend only — the app draws whatever `event.menus` contains, so no APK is needed. Not deployed yet.
+
+Left alone: RSVP still shows for the host (it explains itself — "You're hosting this event") and it is a CORE menu the host ticked on the event, so hiding it is a different decision from hiding a tile the plan added behind their back.
+
+### 533. What can actually be CREATED inside an event from the app
+
+Jamal: "other then host unable to create anything on event app inside event right like participant creation or gallery categories".
+
+Confirmed, and narrower than expected — most of the create buttons in the app write nothing at all, for anybody:
+
+| Action | Real? | Who |
+|---|---|---|
+| Add Guest, edit / delete guest | yes — `POST/PUT/DELETE /client/guests` | host only (server scopes by `website_client_id`; the button is also behind `_isOwner`) |
+| Add Participant | yes — same guest table | host only, same two gates |
+| Add Family Member | yes — same guest table | host only |
+| Submit RSVP | yes — `POST /client/events/:id/my-rsvp` | guest only, once; the host gets "You're hosting this event" |
+| Join by QR | yes | anyone with the code + OTP |
+| **Gallery, Add Category, Upload Photos** | **no** | nobody — `gallery_screen.dart` is a `StatefulWidget` with a hardcoded `_cats` list ("All Photos 132, Highlights 28, Ceremony 46, Guests 40, Decor 20") over `kWallPhotos` stock images. There is no gallery module, no endpoint, no upload |
+| **Create Post (Social Wall), Add Wish, Chat** | **no** | nobody — `kWallPhotos`, `const _wishes`, `_initialChats` |
+
+So there is no per-event content module to gate yet. **Gallery is the one that matters**: it is a CORE menu granted by every plan including Free, it sits on all four production events, and every photo and count in it is invented. Anyone opening Gallery on a real event today sees stock pictures of somebody else's wedding.
+
+### 534. RSVP screen: host now sees who has responded, not a celebration message
+
+Jamal: "tile fix rsvp showing as host we have to show list responses in rsvp view for host we do".
+
+`rsvp_screen.dart`'s `isHost` branch used to say "You're hosting this event / Your guests' RSVPs appear in the client portal under RSVPs" — true, but it sent the host to a different app for something they were already looking at the tile for.
+
+Now the host branch (`_hostResponses`) reads the same guest register the Guests/Family/Participants tiles read (`selectedEventGuestsProvider`, owner-scoped, cached offline) and shows:
+- a 3-way count strip (Attending / Not Attending / Pending — the same `RsvpStatus` buckets Guest List and Participants already use, so this screen does not invent a fourth "Maybe" bucket the rest of the app has no pill for);
+- one row per guest: avatar, name, phone, and party size on an attending answer (`_ResponseRow`), same shape as `guest_list_screen.dart`'s `_GuestRow`;
+- loading / offline-failure / back-online refetch handled the same way as every other list screen this session touched (§529).
+
+Read-only, deliberately: nothing on this screen sets a guest's answer for them — the guest still answers for themself here or in the portal, matching how the rest of the app already works.
+
+`flutter analyze lib test` clean, `flutter test` 30/30. Not device-tested — no handset here.
+
+### 535. A guest who is family sees the Family list
+
+Jamal, on §532 hiding Guests / Family / Participants from non-hosts: "when he is that one of family participant then we have to show that family list right". Asked two things first, both answered with the recommended option: **only family-tagged guests** get it (not every guest who joined), and they see **name, photo, relationship only** (no mobile / email).
+
+**Why un-hiding the tile was not enough.** The Family screen read `GET /client/guests`, which is the host's REGISTER, scoped to the caller's own `website_client_id`. A guest calling it gets their own empty register. So a guest-safe read had to exist first.
+
+**Backend**
+- `clientEvent.service.js`: `familyCategoryOf` / `isFamilyCategory` — a line-for-line mirror of the app's `EventGuest.familyCategory` (same keyword lists, same `relationship ?? groupName` order, same exact-"family"-group fallback). Kept in lock step on purpose: it decides whether a guest gets the tile, and the app's own tabs then sort the rows — a mismatch would show a tile the tabs can't place them in, or deny it to somebody the tabs would list.
+- `HOST_ONLY_MENU_SLUGS` is now `{ guests, participants }`. `presentOne` takes `viewerIsFamily`; a non-owner gets `family` only when it is true. `getEventForViewer` and `getWishlist` compute it from the caller's own guest row (`participant_client_id`), `relationship` + group name — both only used for the decision, never sent.
+- New `GET /client/events/:id/family` → `guestRegistration.service.familyDirectory`, beside `my-rsvp` (same "caller's own membership on this event" pattern). Allowed: the host, or a guest whose own row is family-tagged; anybody else 404 (not a guest) / 403 ("The family list is shown to family members of this event."). Returns every family-tagged guest on the event as `id / full_name / photo / relationship / group{name,color}` — nothing else.
+
+**Verified on LOCAL data**, event #23 (host #23, "Bride's Sister" #94, "Other" #10), `platform=mobile`:
+
+```
+HOST #23    | tiles: family, participants, guests | /family: 2 members, keys=id/full_name/photo/relationship/group
+FAMILY #94  | tiles: family                       | /family: 2 members, keys=id/full_name/photo/relationship/group
+OTHER #10   | tiles: (none)                       | /family: refused: The family list is shown to family members of this event.
+```
+
+**App**
+- `GuestRepository.familyDirectory` (own cache key `event_family_<id>` — a different shape of the same table must never stand in for the register offline) and `selectedEventFamilyProvider`: host → `forEvent` (full register, unchanged), guest → `familyDirectory`. Branches on `selectedEventProvider.selectAsync((e) => e?.isOwner)`, so an event refresh does not refetch the family.
+- `family_screen.dart` for a guest: read-only rows (no profile, no Call / Chat / More — there is no number to call), no Add Member, no Invite card, no Quick Actions, and no Attending tile (the directory carries nobody's RSVP answer, so it would always read 0). Host screen unchanged.
+- `add_member_screen.dart` also invalidates `selectedEventFamilyProvider` — the Family screen stays mounted underneath it and now reads its own provider.
+- `offline_prefetch.dart` saves the directory for a non-owner whose menus include `family`.
+
+`flutter analyze lib test` clean, `flutter test` 30/30, `node --check` clean. NOT device-tested. `tests/plan-menu-gating.test.js` not run (needs a live local server).
+
+⚠ Needs BOTH a backend deploy and a new APK. Deploy first: the old APK never calls `/family`, and a new APK against the old backend would get a 404 on that route for a family guest.

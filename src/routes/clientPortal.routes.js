@@ -216,6 +216,9 @@ router.get('/events/joined', guestRegistrationController.myEvents);
  */
 router.get('/events/:id/my-rsvp', guestRegistrationController.myRsvp);
 router.post('/events/:id/my-rsvp', guestRegistrationController.submitMyRsvp);
+// The family directory — a guest-safe read beside my-rsvp, NOT /guests (that is
+// the host's register, scoped to the host's account). See familyDirectory.
+router.get('/events/:id/family', guestRegistrationController.familyDirectory);
 
 /*
  * Wishlist. `/events/wishlist` is declared BEFORE `/events/:id` for the same

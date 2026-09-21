@@ -4,6 +4,7 @@ const {
     Sequelize,
     Event,
     EventGuest,
+    EventGuestGroup,
     EventGuestResponseLog,
     EventMenu,
     WebsiteClient,
@@ -21,7 +22,7 @@ const msg91Sms = require('./msg91Sms.service');
 // One definition of past/live/upcoming for the whole codebase. Imported rather
 // than re-implemented: two copies of this rule drift, and the guest's card and
 // the host's would then disagree about the same event on the same day.
-const { deriveStatus } = require('./clientEvent.service');
+const { deriveStatus, isFamilyCategory } = require('./clientEvent.service');
 const notificationTrigger = require('./notificationTrigger.service');
 const rsvpService = require('./clientRsvp.service');
 const notifications = require('./clientNotification.service');
@@ -698,6 +699,64 @@ const getMyRsvp = async (clientId, rawEventId) => {
 };
 
 /**
+ * The event's Family / Relative / Close Friend guests, as a DIRECTORY — for a
+ * guest who is themself one of them (or the host).
+ *
+ * ── WHY NOT `GET /client/guests` ─────────────────────────────────────────────
+ * That is the host's guest REGISTER: scoped to `website_client_id`, so a guest
+ * calling it gets their own (empty) register, never the host's. It also
+ * carries every guest's mobile, email and notes. The app's Family screen used
+ * to read it for everyone — a guest saw an empty list (§530, and the tile was
+ * then hidden from guests outright in §532).
+ *
+ * This is the narrow read that Family actually needs for a guest:
+ *   - who may call it: the host, or a guest whose OWN row is family-tagged
+ *     (`isFamilyCategory`) — the same rule that decides whether they get the
+ *     tile at all (`clientEvent.presentOne`), so the two cannot disagree;
+ *   - which rows: every guest on the event that is itself family-tagged;
+ *   - which fields: name, photo, relationship, group name/colour. No mobile,
+ *     email, notes, party size or RSVP answer — a directory, not a register.
+ */
+const familyDirectory = async (clientId, rawEventId) => {
+    const eventId = eventIdOf(rawEventId);
+
+    const [event, membership] = await Promise.all([
+        Event.findOne({ where: { id: eventId }, attributes: ['id', 'website_client_id'] }),
+        EventGuest.findOne({
+            where: { event_id: eventId, participant_client_id: clientId },
+            attributes: ['id', 'relationship'],
+            include: [{ model: EventGuestGroup, as: 'group', attributes: ['name'], required: false }],
+        }),
+    ]);
+    if (!event) throw ApiError.notFound('Event not found.');
+
+    const isOwner = Number(event.website_client_id) === Number(clientId);
+    if (!isOwner) {
+        if (!membership) throw ApiError.notFound('You are not a guest of this event.');
+        if (!isFamilyCategory(membership.relationship, membership.group?.name)) {
+            throw ApiError.forbidden('The family list is shown to family members of this event.');
+        }
+    }
+
+    const guests = await EventGuest.findAll({
+        where: { event_id: eventId },
+        attributes: ['id', 'name', 'photo', 'relationship'],
+        include: [{ model: EventGuestGroup, as: 'group', attributes: ['name', 'color'], required: false }],
+        order: [['name', 'ASC']],
+    });
+
+    return guests
+        .filter((g) => isFamilyCategory(g.relationship, g.group?.name))
+        .map((g) => ({
+            id: g.id,
+            full_name: g.name,
+            photo: g.photo,
+            relationship: g.relationship,
+            group: g.group ? { name: g.group.name, color: g.group.color } : null,
+        }));
+};
+
+/**
  * Submit the RSVP — ONCE per event.
  *
  * Writes the same `event_guests` columns the portal's RSVPs, Guests and
@@ -785,6 +844,7 @@ module.exports = {
     myEvents,
     getMyRsvp,
     submitMyRsvp,
+    familyDirectory,
     // exported for tests
     publicEvent,
     eventFromToken,
