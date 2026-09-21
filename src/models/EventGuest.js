@@ -38,6 +38,13 @@ module.exports = (sequelize) => {
          */
         gender: { type: DataTypes.ENUM('male', 'female', 'other'), allowNull: true },
         title: { type: DataTypes.STRING(30), allowNull: true },
+        /**
+         * Asked on the Add Guest forms (portal, app, Add Family Member). DATE,
+         * not DATETIME: a birthday has no time zone. NULL = not given — never
+         * defaulted, that would invent a fact about a real person.
+         * `apply-guest-date-of-birth.js`.
+         */
+        date_of_birth: { type: DataTypes.DATEONLY, allowNull: true },
         /** Ungrouped when null. Deleting a group SET NULLs this, never the row. */
         group_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
         email: { type: DataTypes.STRING(255), allowNull: true },

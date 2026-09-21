@@ -13025,3 +13025,41 @@ OTHER #10   | tiles: (none)                       | /family: refused: The family
 `flutter analyze lib test` clean, `flutter test` 30/30, `node --check` clean. NOT device-tested. `tests/plan-menu-gating.test.js` not run (needs a live local server).
 
 ⚠ Needs BOTH a backend deploy and a new APK. Deploy first: the old APK never calls `/family`, and a new APK against the old backend would get a 404 on that route for a family guest.
+
+### 536. Live test participants on Jamal's Free event (#19)
+
+Created on PRODUCTION through the real invite flow (event #19's `qr_token` fetched as the host → `POST /public/events/join/otp/request` → `/verify` → `POST /client/events/join`), so both are exactly what a QR-scanning guest produces:
+
+| Login (mobile + any OTP) | Account | Guest row | Relationship | RSVP |
+|---|---|---|---|---|
+| 9000000190 | new, "Test Guest (Normal)" | #356, created | Colleague | none — can test the form |
+| 9100019008 | new, linked to the seeded guest Rehan Ansari | #301, existing | Family | none |
+
+Both log in on the live API and list event #19 under `/client/events/joined`.
+
+⚠ **The Free plan (#8) grants no `family` or `participants` menu** — only event-information, gallery, rsvp and guests (portal). So on #19 NOBODY gets a Family tile, host included; the family-member account is correctly just a normal guest there. The family-directory flow (§535) can only be tested on Standard (#10 Arsath, event #21) or Premium (#11 Najeeb, event #22).
+
+### 537. Member Profile: Occupation gone, Member Since = created_at, Date of Birth real end to end
+
+Jamal: "Occupation remove and DOB … notes also add in guest form and Member Since data map that when that guest created", then "dob add in guest add form".
+
+- **Occupation** row removed from the Member Profile (no column, no form — nothing could ever fill it).
+- **Member Since** now reads the row's `created_at` ("Added on …"). It read `invitedAt`, which prefers `invited_at` — when an invitation went out, a different moment most guests never have. `EventGuest.createdAt` added.
+- **Notes**: already real everywhere — both app forms, the portal form, the backend and the profile. Nothing to change.
+- **Date of Birth** — did not exist anywhere (no column, no field on any of the three guest forms; the Add Family Member file recorded that an old form asked for it and saved nothing). Now:
+  - `event_guests.date_of_birth DATE NULL` after `title` — `src/database/tools/apply-guest-date-of-birth.js` (dry-run default). **LOCAL applied. PRODUCTION dry run clean, NOT applied.** `initial_setup.sql` + `EventGuest` model (`DATEONLY`).
+  - `clientGuest.service`: in `WRITABLE_FIELDS`; must be a real calendar date, never in the future, empty clears it. Verified on local: `1990-05-14` saved, `2026-02-30` / `abc` refused as invalid, `2099-01-01` refused as future, `''` → null; create + read-back returned `1988-03-09`.
+  - Portal `guest-form.tsx`: `<Input type="date" max=today>` in Additional Information (the portal's existing date-input convention), prefill + payload; section opens on edit when a DOB is set. `use-guests.ts` types. `tsc --noEmit` clean.
+  - App `GuestFormBody` (Add Guest, Add Participant, Add Family Member all use it): Date of Birth under Last Name, native date picker (1900 → today), "Clear date"; sent as `YYYY-MM-DD` — a full ISO timestamp would slip to the previous day in the phone's time zone. Member Profile shows it. `flutter analyze` clean, 30/30.
+
+⚠ **Run `apply-guest-date-of-birth.js --prod --apply` BEFORE deploying the backend** — the model selects every column, so without it every guest query on production fails with `Unknown column 'date_of_birth'`.
+
+⚠ `add_guest_screen.dart` and `add_participant_screen.dart` got ONE line each (`dateOfBirth: draft.dateOfBirth,`) but also carry Jamal's own uncommitted changes, so they were NOT staged.
+
+### 538. The 17-menu audit — what was and was not checked
+
+Checked for every menu: (1) is it real data or a design-only mockup (§530, §533), (2) is it shown to someone it does nothing for (§530/§532/§535). Found while answering this, NOT fixed:
+
+- **No plan limit is enforced anywhere.** `subscriptionPlan.service` `LIMIT_CATALOG` lets the admin set Max Events, Max Guests Per Event, Max RSVPs, Max Photos, Max Items, … per plan, and Billing displays them — but no create path (`clientEvent.createEvent`, `clientGuest.createGuest`, `guestRegistration.join`, RSVP submit) reads a single one. A Free client can create any number of events and guests.
+- **Max Family Members / Max Participants can never be set.** Their catalogue key is `guests-family`, a slug that matches none of the 17 menus, so `limitsForMenu(slug)` never returns them.
+- **Invite & Share is shown to guests.** Its QR / Email share hand out the event's own `qr_token`, which is what admits somebody to the event — so any guest can invite anybody. Product decision, not assumed either way.

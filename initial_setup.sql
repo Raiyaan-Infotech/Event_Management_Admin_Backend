@@ -1389,6 +1389,7 @@ CREATE TABLE IF NOT EXISTS `event_guests` (
   `first_name` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `last_name` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `title` varchar(30) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Mr. / Ms. / Mrs.',
+  `date_of_birth` date DEFAULT NULL COMMENT 'Asked on the Add Guest forms. NULL = not given',
   `email` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `dial_code` varchar(8) COLLATE utf8mb4_unicode_ci DEFAULT '+91',
   `mobile` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL,

@@ -45,7 +45,7 @@ const foodOptions = require('./guestFoodPreferenceOption.service');
 */
 const WRITABLE_FIELDS = [
     'event_id', 'group_id',
-    'title', 'first_name', 'last_name', 'email', 'dial_code', 'mobile', 'whatsapp',
+    'title', 'first_name', 'last_name', 'date_of_birth', 'email', 'dial_code', 'mobile', 'whatsapp',
     'gender', 'relationship', 'relationship_option_id',
     'company', 'table_number', 'party_size',
     'rsvp_status', 'response_type', 'invite_source',
@@ -182,6 +182,23 @@ const normalise = async (clientId, body, { partial = false, existing = null } = 
     }
     if (has('last_name')) data.last_name = str(picked.last_name, 100);
     if (has('title')) data.title = str(picked.title, 30);
+
+    // YYYY-MM-DD or empty. Checked as a REAL calendar date (2026-02-30 is not),
+    // and never in the future — a birthday that has not happened yet is a typo.
+    if (has('date_of_birth')) {
+        const raw = str(picked.date_of_birth, 10);
+        if (!raw) {
+            data.date_of_birth = null;
+        } else {
+            const valid = /^\d{4}-\d{2}-\d{2}$/.test(raw)
+                && new Date(`${raw}T00:00:00Z`).toISOString().slice(0, 10) === raw;
+            if (!valid) throw ApiError.badRequest('Please enter a valid date of birth.');
+            if (raw > new Date().toISOString().slice(0, 10)) {
+                throw ApiError.badRequest('Date of birth cannot be in the future.');
+            }
+            data.date_of_birth = raw;
+        }
+    }
 
     if (data.first_name !== undefined || data.last_name !== undefined) {
         data.name = composeName(
