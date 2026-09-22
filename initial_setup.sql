@@ -2207,8 +2207,6 @@ CREATE TABLE IF NOT EXISTS `subscription_plans` (
   `plan_type_id` int DEFAULT NULL,
   `billing_cycle` enum('monthly','quarterly','yearly','lifetime') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'monthly',
   `short_description` varchar(200) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `for_website` tinyint NOT NULL DEFAULT '1',
-  `for_mobile` tinyint NOT NULL DEFAULT '1',
   `event_category_id` int unsigned DEFAULT NULL,
   `currency_code` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'INR',
   `price` decimal(10,2) NOT NULL DEFAULT '0.00',

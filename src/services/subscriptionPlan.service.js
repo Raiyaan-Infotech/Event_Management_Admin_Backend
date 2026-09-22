@@ -22,7 +22,6 @@ const MODULE_SLUG = 'subscription_plans';
 // A plan is scoped by CATEGORY only, like its menus (NULL = all categories).
 const WRITABLE_FIELDS = [
     'name', 'plan_code', 'plan_type_id', 'billing_cycle', 'short_description',
-    'for_website', 'for_mobile',
     'event_category_id',
     'currency_code', 'price', 'trial_days',
     'is_visible', 'is_active', 'sort_order',
@@ -189,10 +188,6 @@ const decorate = (row) => {
     const price = Number(plain.price || 0);
     plain.is_trial = price === 0 && Number(plain.trial_days || 0) > 0;
     plain.total_menus = Array.isArray(plain.planMenus) ? plain.planMenus.length : (plain.total_menus ?? 0);
-    plain.menu_for = [
-        ...(plain.for_website ? ['website'] : []),
-        ...(plain.for_mobile ? ['mobile'] : []),
-    ];
     return plain;
 };
 
@@ -346,10 +341,6 @@ const create = async (data, userId = null, companyId = undefined) => {
     if (!payload.plan_code) throw ApiError.badRequest('Plan code is required');
     await assertCodeAvailable(payload.plan_code, companyId);
 
-    if (!payload.for_website && !payload.for_mobile) {
-        throw ApiError.badRequest('Select at least one platform for this plan (Website or Mobile App).');
-    }
-
     await normaliseBadge(payload, companyId);
 
     const plan = await sequelize.transaction(async (transaction) => {
@@ -390,16 +381,6 @@ const update = async (id, data, userId = null, companyId = undefined) => {
         await assertCodeAvailable(payload.plan_code, companyId, plan.id);
     }
 
-    // Only checked when the request touches platform targeting, so a PATCH that
-    // flips status is not rejected for not resending it.
-    if (payload.for_website !== undefined || payload.for_mobile !== undefined) {
-        const website = payload.for_website ?? plan.for_website;
-        const mobile = payload.for_mobile ?? plan.for_mobile;
-        if (!website && !mobile) {
-            throw ApiError.badRequest('Select at least one platform for this plan (Website or Mobile App).');
-        }
-    }
-
     await normaliseBadge(payload, companyId);
 
     const oldValues = plan.toJSON();
@@ -414,11 +395,10 @@ const update = async (id, data, userId = null, companyId = undefined) => {
         }
     });
 
-    // "Menu For" decides which platforms every menu of the plan is granted on
-    // (see clientPortal.grantedMenuIds), so changing it must drop the cached
-    // grants too — not only a menu change. After the commit, so no request can
-    // re-cache the old answer while the write is still in flight.
-    if (payload.for_website !== undefined || payload.for_mobile !== undefined || data.menus !== undefined) {
+    // Again after the commit (syncPlanMenus also drops it, but before its write
+    // lands): otherwise a request in between can re-cache the old menus for a
+    // minute.
+    if (data.menus !== undefined) {
         require('./clientPortal.service').invalidatePlanGrants(plan.id);
     }
 

@@ -4,8 +4,8 @@ const { DataTypes } = require('sequelize');
  * One row per menu included in a plan.
  *
  * Not a flat menu_ids array on the plan, because step 4 hangs per-menu limits
- * off it. No per-menu platform: a menu is granted on every platform the PLAN
- * is sold on (`subscription_plans.for_website` / `for_mobile`).
+ * off it. No platform here (or on the plan): where a menu shows is decided by
+ * the menu's own per-platform Active switch in Menu Management.
  *
  * `limits_json` is keyed by the menu limit catalogue in
  * subscriptionPlan.service.js (e.g. { max_photos: 500, storage_gb: 100 }).

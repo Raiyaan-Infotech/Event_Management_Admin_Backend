@@ -12,10 +12,9 @@
  *   5. Admin UPDATES the plan's menus; the portal and the app are re-checked.
  *
  * ── WHAT IT LOCKS ───────────────────────────────────────────────────────────
- *   - the PLAN's `for_website` / `for_mobile` ("Menu For") decide which
- *     platforms receive its menus (the app is told apart by `X-Client: flutter`);
- *     a plan menu has no platform of its own, and switching the plan off for a
- *     platform takes effect on the next request
+ *   - a plan has no platform: the portal and the app (told apart by
+ *     `X-Client: flutter`) receive the same menus, unless a menu's own Active
+ *     switch is off for one platform in Menu Management
  *   - an existing event's `menus` follow the owner's plan AS IT IS NOW, while
  *     its saved `menu_ids` stay untouched — re-granting a menu restores it
  * `gap()` remains for requirements not built yet; there are none today.
@@ -36,7 +35,6 @@ require('dotenv').config();
 const db = require('../src/models');
 const planService = require('../src/services/subscriptionPlan.service');
 const clientService = require('../src/services/websiteClient.service');
-const portalService = require('../src/services/clientPortal.service');
 
 const BASE = process.env.TEST_API_URL || 'http://localhost:5001/api/v1';
 const PASSWORD = 'QaTest@1';
@@ -133,8 +131,6 @@ async function cleanup() {
         plan_code: `ZZ_QA_${stamp}`,
         billing_cycle: 'monthly',
         price: 0,
-        for_website: 1,
-        for_mobile: 1,
         is_active: 1,
         is_visible: 0,
         menus: [
@@ -144,7 +140,7 @@ async function cleanup() {
         ],
     });
     ok('plan created with 3 menus', plan && (plan.planMenus || []).length === 3, JSON.stringify(plan?.planMenus));
-    console.log(`        plan ${plan.id} (website + mobile): Event Information, Agenda, RSVP`);
+    console.log(`        plan ${plan.id}: Event Information, Agenda, RSVP`);
 
     const client = await clientService.create({
         name: `ZZ QA Client ${stamp}`,
@@ -216,7 +212,7 @@ async function cleanup() {
     const appOpts = await app('GET', '/client/event-options');
     const appMenus = appOpts.data?.menus ?? appOpts.data?.options?.menus;
     console.log(`        app is offered:    ${names(appMenus, byId)}`);
-    ok('mobile gets the same 3 menus (plan is sold on both platforms)',
+    ok('mobile gets the same 3 menus as the portal',
         same(ids(appMenus), [M['event-information'], M.agenda, M.rsvp]),
         `got ${names(appMenus, byId)}`);
 
@@ -230,22 +226,6 @@ async function cleanup() {
     ok('mobile event shows all 3 menus',
         same(ids(ev?.menus), [M['event-information'], M.agenda, M.rsvp]),
         `got ${names(ev?.menus, byId)}`);
-
-    // The plan's own "Menu For" is the only platform switch a plan has.
-    // In-process, through the service: the grants cache is per process, so an
-    // update made HERE can only clear this process's copy — the server on :5001
-    // keeps its own for up to a minute.
-    const optionsFor = async (platform) =>
-        ids((await portalService.getEventOptions(client.id, { platform })).menus);
-    await optionsFor('mobile'); // warm the cache, so the next check proves it is cleared
-    await planService.update(plan.id, { for_website: 1, for_mobile: 0 });
-    ok('plan switched to website only: mobile is granted no menus (cache cleared)',
-        (await optionsFor('mobile')).length === 0);
-    ok('plan switched to website only: website still granted all 3',
-        same(await optionsFor('website'), [M['event-information'], M.agenda, M.rsvp]));
-    await planService.update(plan.id, { for_website: 1, for_mobile: 1 });
-    ok('plan back on mobile: mobile granted all 3 again (cache cleared)',
-        same(await optionsFor('mobile'), [M['event-information'], M.agenda, M.rsvp]));
 
     const webEvent = await portal('GET', `/client/events/${event.id}`);
     ok('portal event shows all 3',

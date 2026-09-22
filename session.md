@@ -13155,3 +13155,19 @@ Rule now: a menu shows on a platform when the **plan** is sold there (`subscript
 Mobile app and `event_client_single` `.gitignore` gain `graphify-out/` (same as backend + admin); the two graphify files that were staged / tracked were unstaged / untracked.
 
 **Open after this session:** nothing committed in any repo; production column drop (§544) waits on a backend deploy; `check-plan-menus.js` needs its plan-menu W/M queries removed.
+
+### 546. "Menu For" removed — plans have no website/app split at all
+
+Jamal: "remove that". After §544 the plan's own "Menu For" (Website / Mobile App on wizard step 2) was the last website/app switch on plans. Nothing recorded a reason to keep it, and every plan (local 9, production 4) had both ticked, so it did nothing.
+
+Rule now: a plan grants its menus everywhere; a menu shows on a platform when its own **Active** switch for that platform is on (Menu Management, §522). That is the only website/app control left.
+- Backend: `SubscriptionPlan` model + `WRITABLE_FIELDS` + `decorate().menu_for` + both "Select at least one platform" checks removed; `clientPortal.grantedMenuIds` back to one query (plan menus joined to menu Active); `update` drops the grants cache after commit when menus change. `initial_setup.sql` updated.
+- Admin: "Menu For" field, its validation, and the Review row removed; `SubscriptionPlan` / payload types lose `for_website` / `for_mobile` / `menu_for`. `tsc` clean.
+- `drop-plan-menu-platform.js` now drops both leftovers (plan-menu and plan columns), whichever are still present; dry run compares old vs new grants per plan × platform.
+- Test: the §544 in-process "Menu For" checks removed.
+
+**Production state found during this work:** Jamal had already committed + pushed §544 (`15730f9`, `cac4b74`) and run the plan-menu drop on production at 12:15 (backup `D:\Jamal\prod-backups\prod-drop-plan-menu-platform-1790059502005.json`). Live check as #29 Najeeb: event-options OK on website + app, event #22 detail menus correct on both (app gets the app features too).
+- `subscription_plans.for_website` / `for_mobile` production dry run: **no change**, 4 plans / 45 grants.
+- **LOCAL applied** (backup `local-drop-plan-menu-platform-1790061361508.json`). Local check 5/5: event-options for every client × 2 platforms, plan list without the fields, create a plan with no "Menu For", duplicate, plan #3 grants on both platforms.
+
+⚠ Production: deploy this backend FIRST, then `node src/database/tools/drop-plan-menu-platform.js --prod --apply` (it will drop only the two `subscription_plans` columns now).

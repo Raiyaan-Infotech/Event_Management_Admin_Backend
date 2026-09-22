@@ -36,16 +36,6 @@ module.exports = (sequelize) => {
             type: DataTypes.STRING(200),
             allowNull: true,
         },
-        for_website: {
-            type: DataTypes.TINYINT,
-            allowNull: false,
-            defaultValue: 1,
-        },
-        for_mobile: {
-            type: DataTypes.TINYINT,
-            allowNull: false,
-            defaultValue: 1,
-        },
         event_category_id: {
             type: DataTypes.INTEGER.UNSIGNED,
             allowNull: true,
