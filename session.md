@@ -13171,3 +13171,24 @@ Rule now: a plan grants its menus everywhere; a menu shows on a platform when it
 - **LOCAL applied** (backup `local-drop-plan-menu-platform-1790061361508.json`). Local check 5/5: event-options for every client × 2 platforms, plan list without the fields, create a plan with no "Menu For", duplicate, plan #3 grants on both platforms.
 
 ⚠ Production: deploy this backend FIRST, then `node src/database/tools/drop-plan-menu-platform.js --prod --apply` (it will drop only the two `subscription_plans` columns now).
+
+**Production applied by Jamal (2026-09-22)** after pushing `f6ead66` — `subscription_plans.for_website` / `for_mobile` dropped, backup `D:\Jamal\prod-backups\prod-drop-plan-menu-platform-1790061918197.json`. Both website/app leftovers are now gone from production. Live check, all 4 clients × website + app: sign-in, `/client/me` and event-options OK, menus Free 3 · Basic 5 · Standard 6 · Premium 6 on BOTH platforms (same as §524). Admin plan pages not checked live (no admin credentials here).
+
+### 547. Plan limits are ONE card on the plan — the per-menu limit panels are gone
+
+Jamal: "plan config why not update that form i already give that input". His list (Session 47 start): event count, guest count per event, RSVP same as guests, image count, storage limit, video count. §543 only wired enforcement; step 4 was still one panel per menu (events/guests under Event Information, images/videos/storage under Gallery, plus agenda items, venues, wishes, posts, files, contact entries, RSVP closing days). Jamal chose: build the 5-field card; remove every other per-menu limit.
+
+- **Schema:** `subscription_plans` gains `max_events`, `max_guests_per_event`, `max_photos`, `max_videos`, `storage_gb` (INT UNSIGNED NULL, NULL = unlimited). `subscription_plan_menus.limits_json` dropped. `initial_setup.sql` updated.
+- **No RSVP limit:** one answer per guest, so `max_guests_per_event` caps RSVPs. The two `max_rsvps` checks (§543) removed; Billing's `rsvps.limit` now reports the guest limit.
+- **Backend:** `LIMIT_CATALOG` / `limitsForMenu` / `getMenuLimit` / `getFirstMenuLimit` and `GET /subscription-plans/limit-catalog` removed. `subscriptionPlan.service` — `LIMIT_FIELDS`, `normaliseLimits` (blank / "Unlimited" -> NULL, "100 GB" -> 100, anything else not a whole number >= 1 refused), `getPlanLimit(planId, key)`. Enforcement unchanged in shape: `max_events` (createEvent, client's current plan), `max_guests_per_event` (createGuest + QR join new row, the event's plan). `clientBilling.resolvePlanLimits` reads the plan columns — same API shape, so the portal Billing page needed no change.
+- **Admin:** wizard step 4 = "Plan Limits" card (Max Events, Max Guests per Event, Max Images, Max Videos, Storage Limit select 1/10/50/100/500 GB/Unlimited), validated on Next and submit; Review shows a Plan Limits card; plan detail page shows a Plan Limits section; Manage Plan Menus and types lose `limits_json`. `tsc` clean.
+- **Tool `src/database/tools/apply-plan-limits.js`**, two phases (deploy order runs opposite ways):
+  1. default `--apply`: add the 5 columns + copy old per-menu values (highest per plan) into any still NULL — run BEFORE deploying;
+  2. `--drop-old --apply`: drop `limits_json` (backup first) — run AFTER the deploy.
+  - **LOCAL applied both** (9 plans filled: events 5 · guests 250 · images 500 · videos 20 · storage 100 GB; backup `local-plan-limits-drop-old-1790066546247.json`).
+  - **Production dry run:** 5 columns to add, 0 values to copy (no production plan ever had a limit).
+- Found while testing: the limit-parsing regex had lost its backslashes when generated and refused "1" — fixed before anything shipped.
+- Checks on local: 11/11 in-process (bad values refused; "1" / 2 / blank / null / "100 GB" saved right; billing reads the columns; duplicate copies them; event 2 of max 1 refused; guest 3 of max 2 refused; clearing the limit allows it again; throwaway rows removed). `tests/client-billing.test.js` rewritten for the columns: 55/55.
+- Still NOT enforced: images / videos / storage (no real gallery upload yet, §533).
+
+⚠ **Production order:** (1) `node src/database/tools/apply-plan-limits.js --prod --apply` → (2) commit + push, wait for Render → (3) `node src/database/tools/apply-plan-limits.js --prod --drop-old --apply`. Skipping (1) breaks every plan read once the new code is live; running (3) before the deploy breaks them on the old code.

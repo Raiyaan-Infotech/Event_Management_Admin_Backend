@@ -437,14 +437,12 @@ const createGuest = async (clientId, companyId, body) => {
         throw ApiError.conflict(`${clash.name} is already on the guest list for this event.`);
     }
 
-    // Plan-configured quota — see LIMIT_CATALOG in subscriptionPlan.service.js.
-    // Checked against the PLAN THE EVENT WAS CREATED UNDER, not the client's
-    // current one: an event keeps the quota it was built against even if the
-    // client's plan changes later.
+    // Plan limit — see LIMIT_FIELDS in subscriptionPlan.service.js. Checked
+    // against the PLAN THE EVENT WAS CREATED UNDER, not the client's current
+    // one: an event keeps the limit it was built against even if the client's
+    // plan changes later.
     const event = await Event.findByPk(data.event_id, { attributes: ['id', 'subscription_plan_id'] });
-    const maxGuests = await subscriptionPlanService.getMenuLimit(
-        event?.subscription_plan_id, 'event-information', 'max_guests_per_event'
-    );
+    const maxGuests = await subscriptionPlanService.getPlanLimit(event?.subscription_plan_id, 'max_guests_per_event');
     if (maxGuests !== null) {
         const guestCount = await EventGuest.count({ where: { event_id: data.event_id } });
         if (guestCount >= maxGuests) {

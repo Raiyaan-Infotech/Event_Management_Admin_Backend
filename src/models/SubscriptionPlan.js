@@ -40,6 +40,13 @@ module.exports = (sequelize) => {
             type: DataTypes.INTEGER.UNSIGNED,
             allowNull: true,
         },
+        // Wizard step 4 — usage limits, NULL = unlimited. See LIMIT_FIELDS in
+        // subscriptionPlan.service.js for which of these are enforced.
+        max_events: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+        max_guests_per_event: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+        max_photos: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+        max_videos: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+        storage_gb: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
         currency_code: {
             type: DataTypes.STRING(10),
             allowNull: false,

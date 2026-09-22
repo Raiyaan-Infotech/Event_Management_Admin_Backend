@@ -26,91 +26,67 @@ const WRITABLE_FIELDS = [
     'currency_code', 'price', 'trial_days',
     'is_visible', 'is_active', 'sort_order',
     'plan_badge_id',
+    'max_events', 'max_guests_per_event', 'max_photos', 'max_videos', 'storage_gb',
 ];
 
 /**
- * Wizard step 4 — which limit fields each menu exposes.
+ * Wizard step 4 — the plan's usage limits. One set per PLAN (not per menu), so
+ * a limit exists whether or not the plan includes the menu it relates to.
  *
- * Keyed by the menu's slug so it survives menus being renamed. A menu with no
- * entry simply gets no limit fields, which is why the fallback is an empty
- * array rather than an error. Same shape as FIELD_CATALOG in the translations
- * service: adding a limit to a menu is a change here, not a schema change.
+ * NULL = unlimited, which is what a blank field in the wizard means. There is
+ * no RSVP limit: each guest answers once, so RSVPs can never exceed
+ * `max_guests_per_event` — it caps both.
  *
- * `type: 'select'` fields carry their own options; everything else is a number
- * input where blank means unlimited.
+ * Enforced today: max_events (clientEvent.createEvent) and max_guests_per_event
+ * (clientGuest.createGuest, guestRegistration.join). The photo / video / storage
+ * limits are stored and shown on Billing but have nothing to enforce against
+ * until a real gallery upload exists.
  */
-const LIMIT_CATALOG = {
-    'event-information': [
-        { key: 'max_events', label: 'Max Events' },
-        { key: 'max_guests_per_event', label: 'Max Guests Per Event' },
-        { key: 'max_rsvps', label: 'Max RSVPs' },
-    ],
-    gallery: [
-        { key: 'max_photos', label: 'Max Photos' },
-        { key: 'max_videos', label: 'Max Videos' },
-        { key: 'storage_gb', label: 'Storage Space', type: 'select', options: ['1 GB', '10 GB', '50 GB', '100 GB', '500 GB', 'Unlimited'] },
-    ],
-    // Two entries, not one `guests-family` — that key matched neither menu's
-    // real slug (`family` / `participants`) and so neither limit ever rendered.
-    family: [{ key: 'max_family_members', label: 'Max Family Members' }],
-    participants: [{ key: 'max_participants', label: 'Max Participants' }],
-    rsvp: [
-        { key: 'max_rsvps', label: 'Max RSVPs' },
-        { key: 'rsvp_closing_days', label: 'RSVP Closing Days Before Event', helper: '0 for no limit' },
-    ],
-    wishes: [{ key: 'max_wishes', label: 'Max Wishes' }],
-    'social-wall': [{ key: 'max_posts', label: 'Max Posts' }],
-    downloads: [
-        { key: 'storage_gb', label: 'Storage Space', type: 'select', options: ['1 GB', '10 GB', '50 GB', '100 GB', '500 GB', 'Unlimited'] },
-        { key: 'max_files', label: 'Max Files' },
-    ],
-    'contact-us': [{ key: 'max_entries', label: 'Max Entries' }],
-    agenda: [{ key: 'max_items', label: 'Max Items' }],
-    venue: [{ key: 'max_venues', label: 'Max Venues' }],
-};
-
-const limitsForMenu = (slug) => LIMIT_CATALOG[slug] || [];
+const LIMIT_FIELDS = [
+    { key: 'max_events', label: 'Max Events' },
+    { key: 'max_guests_per_event', label: 'Max Guests per Event' },
+    { key: 'max_photos', label: 'Max Images' },
+    { key: 'max_videos', label: 'Max Videos' },
+    { key: 'storage_gb', label: 'Storage Limit' },
+];
+const LIMIT_KEYS = LIMIT_FIELDS.map((f) => f.key);
 
 /**
- * A plan's configured cap for one field on one menu, or null when it was left
- * blank — "blank means unlimited", the same convention the wizard's own limit
- * inputs use. Callers compare a live count against this and only refuse the
- * write when it comes back non-null.
+ * '' / null / 'Unlimited' -> null; a whole number >= 1 -> that number. Accepts
+ * "100 GB" too, the shape the old per-menu storage select stored. Anything
+ * else is refused rather than silently stored as unlimited.
  */
-const getMenuLimit = async (planId, menuSlug, key) => {
-    if (!planId) return null;
-    const menu = await EventMenu.findOne({ where: { slug: menuSlug }, attributes: ['id'] });
-    if (!menu) return null;
-    const row = await SubscriptionPlanMenu.findOne({
-        where: { plan_id: planId, menu_id: menu.id },
-        attributes: ['limits_json'],
-    });
-    const raw = row?.limits_json?.[key];
-    const n = parseInt(raw, 10);
-    return Number.isFinite(n) && n > 0 ? n : null;
-};
-
-/**
- * Same as `getMenuLimit`, but tries several menus in order and returns the
- * first one that actually has a value set.
- *
- * `max_rsvps` is offered on BOTH `event-information` and `rsvp` in the
- * catalogue (the admin may only ever see the first, if the plan's category
- * does not grant an RSVP menu) — this is what lets either one work without the
- * caller having to guess which was actually filled in.
- */
-const getFirstMenuLimit = async (planId, menuSlugs, key) => {
-    for (const slug of menuSlugs) {
-        const limit = await getMenuLimit(planId, slug, key);
-        if (limit !== null) return limit;
+const normaliseLimits = (payload) => {
+    for (const { key, label } of LIMIT_FIELDS) {
+        if (payload[key] === undefined) continue;
+        const raw = payload[key];
+        if (raw === null || raw === '' || String(raw).trim().toLowerCase() === 'unlimited') {
+            payload[key] = null;
+            continue;
+        }
+        const match = String(raw).trim().match(/^(\d+)(\s*gb)?$/i);
+        const n = match ? Number(match[1]) : NaN;
+        if (!Number.isInteger(n) || n < 1) {
+            throw ApiError.badRequest(`${label} must be a whole number of 1 or more, or blank for unlimited.`);
+        }
+        payload[key] = n;
     }
-    return null;
+};
+
+/**
+ * A plan's limit for one key, or null (unlimited / no plan). Callers compare a
+ * live count against this and refuse the write only when it is non-null.
+ */
+const getPlanLimit = async (planId, key) => {
+    if (!planId || !LIMIT_KEYS.includes(key)) return null;
+    const plan = await SubscriptionPlan.findByPk(planId, { attributes: ['id', key] });
+    const n = Number(plan?.[key]);
+    return Number.isInteger(n) && n > 0 ? n : null;
 };
 
 /**
  * Reason options for the Deactivate / Delete confirm screens. In code rather
- * than a table for the same reason as LIMIT_CATALOG — they are a fixed list the
- * UI renders, not data an admin curates.
+ * than a table: they are a fixed list the UI renders, not data an admin curates.
  */
 const REASONS = {
     deactivation: [
@@ -131,9 +107,6 @@ const REASONS = {
 };
 
 const getReasons = () => REASONS;
-
-/** The catalogue, so the wizard can render step 4 without hardcoding it. */
-const getLimitCatalog = () => LIMIT_CATALOG;
 
 const PLAN_INCLUDE = [
     { model: PlanType, as: 'planType', attributes: ['id', 'name'], required: false },
@@ -224,7 +197,6 @@ const syncPlanMenus = async (planId, menus, transaction) => {
     const incoming = menus
         .map((m, index) => ({
             menu_id: parseInt(m.menu_id ?? m.id, 10),
-            limits_json: m.limits_json ?? m.limits ?? null,
             sort_order: m.sort_order ?? index,
         }))
         .filter((m) => !Number.isNaN(m.menu_id));
@@ -341,6 +313,7 @@ const create = async (data, userId = null, companyId = undefined) => {
     if (!payload.plan_code) throw ApiError.badRequest('Plan code is required');
     await assertCodeAvailable(payload.plan_code, companyId);
 
+    normaliseLimits(payload);
     await normaliseBadge(payload, companyId);
 
     const plan = await sequelize.transaction(async (transaction) => {
@@ -381,6 +354,7 @@ const update = async (id, data, userId = null, companyId = undefined) => {
         await assertCodeAvailable(payload.plan_code, companyId, plan.id);
     }
 
+    normaliseLimits(payload);
     await normaliseBadge(payload, companyId);
 
     const oldValues = plan.toJSON();
@@ -576,11 +550,8 @@ module.exports = {
     deleteWithReason,
     getReasons,
     REASONS,
-    getLimitCatalog,
-    limitsForMenu,
-    getMenuLimit,
-    getFirstMenuLimit,
-    LIMIT_CATALOG,
+    getPlanLimit,
+    LIMIT_FIELDS,
     // Alias used by approval.service.js executeApprovedAction
     remove: deleteById,
 };

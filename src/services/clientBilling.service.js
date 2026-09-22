@@ -125,62 +125,21 @@ const ENDING_STATUSES = new Set(['cancelled', 'cancelling']);
  * ────────────────────────────────────────────────────────────────────────── */
 
 /**
- * A plan's ceilings, merged from the menus it grants.
- *
- * ⚠ The limits live on `subscription_plan_menus.limits_json`, i.e. per GRANTED
- * MENU, not per plan — that is where the admin's Step 4 wizard writes them. So
- * "the plan's max_events" means "the highest max_events among the menus this
- * plan grants". The MAXIMUM, not the minimum: a plan that grants two menus
- * which both cap events should not be capped by the stricter of two things it
- * paid for.
- *
- * ⚠ The stored values are not consistently typed. Plan 3 holds `"200"` as a
- * string where plans 4-6 hold `200` as a number, and `storage_gb` is the string
- * `"100 GB"`. Everything is coerced here rather than at the call sites, or the
- * first `>` comparison against a string silently does the wrong thing.
+ * A plan's limits — the five columns wizard step 4 writes on the plan itself
+ * (see LIMIT_FIELDS in subscriptionPlan.service.js). A key is present only when
+ * the plan sets it; absent = unlimited.
  */
-const NUMERIC_LIMIT_KEYS = [
-    'max_events', 'max_guests_per_event', 'max_rsvps',
-    'max_photos', 'max_videos', 'storage_gb', 'rsvp_closing_days',
-];
-
-/** `"100 GB"` -> 100, `"200"` -> 200, `200` -> 200, junk -> null. */
-const toNumber = (value) => {
-    if (value === null || value === undefined || value === '') return null;
-    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
-    const match = String(value).match(/-?\d+(\.\d+)?/);
-    if (!match) return null;
-    const n = Number(match[0]);
-    return Number.isFinite(n) ? n : null;
-};
+const PLAN_LIMIT_KEYS = ['max_events', 'max_guests_per_event', 'max_photos', 'max_videos', 'storage_gb'];
 
 const resolvePlanLimits = async (planId) => {
     if (!planId) return {};
-
-    const rows = await SubscriptionPlanMenu.findAll({
-        where: { plan_id: planId },
-        attributes: ['menu_id', 'limits_json'],
-        raw: true,
-    });
-
-    const merged = {};
-    for (const row of rows) {
-        let limits = row.limits_json;
-        if (!limits) continue;
-        // The column is JSON, but a row written as a string still parses back
-        // as a string on some drivers. Tolerate both rather than assume.
-        if (typeof limits === 'string') {
-            try { limits = JSON.parse(limits); } catch { continue; }
-        }
-        if (typeof limits !== 'object') continue;
-
-        for (const key of NUMERIC_LIMIT_KEYS) {
-            const n = toNumber(limits[key]);
-            if (n === null) continue;
-            merged[key] = merged[key] === undefined ? n : Math.max(merged[key], n);
-        }
+    const plan = await SubscriptionPlan.findByPk(planId, { attributes: ['id', ...PLAN_LIMIT_KEYS], raw: true });
+    const limits = {};
+    for (const key of PLAN_LIMIT_KEYS) {
+        const n = Number(plan?.[key]);
+        if (Number.isInteger(n) && n > 0) limits[key] = n;
     }
-    return merged;
+    return limits;
 };
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -515,8 +474,10 @@ const getUsage = async (clientId, subscription) => {
             available: false,
             reason: 'Storage usage is not measured yet.',
         },
+        // One answer per guest, so RSVPs are capped by the guest limit — a
+        // PER-EVENT figure, like guests.per_event_limit.
         rsvps: {
-            limit: limits.max_rsvps ?? null,
+            limit: limits.max_guests_per_event ?? null,
         },
     };
 };

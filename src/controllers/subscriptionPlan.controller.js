@@ -15,16 +15,6 @@ const getById = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, { subscriptionPlan });
 });
 
-/**
- * Wizard step 4 renders whatever this returns, so the limit fields live in one
- * place instead of being duplicated in the frontend.
- */
-const getLimitCatalog = asyncHandler(async (req, res) => {
-    const catalog = subscriptionPlanService.getLimitCatalog();
-    logger.logRequest(req, 'Fetched plan limit catalog');
-    return ApiResponse.success(res, { catalog });
-});
-
 const create = asyncHandler(async (req, res) => {
     const subscriptionPlan = await subscriptionPlanService.create(req.body, req.user.id, req.companyId);
     logger.logRequest(req, `Created subscription plan: ${subscriptionPlan.name}`);
@@ -109,7 +99,6 @@ const deleteById = asyncHandler(async (req, res) => {
 module.exports = {
     getAll,
     getById,
-    getLimitCatalog,
     getReasons,
     deactivate,
     reactivate,

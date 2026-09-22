@@ -1,15 +1,10 @@
 const { DataTypes } = require('sequelize');
 
 /**
- * One row per menu included in a plan.
+ * One row per menu included in a plan, with its display order.
  *
- * Not a flat menu_ids array on the plan, because step 4 hangs per-menu limits
- * off it. No platform here (or on the plan): where a menu shows is decided by
- * the menu's own per-platform Active switch in Menu Management.
- *
- * `limits_json` is keyed by the menu limit catalogue in
- * subscriptionPlan.service.js (e.g. { max_photos: 500, storage_gb: 100 }).
- * A missing key means "unlimited", which is what the form shows by default.
+ * No platform and no limits here: where a menu shows is decided by the menu's
+ * own per-platform Active switch, and usage limits live on the plan itself.
  */
 module.exports = (sequelize) => {
     const SubscriptionPlanMenu = sequelize.define('SubscriptionPlanMenu', {
@@ -25,10 +20,6 @@ module.exports = (sequelize) => {
         menu_id: {
             type: DataTypes.INTEGER.UNSIGNED,
             allowNull: false,
-        },
-        limits_json: {
-            type: DataTypes.JSON,
-            allowNull: true,
         },
         sort_order: {
             type: DataTypes.INTEGER,

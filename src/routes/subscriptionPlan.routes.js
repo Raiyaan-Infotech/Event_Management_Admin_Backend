@@ -11,8 +11,7 @@ router.use(extractCompanyContext);
 // Filters: ?search= &event_category_id= &plan_type_id= &billing_cycle=
 //          &is_active= &page= &limit=
 router.get('/', hasPermission('subscription_plans.view'), controller.getAll);
-// Before /:id, or "limit-catalog" is swallowed as an id.
-router.get('/limit-catalog', hasPermission('subscription_plans.view'), controller.getLimitCatalog);
+// Before /:id, or "reasons" is swallowed as an id.
 router.get('/reasons', hasPermission('subscription_plans.view'), controller.getReasons);
 router.get('/:id', hasPermission('subscription_plans.view'), controller.getById);
 

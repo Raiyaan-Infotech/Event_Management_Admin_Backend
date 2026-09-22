@@ -8,10 +8,9 @@
  *     as `active`, which let the cancel guard through twice and wrote a
  *     duplicate row into the billing history. Boundary cases only exist here.
  *
- *  2. resolvePlanLimits(). The stored limits are genuinely inconsistent —
- *     plan 3 holds "200" as a string where plans 4-6 hold 200 as a number, and
- *     storage_gb is the string "100 GB". A coercion bug here shows up as a
- *     usage bar that is silently wrong rather than as an error.
+ *  2. resolvePlanLimits(). Reads the plan's own limit columns (wizard step 4);
+ *     a wrong value here shows up as a usage bar that is silently wrong rather
+ *     than as an error.
  *
  * Read-only against the database. Nothing is created, updated or deleted.
  */
@@ -80,29 +79,16 @@ const at = (offsetDays) => new Date(Date.now() + offsetDays * day);
     const free = billing.withTax(0, 18);
     ok('a free plan has no tax', free.total === 0 && free.tax_amount === 0);
 
-    console.log('\n── resolvePlanLimits: mixed stored types ──────────');
-    const plans = await SubscriptionPlan.findAll({ attributes: ['id', 'name'], order: [['id', 'ASC']] });
-    let sawStorage = false;
-    let sawEvents = false;
+    console.log('\n── resolvePlanLimits: the plan\'s own columns ─────');
+    const KEYS = ['max_events', 'max_guests_per_event', 'max_photos', 'max_videos', 'storage_gb'];
+    const plans = await SubscriptionPlan.findAll({ attributes: ['id', 'name', ...KEYS], order: [['id', 'ASC']], raw: true });
     for (const p of plans) {
         const limits = await billing.resolvePlanLimits(p.id);
-        const keys = Object.keys(limits);
-        if (!keys.length) continue;
-        const allNumbers = keys.every((k) => typeof limits[k] === 'number' && Number.isFinite(limits[k]));
-        ok(`plan ${p.id} ${p.name}: every limit coerced to a finite number`, allNumbers, JSON.stringify(limits));
-        if (limits.storage_gb !== undefined) sawStorage = true;
-        if (limits.max_events !== undefined) sawEvents = true;
+        const expected = Object.fromEntries(KEYS.filter((k) => p[k]).map((k) => [k, Number(p[k])]));
+        ok(`plan ${p.id} ${p.name}: limits match its columns (unset = absent)`,
+            JSON.stringify(limits) === JSON.stringify(expected), `${JSON.stringify(limits)} vs ${JSON.stringify(expected)}`);
     }
-    // Plan 3 stores its limits as STRINGS and storage_gb as "100 GB". If the
-    // coercion regressed, one of these would come back as a string or NaN.
-    const plan3 = await billing.resolvePlanLimits(3);
-    ok('plan 3 ("200" as a string) coerces to the number 200',
-        plan3.max_rsvps === 200, JSON.stringify(plan3));
-    ok('"100 GB" coerces to the number 100',
-        plan3.storage_gb === 100, JSON.stringify(plan3));
-    ok('at least one plan exposes a storage ceiling', sawStorage);
-    ok('at least one plan exposes an event ceiling', sawEvents);
-    ok('a plan with no menus yields no limits, not a crash',
+    ok('an unknown plan yields no limits, not a crash',
         Object.keys(await billing.resolvePlanLimits(999999)).length === 0);
     ok('a null plan id yields no limits',
         Object.keys(await billing.resolvePlanLimits(null)).length === 0);
