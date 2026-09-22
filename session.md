@@ -13063,3 +13063,47 @@ Checked for every menu: (1) is it real data or a design-only mockup (§530, §53
 - **No plan limit is enforced anywhere.** `subscriptionPlan.service` `LIMIT_CATALOG` lets the admin set Max Events, Max Guests Per Event, Max RSVPs, Max Photos, Max Items, … per plan, and Billing displays them — but no create path (`clientEvent.createEvent`, `clientGuest.createGuest`, `guestRegistration.join`, RSVP submit) reads a single one. A Free client can create any number of events and guests.
 - **Max Family Members / Max Participants can never be set.** Their catalogue key is `guests-family`, a slug that matches none of the 17 menus, so `limitsForMenu(slug)` never returns them.
 - **Invite & Share is shown to guests.** Its QR / Email share hand out the event's own `qr_token`, which is what admits somebody to the event — so any guest can invite anybody. Product decision, not assumed either way.
+
+### 539. Any guest who joined sees the Participants list (family included)
+
+Jamal: "participant can view other participants list okay and also family can view also". Participants had been host-only since §532, alongside Guests.
+
+**Why it differs from Guests.** Guests is the host's private register — every invitee, mobiles, emails, notes. Participants only ever lists people who joined the event themselves, and a non-owner can only open the event at all if they did (`getEventForViewer` refuses one with no guest row before `presentOne` runs; the wishlist reader keeps only joined events the same way). So the tile needs no extra rule: `HOST_ONLY_MENU_SLUGS` is now just `{ guests }`, and every non-owner who can see the event gets Participants — which covers every family-tagged guest too.
+
+**Backend**
+- New `GET /client/events/:id/participants` → `guestRegistration.service.participantsDirectory`, beside `/family`. Allowed: the host or any guest with a row on the event (404 otherwise). Rows: `participant_client_id IS NOT NULL` — the same "joined" definition the app's `hasJoined` filter uses. Fields: id, name, photo, relationship, group, **`rsvp_status`**, `has_joined`. RSVP status is included here (unlike the family directory) because the Participants screen is built on it — filter pills and a status badge per row; without it every row would read "Pending". No mobile, email or notes.
+
+**Verified on LOCAL** event #23 (`platform=mobile`):
+
+```
+HOST #23    | tiles: family, participants, guests | /participants: 6 rows
+FAMILY #94  | tiles: family, participants         | /participants: 6 rows
+OTHER #10   | tiles: participants                 | /participants: 6 rows
+keys: id / full_name / photo / relationship / rsvp_status / has_joined / group
+```
+
+**App**
+- `GuestRepository.participantsDirectory` (cache key `event_participants_<id>`) and `selectedEventParticipantsProvider` (host → `forEvent`, guest → directory, on `selectAsync(isOwner)`).
+- `participants_screen.dart`: reads the new provider; back-online refetch; for a guest the rows are read-only (the details page is the host's edit page with mobile/email/Edit/RSVP switcher) and Add Participant stays host-only.
+- `add_participant_screen.dart` also invalidates the new provider — ONE line, in a file carrying Jamal's own uncommitted changes, so NOT staged.
+- `offline_prefetch.dart` saves the directory for a non-owner whose menus include `participants`.
+
+`flutter analyze` clean, `flutter test` 30/30, `node --check` clean. NOT device-tested.
+
+⚠ The Free plan grants neither `family` nor `participants`, so on Jamal's event #19 the live test accounts (§536) see neither tile. Test on Standard (#21) or Premium (#22).
+
+### 540. Confirmed: Guests was never touched by §539
+
+Jamal, after §539: "i told only family and participant list only but you are change geuest also change that guest list showing only for organizer okay". Re-checked against live local data rather than just re-reading the diff, since that is the only way to actually answer "does it still behave right" rather than "does it still say the right thing".
+
+`HOST_ONLY_MENU_SLUGS` is `{ guests }` only — §539 removed `family` and `participants` from that set, `guests` was never in scope. `clientGuest.service.listGuests` still scopes by the caller's own `website_client_id`, untouched.
+
+Verified live on event #23:
+
+| Viewer | Guests tile | `GET /client/guests` |
+|---|---|---|
+| Host #23 | YES | 6 rows |
+| Family guest #94 | no | 0 rows |
+| Other guest #10 | no | 0 rows |
+
+No code change — the concern was the READING of the earlier report's table, not the code.

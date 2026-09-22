@@ -100,4 +100,16 @@ const familyDirectory = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, members, 'Family retrieved');
 });
 
-module.exports = { resolve, requestOtp, verifyOtp, join, myEvents, myRsvp, submitMyRsvp, familyDirectory };
+/**
+ * The event's participants directory — name, photo, relationship, RSVP
+ * status. Open to the host and to any guest who joined; see the service.
+ */
+const participantsDirectory = asyncHandler(async (req, res) => {
+    const members = await service.participantsDirectory(req.websiteClient.id, req.params.id);
+    return ApiResponse.success(res, members, 'Participants retrieved');
+});
+
+module.exports = {
+    resolve, requestOtp, verifyOtp, join, myEvents, myRsvp, submitMyRsvp,
+    familyDirectory, participantsDirectory,
+};

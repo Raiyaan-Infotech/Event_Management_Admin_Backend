@@ -757,6 +757,64 @@ const familyDirectory = async (clientId, rawEventId) => {
 };
 
 /**
+ * The event's PARTICIPANTS — guests who actually joined through the app
+ * (`participant_client_id` set) — as a DIRECTORY, for anyone who is one
+ * themselves.
+ *
+ * ── WHY THIS EXISTS ──────────────────────────────────────────────────────────
+ * Jamal: "participant can view other participants list, and also family can
+ * view also". Participants was host-only (§532), same reasoning as Guests: the
+ * screen read `GET /client/guests`, the host's full register. But unlike
+ * Guests — which is the host's private invite list, mobiles and emails
+ * included — Participants only ever lists people who joined the event
+ * themselves, and reaching this endpoint AT ALL already proves the caller is
+ * one of them (`getEventForViewer` refuses a non-owner with no guest row
+ * before `presentOne` is ever called — see its own comment). So the rule here
+ * is simpler than `familyDirectory`'s: no family tag required, any guest who
+ * joined qualifies, which is also every family-tagged guest.
+ *
+ * ── FIELDS ────────────────────────────────────────────────────────────────
+ * Name, photo, relationship, group, and — unlike the family directory —
+ * `rsvp_status`. The Participants screen is built around it (filter pills, the
+ * status badge on every row); leaving it out would make every row read
+ * "Pending" regardless of the real answer. Still no mobile, email or notes.
+ */
+const participantsDirectory = async (clientId, rawEventId) => {
+    const eventId = eventIdOf(rawEventId);
+
+    const [event, membership] = await Promise.all([
+        Event.findOne({ where: { id: eventId }, attributes: ['id', 'website_client_id'] }),
+        EventGuest.findOne({
+            where: { event_id: eventId, participant_client_id: clientId },
+            attributes: ['id'],
+        }),
+    ]);
+    if (!event) throw ApiError.notFound('Event not found.');
+
+    const isOwner = Number(event.website_client_id) === Number(clientId);
+    if (!isOwner && !membership) {
+        throw ApiError.notFound('You are not a guest of this event.');
+    }
+
+    const guests = await EventGuest.findAll({
+        where: { event_id: eventId, participant_client_id: { [Op.ne]: null } },
+        attributes: ['id', 'name', 'photo', 'relationship', 'rsvp_status'],
+        include: [{ model: EventGuestGroup, as: 'group', attributes: ['name', 'color'], required: false }],
+        order: [['name', 'ASC']],
+    });
+
+    return guests.map((g) => ({
+        id: g.id,
+        full_name: g.name,
+        photo: g.photo,
+        relationship: g.relationship,
+        rsvp_status: g.rsvp_status,
+        has_joined: true,
+        group: g.group ? { name: g.group.name, color: g.group.color } : null,
+    }));
+};
+
+/**
  * Submit the RSVP — ONCE per event.
  *
  * Writes the same `event_guests` columns the portal's RSVPs, Guests and
@@ -845,6 +903,7 @@ module.exports = {
     getMyRsvp,
     submitMyRsvp,
     familyDirectory,
+    participantsDirectory,
     // exported for tests
     publicEvent,
     eventFromToken,

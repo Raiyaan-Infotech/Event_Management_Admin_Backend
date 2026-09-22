@@ -554,7 +554,14 @@ const getEventForViewer = async (clientId, eventId, opts = {}) => {
  * is a fact about what these three SCREENS read, not a property an admin
  * should be able to toggle per menu in Menu Management.
  */
-const HOST_ONLY_MENU_SLUGS = new Set(['guests', 'participants']);
+// The host's private guest register — mobiles, emails, notes included.
+// `family` and `participants` used to be here too; both now have their own
+// guest-safe directory (familyDirectory / participantsDirectory) and their
+// own gate in the loop below, because "may see the tile" differs per slug —
+// family needs the viewer's own row to be family-tagged, participants needs
+// only that the viewer is a guest at all (reaching this function as a
+// non-owner already proves that — see getEventForViewer).
+const HOST_ONLY_MENU_SLUGS = new Set(['guests']);
 
 /**
  * The app's own three Family sub-tabs (Family / Relative / Close Friend),
@@ -661,12 +668,14 @@ const presentOne = async (event, { platform = 'website', isOwner = true, viewerI
         if (row.menu_group === 'app' || row.menu_group === 'portal') {
             if (!wantsApp) continue;
             if (!isOwner) {
-                // See HOST_ONLY_MENU_SLUGS: these two open the host's guest
+                // See HOST_ONLY_MENU_SLUGS: this opens the host's guest
                 // register, which answers a participant with an empty list.
                 if (HOST_ONLY_MENU_SLUGS.has(row.slug)) continue;
-                // Family is different: it opens a directory of OTHER family
-                // members, which only makes sense to somebody who is one.
+                // Family opens a directory of OTHER family members, which only
+                // makes sense to somebody who is one.
                 if (row.slug === 'family' && !viewerIsFamily) continue;
+                // `participants` needs no extra check: reaching this function
+                // as a non-owner already proves the viewer joined the event.
             }
             appFeatures.push(row);
         } else if (visible.has(Number(row.id))) {

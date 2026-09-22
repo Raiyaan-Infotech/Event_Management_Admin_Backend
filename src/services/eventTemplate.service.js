@@ -508,6 +508,9 @@ const getAll = async (query = {}, companyId = undefined) => {
     const categoryId = numericFilter(query.event_category_id);
     if (categoryId !== undefined) where.event_category_id = categoryId;
 
+    const templateCategoryId = numericFilter(query.template_category_id);
+    if (templateCategoryId !== undefined) where.template_category_id = templateCategoryId;
+
     if (query.style && query.style !== 'all') where.style = String(query.style).toLowerCase();
 
     if (query.is_featured !== undefined && query.is_featured !== '' && query.is_featured !== 'all') {
