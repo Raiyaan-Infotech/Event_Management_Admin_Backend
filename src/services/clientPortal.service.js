@@ -294,27 +294,35 @@ const platformFromHeader = (value) =>
 /**
  * The menu ids a plan grants ON ONE PLATFORM.
  *
- * `subscription_plan_menus` carries `for_website` / `for_mobile` per menu — the
- * admin wizard picks each menu per platform. The menu's own per-platform Active
- * switch in Menu Management (`active_website` / `active_mobile`) must also be
- * on: switching a menu off for the app hides it there for every plan.
+ * Two switches, both must be on:
+ *   - the PLAN is sold on this platform (`subscription_plans.for_website` /
+ *     `for_mobile`, the wizard's "Menu For") — a menu has no platform of its
+ *     own any more, so a plan grants each of its menus on every platform the
+ *     plan itself targets;
+ *   - the menu's per-platform Active switch in Menu Management
+ *     (`active_website` / `active_mobile`) — switching a menu off for the app
+ *     hides it there for every plan.
  */
 const grantedMenuIds = async (planId, platform = 'website') => {
-    const flag = platform === 'mobile' ? 'for_mobile' : 'for_website';
-    // Cached: the same answer for every guest of every event on this plan, and
-    // it only changes when an admin saves the plan — which busts it explicitly
-    // (see `invalidatePlanGrants`, called from subscriptionPlan.service and
-    // eventMenu.service).
+    const planFlag = platform === 'mobile' ? 'for_mobile' : 'for_website';
     const activeFlag = platform === 'mobile' ? 'active_mobile' : 'active_website';
+    // Cached: the same answer for every guest of every event on this plan, and
+    // it only changes when an admin saves the plan or a menu — which busts it
+    // explicitly (see `invalidatePlanGrants`, called from subscriptionPlan.service
+    // and eventMenu.service).
     return planGrantsCache.wrap(`${planId}:${platform}`, async () => {
-        const grants = await SubscriptionPlanMenu.findAll({
-            where: { plan_id: planId, [flag]: 1 },
-            attributes: ['menu_id'],
-            include: [{
-                model: EventMenu, as: 'menu', attributes: [], required: true,
-                where: { [activeFlag]: 1 },
-            }],
-        });
+        const [plan, grants] = await Promise.all([
+            SubscriptionPlan.findByPk(planId, { attributes: ['id', planFlag] }),
+            SubscriptionPlanMenu.findAll({
+                where: { plan_id: planId },
+                attributes: ['menu_id'],
+                include: [{
+                    model: EventMenu, as: 'menu', attributes: [], required: true,
+                    where: { [activeFlag]: 1 },
+                }],
+            }),
+        ]);
+        if (!plan || Number(plan[planFlag]) !== 1) return [];
         return grants.map((g) => Number(g.menu_id));
     });
 };

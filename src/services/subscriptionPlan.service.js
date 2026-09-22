@@ -51,10 +51,10 @@ const LIMIT_CATALOG = {
         { key: 'max_videos', label: 'Max Videos' },
         { key: 'storage_gb', label: 'Storage Space', type: 'select', options: ['1 GB', '10 GB', '50 GB', '100 GB', '500 GB', 'Unlimited'] },
     ],
-    'guests-family': [
-        { key: 'max_family_members', label: 'Max Family Members' },
-        { key: 'max_participants', label: 'Max Participants / Guests' },
-    ],
+    // Two entries, not one `guests-family` — that key matched neither menu's
+    // real slug (`family` / `participants`) and so neither limit ever rendered.
+    family: [{ key: 'max_family_members', label: 'Max Family Members' }],
+    participants: [{ key: 'max_participants', label: 'Max Participants' }],
     rsvp: [
         { key: 'max_rsvps', label: 'Max RSVPs' },
         { key: 'rsvp_closing_days', label: 'RSVP Closing Days Before Event', helper: '0 for no limit' },
@@ -71,6 +71,42 @@ const LIMIT_CATALOG = {
 };
 
 const limitsForMenu = (slug) => LIMIT_CATALOG[slug] || [];
+
+/**
+ * A plan's configured cap for one field on one menu, or null when it was left
+ * blank — "blank means unlimited", the same convention the wizard's own limit
+ * inputs use. Callers compare a live count against this and only refuse the
+ * write when it comes back non-null.
+ */
+const getMenuLimit = async (planId, menuSlug, key) => {
+    if (!planId) return null;
+    const menu = await EventMenu.findOne({ where: { slug: menuSlug }, attributes: ['id'] });
+    if (!menu) return null;
+    const row = await SubscriptionPlanMenu.findOne({
+        where: { plan_id: planId, menu_id: menu.id },
+        attributes: ['limits_json'],
+    });
+    const raw = row?.limits_json?.[key];
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+};
+
+/**
+ * Same as `getMenuLimit`, but tries several menus in order and returns the
+ * first one that actually has a value set.
+ *
+ * `max_rsvps` is offered on BOTH `event-information` and `rsvp` in the
+ * catalogue (the admin may only ever see the first, if the plan's category
+ * does not grant an RSVP menu) — this is what lets either one work without the
+ * caller having to guess which was actually filled in.
+ */
+const getFirstMenuLimit = async (planId, menuSlugs, key) => {
+    for (const slug of menuSlugs) {
+        const limit = await getMenuLimit(planId, slug, key);
+        if (limit !== null) return limit;
+    }
+    return null;
+};
 
 /**
  * Reason options for the Deactivate / Delete confirm screens. In code rather
@@ -193,8 +229,6 @@ const syncPlanMenus = async (planId, menus, transaction) => {
     const incoming = menus
         .map((m, index) => ({
             menu_id: parseInt(m.menu_id ?? m.id, 10),
-            for_website: toBit(m.for_website, 0),
-            for_mobile: toBit(m.for_mobile, 0),
             limits_json: m.limits_json ?? m.limits ?? null,
             sort_order: m.sort_order ?? index,
         }))
@@ -380,6 +414,14 @@ const update = async (id, data, userId = null, companyId = undefined) => {
         }
     });
 
+    // "Menu For" decides which platforms every menu of the plan is granted on
+    // (see clientPortal.grantedMenuIds), so changing it must drop the cached
+    // grants too — not only a menu change. After the commit, so no request can
+    // re-cache the old answer while the write is still in flight.
+    if (payload.for_website !== undefined || payload.for_mobile !== undefined || data.menus !== undefined) {
+        require('./clientPortal.service').invalidatePlanGrants(plan.id);
+    }
+
     logger.logDB('update', MODEL_NAME, id);
     await logger.logActivity(userId, 'update', MODEL_NAME, `Updated subscription plan: ${plan.name}`, {
         recordId: id,
@@ -556,6 +598,8 @@ module.exports = {
     REASONS,
     getLimitCatalog,
     limitsForMenu,
+    getMenuLimit,
+    getFirstMenuLimit,
     LIMIT_CATALOG,
     // Alias used by approval.service.js executeApprovedAction
     remove: deleteById,

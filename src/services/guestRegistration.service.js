@@ -24,6 +24,7 @@ const msg91Sms = require('./msg91Sms.service');
 // the host's would then disagree about the same event on the same day.
 const { deriveStatus, isFamilyCategory } = require('./clientEvent.service');
 const notificationTrigger = require('./notificationTrigger.service');
+const subscriptionPlanService = require('./subscriptionPlan.service');
 const rsvpService = require('./clientRsvp.service');
 const notifications = require('./clientNotification.service');
 const clientPortalService = require('./clientPortal.service');
@@ -481,6 +482,24 @@ const join = async (client, payload = {}) => {
     // re-scan path always posts `guest_count: 0`.
     const writeAnswer = !existing || (response !== 'none' && !alreadyAnswered);
 
+    // Plan-configured quota — see LIMIT_CATALOG in subscriptionPlan.service.js
+    // and the matching check in submitMyRsvp. Only matters when this join is
+    // ABOUT to record a real answer — joining with no response yet (or a
+    // re-scan that changes nothing) never counts against it.
+    if (writeAnswer && response !== 'none') {
+        const maxRsvps = await subscriptionPlanService.getFirstMenuLimit(
+            event.subscription_plan_id, ['rsvp', 'event-information'], 'max_rsvps'
+        );
+        if (maxRsvps !== null) {
+            const rsvpCount = await EventGuest.count({
+                where: { event_id: event.id, response_type: { [Op.ne]: 'none' } },
+            });
+            if (rsvpCount >= maxRsvps) {
+                throw ApiError.badRequest('This event has reached its RSVP limit. Please contact the host.');
+            }
+        }
+    }
+
     const before = snapshotAnswer(existing);
 
     const fields = { participant_client_id: client.id };
@@ -523,6 +542,19 @@ const join = async (client, payload = {}) => {
         await existing.update(fields); // invite_source untouched — see the header
         guest = existing;
     } else {
+        // Plan-configured quota — see LIMIT_CATALOG in subscriptionPlan.service.js.
+        // Only checked for a NEW row: a re-scan of an existing guest must never
+        // be refused for a quota that guest already counts toward.
+        const maxGuests = await subscriptionPlanService.getMenuLimit(
+            event.subscription_plan_id, 'event-information', 'max_guests_per_event'
+        );
+        if (maxGuests !== null) {
+            const guestCount = await EventGuest.count({ where: { event_id: event.id } });
+            if (guestCount >= maxGuests) {
+                throw ApiError.badRequest('This event has reached its guest limit. Please contact the host.');
+            }
+        }
+
         guest = await EventGuest.create({
             ...fields,
             event_id: event.id,
@@ -844,7 +876,9 @@ const submitMyRsvp = async (clientId, rawEventId, body = {}) => {
         throw ApiError.notFound('You are not a guest of this event.');
     }
 
-    const event = await Event.findByPk(eventId, { attributes: ['id', 'website_client_id', 'menu_ids'] });
+    const event = await Event.findByPk(eventId, {
+        attributes: ['id', 'website_client_id', 'menu_ids', 'subscription_plan_id'],
+    });
     if (!(await rsvpEnabledFor(event))) {
         throw ApiError.badRequest('RSVP is not enabled for this event.');
     }
@@ -852,6 +886,26 @@ const submitMyRsvp = async (clientId, rawEventId, body = {}) => {
     const response = String(body.response_type || '').toLowerCase();
     if (!['yes', 'no', 'maybe'].includes(response)) {
         throw ApiError.badRequest('Please choose a response.');
+    }
+
+    // Plan-configured quota — see LIMIT_CATALOG in subscriptionPlan.service.js.
+    // `rsvp` and `event-information` both offer this field in the catalogue;
+    // whichever the admin actually filled in wins. Counted against responses
+    // already IN (not 'none'), so re-checking a guest who has not answered yet
+    // never trips it. Read-then-write, like the rest of this quota family: the
+    // one-time guard below is what actually prevents a double count, so the
+    // small race between two DIFFERENT guests both passing this check at once
+    // is an acceptable, brief overshoot rather than something worth a lock for.
+    const maxRsvps = await subscriptionPlanService.getFirstMenuLimit(
+        event.subscription_plan_id, ['rsvp', 'event-information'], 'max_rsvps'
+    );
+    if (maxRsvps !== null) {
+        const rsvpCount = await EventGuest.count({
+            where: { event_id: eventId, response_type: { [Op.ne]: 'none' } },
+        });
+        if (rsvpCount >= maxRsvps) {
+            throw ApiError.badRequest('This event has reached its RSVP limit. Please contact the host.');
+        }
     }
 
     let partySize = 1;

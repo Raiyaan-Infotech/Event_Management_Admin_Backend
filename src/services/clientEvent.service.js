@@ -17,6 +17,7 @@ const ApiError = require('../utils/apiError');
 const eventQr = require('../utils/eventQr');
 const clientPortalService = require('./clientPortal.service');
 const mediaService = require('./media.service');
+const subscriptionPlanService = require('./subscriptionPlan.service');
 
 /**
  * Events belonging to a signed-in website client.
@@ -393,7 +394,21 @@ const createEvent = async (clientId, body) => {
     const client = await WebsiteClient.findByPk(clientId);
     if (!client) throw ApiError.notFound('Account not found.');
 
-    const { data } = await normalise(clientId, body, { partial: false });
+    const { data, plan } = await normalise(clientId, body, { partial: false });
+
+    // Plan-configured quota — see LIMIT_CATALOG in subscriptionPlan.service.js.
+    // Checked against the client's CURRENT plan (same one `normalise` just
+    // validated the rest of the body against), not the plan any existing event
+    // was created under.
+    const maxEvents = await subscriptionPlanService.getMenuLimit(plan.id, 'event-information', 'max_events');
+    if (maxEvents !== null) {
+        const eventCount = await Event.count({ where: { website_client_id: client.id } });
+        if (eventCount >= maxEvents) {
+            throw ApiError.badRequest(
+                `Your plan allows a maximum of ${maxEvents} event${maxEvents === 1 ? '' : 's'}. Please upgrade your plan to create more.`
+            );
+        }
+    }
 
     const created = await sequelize.transaction(async (transaction) => {
         const event = await Event.create(

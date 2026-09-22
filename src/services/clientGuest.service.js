@@ -9,6 +9,7 @@ const { Op } = Sequelize;
 const ApiError = require('../utils/apiError');
 const notifications = require('./clientNotification.service');
 const notificationTrigger = require('./notificationTrigger.service');
+const subscriptionPlanService = require('./subscriptionPlan.service');
 // The same two catalogues the guest's own registration form reads — see
 // getGuestFormOptions for why the host cannot go through the admin routes.
 const relationshipOptions = require('./guestRelationshipOption.service');
@@ -434,6 +435,23 @@ const createGuest = async (clientId, companyId, body) => {
     });
     if (clash) {
         throw ApiError.conflict(`${clash.name} is already on the guest list for this event.`);
+    }
+
+    // Plan-configured quota — see LIMIT_CATALOG in subscriptionPlan.service.js.
+    // Checked against the PLAN THE EVENT WAS CREATED UNDER, not the client's
+    // current one: an event keeps the quota it was built against even if the
+    // client's plan changes later.
+    const event = await Event.findByPk(data.event_id, { attributes: ['id', 'subscription_plan_id'] });
+    const maxGuests = await subscriptionPlanService.getMenuLimit(
+        event?.subscription_plan_id, 'event-information', 'max_guests_per_event'
+    );
+    if (maxGuests !== null) {
+        const guestCount = await EventGuest.count({ where: { event_id: data.event_id } });
+        if (guestCount >= maxGuests) {
+            throw ApiError.badRequest(
+                `This event has reached its guest limit of ${maxGuests}. Please upgrade your plan to add more guests.`
+            );
+        }
     }
 
     // Fall back to the default group when the form left it blank — that is what

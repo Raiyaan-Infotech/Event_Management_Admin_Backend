@@ -3,9 +3,9 @@ const { DataTypes } = require('sequelize');
 /**
  * One row per menu included in a plan.
  *
- * Not a flat menu_ids array on the plan, because wizard step 2 picks each menu
- * *per platform* and step 4 hangs per-menu limits off it — neither fits in a
- * list of ids.
+ * Not a flat menu_ids array on the plan, because step 4 hangs per-menu limits
+ * off it. No per-menu platform: a menu is granted on every platform the PLAN
+ * is sold on (`subscription_plans.for_website` / `for_mobile`).
  *
  * `limits_json` is keyed by the menu limit catalogue in
  * subscriptionPlan.service.js (e.g. { max_photos: 500, storage_gb: 100 }).
@@ -25,16 +25,6 @@ module.exports = (sequelize) => {
         menu_id: {
             type: DataTypes.INTEGER.UNSIGNED,
             allowNull: false,
-        },
-        for_website: {
-            type: DataTypes.TINYINT,
-            allowNull: false,
-            defaultValue: 0,
-        },
-        for_mobile: {
-            type: DataTypes.TINYINT,
-            allowNull: false,
-            defaultValue: 0,
         },
         limits_json: {
             type: DataTypes.JSON,

@@ -12,8 +12,10 @@
  *   5. Admin UPDATES the plan's menus; the portal and the app are re-checked.
  *
  * ── WHAT IT LOCKS ───────────────────────────────────────────────────────────
- *   - `for_website` / `for_mobile` on a plan menu decide what each platform
- *     receives (the app is told apart by `X-Client: flutter`)
+ *   - the PLAN's `for_website` / `for_mobile` ("Menu For") decide which
+ *     platforms receive its menus (the app is told apart by `X-Client: flutter`);
+ *     a plan menu has no platform of its own, and switching the plan off for a
+ *     platform takes effect on the next request
  *   - an existing event's `menus` follow the owner's plan AS IT IS NOW, while
  *     its saved `menu_ids` stay untouched — re-granting a menu restores it
  * `gap()` remains for requirements not built yet; there are none today.
@@ -34,6 +36,7 @@ require('dotenv').config();
 const db = require('../src/models');
 const planService = require('../src/services/subscriptionPlan.service');
 const clientService = require('../src/services/websiteClient.service');
+const portalService = require('../src/services/clientPortal.service');
 
 const BASE = process.env.TEST_API_URL || 'http://localhost:5001/api/v1';
 const PASSWORD = 'QaTest@1';
@@ -135,13 +138,13 @@ async function cleanup() {
         is_active: 1,
         is_visible: 0,
         menus: [
-            { menu_id: M['event-information'], for_website: 1, for_mobile: 1 },
-            { menu_id: M.agenda, for_website: 1, for_mobile: 0 },   // WEBSITE ONLY
-            { menu_id: M.rsvp, for_website: 1, for_mobile: 1 },
+            { menu_id: M['event-information'] },
+            { menu_id: M.agenda },
+            { menu_id: M.rsvp },
         ],
     });
     ok('plan created with 3 menus', plan && (plan.planMenus || []).length === 3, JSON.stringify(plan?.planMenus));
-    console.log(`        plan ${plan.id}: Event Information (web+mobile), Agenda (WEB ONLY), RSVP (web+mobile)`);
+    console.log(`        plan ${plan.id} (website + mobile): Event Information, Agenda, RSVP`);
 
     const client = await clientService.create({
         name: `ZZ QA Client ${stamp}`,
@@ -213,8 +216,8 @@ async function cleanup() {
     const appOpts = await app('GET', '/client/event-options');
     const appMenus = appOpts.data?.menus ?? appOpts.data?.options?.menus;
     console.log(`        app is offered:    ${names(appMenus, byId)}`);
-    ok('mobile gets only for_mobile menus (Agenda is web-only)',
-        same(ids(appMenus), [M['event-information'], M.rsvp]),
+    ok('mobile gets the same 3 menus (plan is sold on both platforms)',
+        same(ids(appMenus), [M['event-information'], M.agenda, M.rsvp]),
         `got ${names(appMenus, byId)}`);
 
     const appEvent = await app('GET', `/client/events/${event.id}`);
@@ -224,12 +227,28 @@ async function cleanup() {
     ok('mobile event stats: 1 invited, 0 joined, 0 sent',
         ev?.stats && ev.stats.invited_guests === 1 && ev.stats.guests_joined === 0 && ev.stats.invitations_sent === 0,
         JSON.stringify(ev?.stats));
-    ok('mobile event shows only for_mobile menus (no Agenda)',
-        same(ids(ev?.menus), [M['event-information'], M.rsvp]),
+    ok('mobile event shows all 3 menus',
+        same(ids(ev?.menus), [M['event-information'], M.agenda, M.rsvp]),
         `got ${names(ev?.menus, byId)}`);
 
+    // The plan's own "Menu For" is the only platform switch a plan has.
+    // In-process, through the service: the grants cache is per process, so an
+    // update made HERE can only clear this process's copy — the server on :5001
+    // keeps its own for up to a minute.
+    const optionsFor = async (platform) =>
+        ids((await portalService.getEventOptions(client.id, { platform })).menus);
+    await optionsFor('mobile'); // warm the cache, so the next check proves it is cleared
+    await planService.update(plan.id, { for_website: 1, for_mobile: 0 });
+    ok('plan switched to website only: mobile is granted no menus (cache cleared)',
+        (await optionsFor('mobile')).length === 0);
+    ok('plan switched to website only: website still granted all 3',
+        same(await optionsFor('website'), [M['event-information'], M.agenda, M.rsvp]));
+    await planService.update(plan.id, { for_website: 1, for_mobile: 1 });
+    ok('plan back on mobile: mobile granted all 3 again (cache cleared)',
+        same(await optionsFor('mobile'), [M['event-information'], M.agenda, M.rsvp]));
+
     const webEvent = await portal('GET', `/client/events/${event.id}`);
-    ok('portal event still shows all 3 (Agenda is on the website)',
+    ok('portal event shows all 3',
         same(ids(webEvent.data?.event?.menus), [M['event-information'], M.agenda, M.rsvp]),
         `got ${names(webEvent.data?.event?.menus, byId)}`);
     ok('menu_ids on the event are untouched',
@@ -243,9 +262,9 @@ async function cleanup() {
     console.log('\n── 5. admin updates plan: -Agenda +Gallery ─────────');
     await planService.update(plan.id, {
         menus: [
-            { menu_id: M['event-information'], for_website: 1, for_mobile: 1 },
-            { menu_id: M.gallery, for_website: 1, for_mobile: 1 },
-            { menu_id: M.rsvp, for_website: 1, for_mobile: 1 },
+            { menu_id: M['event-information'] },
+            { menu_id: M.gallery },
+            { menu_id: M.rsvp },
         ],
     });
 
@@ -277,10 +296,10 @@ async function cleanup() {
     // Nothing was deleted from the event — putting Agenda back restores it.
     await planService.update(plan.id, {
         menus: [
-            { menu_id: M['event-information'], for_website: 1, for_mobile: 1 },
-            { menu_id: M.gallery, for_website: 1, for_mobile: 1 },
-            { menu_id: M.agenda, for_website: 1, for_mobile: 1 },
-            { menu_id: M.rsvp, for_website: 1, for_mobile: 1 },
+            { menu_id: M['event-information'] },
+            { menu_id: M.gallery },
+            { menu_id: M.agenda },
+            { menu_id: M.rsvp },
         ],
     });
     const appEvent3 = await app('GET', `/client/events/${event.id}`);
@@ -303,9 +322,9 @@ async function cleanup() {
         resolvedOn.data?.rsvp_enabled === true, `${resolvedOn.status} ${JSON.stringify(resolvedOn.body)?.slice(0, 160)}`);
 
     const withoutRsvp = [
-        { menu_id: M['event-information'], for_website: 1, for_mobile: 1 },
-        { menu_id: M.gallery, for_website: 1, for_mobile: 1 },
-        { menu_id: M.agenda, for_website: 1, for_mobile: 1 },
+        { menu_id: M['event-information'] },
+        { menu_id: M.gallery },
+        { menu_id: M.agenda },
     ];
     await planService.update(plan.id, { menus: withoutRsvp });
     const resolvedOff = await scanner('POST', '/public/events/qr/resolve', { token: qrToken });
@@ -344,7 +363,7 @@ async function cleanup() {
     ok('RSVP off: submitting from the RSVP tab -> 400', submitOff.status === 400, `${submitOff.status} ${submitOff.body?.message}`);
 
     // Admin adds RSVP back — the guest who joined meanwhile can now answer, once.
-    await planService.update(plan.id, { menus: [...withoutRsvp, { menu_id: M.rsvp, for_website: 1, for_mobile: 1 }] });
+    await planService.update(plan.id, { menus: [...withoutRsvp, { menu_id: M.rsvp }] });
     const tabOn = await guestApp('GET', `/client/events/${event.id}/my-rsvp`);
     ok('RSVP back on: RSVP tab lets the guest respond',
         tabOn.data?.rsvp_enabled === true && tabOn.data?.can_respond === true, JSON.stringify(tabOn.data));
@@ -360,12 +379,12 @@ async function cleanup() {
     if (!chatRow) {
         gap('app feature menus exist (run apply-app-feature-menus.js --apply)', false);
     } else {
-        const planNow = [...withoutRsvp, { menu_id: M.rsvp, for_website: 1, for_mobile: 1 }];
+        const planNow = [...withoutRsvp, { menu_id: M.rsvp }];
         const appBefore = await app('GET', `/client/events/${event.id}`);
         ok('plan without Chat: app event menus have no chat',
             !(appBefore.data?.event?.menus || []).some((m) => m.slug === 'chat'));
 
-        await planService.update(plan.id, { menus: [...planNow, { menu_id: chatRow.id, for_website: 0, for_mobile: 1 }] });
+        await planService.update(plan.id, { menus: [...planNow, { menu_id: chatRow.id }] });
         const appAfter = await app('GET', `/client/events/${event.id}`);
         const webAfter = await portal('GET', `/client/events/${event.id}`);
         const webOptsAfter = await portal('GET', '/client/event-options');

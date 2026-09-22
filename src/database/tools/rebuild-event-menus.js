@@ -21,7 +21,7 @@
  *      and every events / plan_types menu_ids list.
  *   2. In ONE transaction: deletes all grants and all menus (hard delete),
  *      inserts the new catalogue with ids 1…N, re-creates each plan's grants
- *      by SLUG (W/M flags and limits kept — so plans keep what they had), and
+ *      by SLUG (limits kept — so plans keep what they had), and
  *      re-points events.menu_ids / plan_types.menu_ids by slug. A menu whose
  *      slug is not in the new list (e.g. an old "speakers") is dropped from
  *      grants and events.
@@ -156,8 +156,8 @@ const parseIds = (raw) => {
             await q(`INSERT INTO event_menus (${cols.join(', ')}, created_at, updated_at) VALUES ?`,
                 [newRows.map((r) => [...cols.map((c) => r[c]), new Date(), new Date()])]);
             if (newGrants.length) {
-                await q(`INSERT INTO subscription_plan_menus (plan_id, menu_id, for_website, for_mobile, limits_json, sort_order, created_at, updated_at) VALUES ?`,
-                    [newGrants.map((g) => [g.plan_id, g.menu_id, g.for_website, g.for_mobile,
+                await q(`INSERT INTO subscription_plan_menus (plan_id, menu_id, limits_json, sort_order, created_at, updated_at) VALUES ?`,
+                    [newGrants.map((g) => [g.plan_id, g.menu_id,
                         g.limits_json === null ? null : (typeof g.limits_json === 'string' ? g.limits_json : JSON.stringify(g.limits_json)),
                         g.sort_order, g.created_at, new Date()])]);
             }

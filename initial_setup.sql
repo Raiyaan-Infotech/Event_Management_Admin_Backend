@@ -2188,8 +2188,6 @@ CREATE TABLE IF NOT EXISTS `subscription_plan_menus` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `plan_id` int unsigned NOT NULL,
   `menu_id` int unsigned NOT NULL,
-  `for_website` tinyint NOT NULL DEFAULT '0',
-  `for_mobile` tinyint NOT NULL DEFAULT '0',
   `limits_json` json DEFAULT NULL COMMENT 'screen 4 limits, keyed by the menu limit catalogue',
   `sort_order` int NOT NULL DEFAULT '0',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
