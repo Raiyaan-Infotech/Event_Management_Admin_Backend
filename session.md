@@ -13212,3 +13212,19 @@ Jamal: a list of default menus for every plan; every other menu in the Menu modu
 - Checks on local: 11/11 (13 defaults / 5 add-ons read from the DB, Default toggle both ways, storage validation, 50 MB saved + read by billing, Unlimited clears, 100 GB). `tests/client-billing.test.js` 55/55. Admin + portal `tsc` clean. Not browser-tested.
 
 ⚠ **Production order:** (1) `node src/database/tools/apply-default-menus.js --prod --apply` (live at once: Basic gets 7 more menus) → (2) `node src/database/tools/apply-plan-storage-unit.js --prod --apply` → (3) commit + push backend, admin, portal; wait for Render + Vercel → (4) `node src/database/tools/apply-plan-storage-unit.js --prod --drop-old --apply`.
+
+### 549. Mobile app features: chosen by the plan, switchable per event in the portal
+
+Jamal: the 8 app features (Family, Participants, Invite & Share, Near By, Chat, Wishes, Social Wall, Downloads) never showed in the portal's Create Event step 3. Asked: read-only list or per-event toggles — answer: "choose by plan and it also per event on / off toggle needed".
+
+Why they were missing: step 3 lists `/client/event-options` `menus`, which excludes `app` rows on purpose, and the portal asks for WEBSITE grants — app features are Active on mobile only, so they were never in that list at all.
+
+- **`events.disabled_app_menu_ids`** (JSON, NULL) — the OFF list, not the ON list: NULL / [] = every app feature the plan grants shows, so existing events are unchanged, and a feature later added to a plan appears on every event unless a client switched it off. Portal-group rows (Guests) are not switchable.
+- **Backend:** `getEventOptions` returns `app_features` (plan grants on MOBILE, `menu_group = 'app'`, whatever platform asks). `clientEvent` accepts `disabled_app_menu_ids`, keeps only ids that are current plan app features (others dropped, not refused). `presentOne` skips switched-off app rows on mobile.
+- **Portal wizard step 3:** new "Mobile App Features" section under the event menus — a switch per plan app feature, all ON for a new event, prefilled from the event in edit mode. `use-client-portal` / `use-client-events` types. `tsc` clean.
+- **App:** no change — it draws `event.menus`, which now omits switched-off features.
+- Tool `src/database/tools/apply-event-app-feature-toggles.js` (dry-run default, `--apply`, `--prod`; idempotent). **LOCAL applied.** Production dry run: column to add, no data change.
+- Local check 9/9 on event #71 (client #108): options return 8 app features and keep them out of `menus`; OFF list saved as [family] with a junk id dropped; mobile hides Family only; event menus + portal rows unchanged; response carries the list for prefill; switching back on restores it. Event restored to NULL.
+- Not changed: the `/client/events/:id/family` and `/participants` endpoints still answer when the tile is switched off — the tile is hidden, the data route is not gated by it.
+
+⚠ **Production order:** (1) `node src/database/tools/apply-event-app-feature-toggles.js --prod --apply` → (2) deploy backend + portal. The new Event model selects the column.

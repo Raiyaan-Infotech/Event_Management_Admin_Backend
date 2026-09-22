@@ -87,6 +87,14 @@ module.exports = (sequelize) => {
 
             // ── Step 3 — the menus toggled on ───────────────────────────────
             menu_ids: { type: DataTypes.JSON, allowNull: true },
+            /**
+             * The plan's mobile APP features (Chat, Wishes, …) the client switched
+             * OFF for this event. Stored as the OFF list, not the ON list: NULL /
+             * [] = every app feature the plan grants shows, so existing events
+             * are unchanged and a feature later added to the plan appears on
+             * every event unless a client turned it off.
+             */
+            disabled_app_menu_ids: { type: DataTypes.JSON, allowNull: true },
 
             // ── Step 4 — design ─────────────────────────────────────────────
             theme_id: { type: DataTypes.STRING(64), allowNull: true },

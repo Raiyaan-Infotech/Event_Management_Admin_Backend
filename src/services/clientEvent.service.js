@@ -54,7 +54,7 @@ const WRITABLE_FIELDS = [
     'venue_name', 'venue_address',
     'organizer', 'contact_phone', 'contact_email', 'footer_note',
     'privacy', 'status',
-    'menu_ids',
+    'menu_ids', 'disabled_app_menu_ids',
     'theme_id', 'primary_color',
     'cover_image',
     'components', 'component_order',
@@ -144,6 +144,7 @@ const present = (event) => {
     return {
         ...plain,
         menu_ids: Array.isArray(plain.menu_ids) ? plain.menu_ids : [],
+        disabled_app_menu_ids: Array.isArray(plain.disabled_app_menu_ids) ? plain.disabled_app_menu_ids : [],
         derived_status: deriveStatus(plain),
     };
 };
@@ -298,6 +299,16 @@ const normalise = async (clientId, body, { partial = false } = {}) => {
             }
         }
         data.menu_ids = ids;
+    }
+
+    // ── Step 3 — the plan's app features this event switches OFF ────────────
+    // Kept to ids the plan actually grants as app features; anything else is
+    // dropped rather than refused — an OFF entry for a feature the plan no
+    // longer grants cannot turn anything on, so it is only noise.
+    if (has('disabled_app_menu_ids')) {
+        const appIds = new Set((options.app_features ?? []).map((m) => Number(m.id)));
+        const raw = Array.isArray(picked.disabled_app_menu_ids) ? picked.disabled_app_menu_ids : [];
+        data.disabled_app_menu_ids = [...new Set(raw.map(Number).filter((id) => appIds.has(id)))];
     }
 
     // ── Step 4 — design ─────────────────────────────────────────────────────
@@ -635,11 +646,11 @@ const presentOne = async (event, { platform = 'website', isOwner = true, viewerI
       model comment for why it is not a join table.
 
       EVENT FEATURES are the event's own selection, narrowed by the plan.
-      APP FEATURES are mobile-only and are NOT chosen per event: the host's plan
-      granting them on MOBILE is the whole rule, so every event of that host
-      shows them without its menu_ids having to list them. `portal` rows count
-      when the plan also grants them on mobile (Guests is one menu for both
-      surfaces). See apply-app-feature-menus.js.
+      APP FEATURES are mobile-only: the host's plan granting them on MOBILE
+      decides which exist, and each event shows all of them except the ones
+      its `disabled_app_menu_ids` switched off. `portal` rows count when the
+      plan also grants them on mobile (Guests is one menu for both surfaces)
+      and cannot be switched off per event. See apply-app-feature-menus.js.
 
       These were two sequential `findAll`s over the same table with disjoint
       groups — now ONE round trip, partitioned in JS. The design and the guest
@@ -673,6 +684,9 @@ const presentOne = async (event, { platform = 'website', isOwner = true, viewerI
     ]);
 
     const visible = new Set(visibleIds);
+    // App features the host switched off for THIS event (portal rows such as
+    // Guests are not per-event choices, so they are never in this list).
+    const switchedOff = new Set(presented.disabled_app_menu_ids.map(Number));
     const eventFeatures = [];
     const appFeatures = [];
     for (const row of menuRows) {
@@ -681,6 +695,7 @@ const presentOne = async (event, { platform = 'website', isOwner = true, viewerI
         // inside each is still the query's (sort_order, id).
         if (row.menu_group === 'app' || row.menu_group === 'portal') {
             if (!wantsApp) continue;
+            if (row.menu_group === 'app' && switchedOff.has(Number(row.id))) continue;
             if (!isOwner) {
                 // See HOST_ONLY_MENU_SLUGS: this opens the host's guest
                 // register, which answers a participant with an empty list.

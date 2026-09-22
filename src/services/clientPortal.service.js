@@ -379,7 +379,7 @@ const ownerGrantedMenuIds = async (ownerClientId, platform = 'website') => {
 const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
     const client = await WebsiteClient.findByPk(clientId);
     if (!client) {
-        return { plan: null, reason: 'Account not found.', categories: [], menus: [], portal_sections: [], templates: [] };
+        return { plan: null, reason: 'Account not found.', categories: [], menus: [], portal_sections: [], app_features: [], templates: [] };
     }
 
     const companyId = client.company_id ?? null;
@@ -388,7 +388,7 @@ const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
         return {
             plan: null,
             reason: 'No subscription plan is assigned to your account yet. Please contact us.',
-            categories: [], menus: [], portal_sections: [], templates: [],
+            categories: [], menus: [], portal_sections: [], app_features: [], templates: [],
         };
     }
 
@@ -397,14 +397,14 @@ const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
         return {
             plan: null,
             reason: 'Your subscription plan is no longer available. Please contact us.',
-            categories: [], menus: [], portal_sections: [], templates: [],
+            categories: [], menus: [], portal_sections: [], app_features: [], templates: [],
         };
     }
     if (Number(plan.is_active) !== 1) {
         return {
             plan: plan.toJSON(),
             reason: 'Your subscription plan is inactive. Please contact us.',
-            categories: [], menus: [], portal_sections: [], templates: [],
+            categories: [], menus: [], portal_sections: [], app_features: [], templates: [],
         };
     }
 
@@ -441,6 +441,18 @@ const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
     const menus = granted.filter((m) => m.menu_group !== 'portal' && m.menu_group !== 'app');
     const portalSections = granted.filter((m) => m.menu_group === 'portal').map((m) => m.slug);
 
+    // The plan's mobile APP features, for the wizard's per-event on/off
+    // switches. Read on MOBILE whatever platform is asking: they are Active on
+    // mobile only, so the website grant list never contains them.
+    const appIds = await grantedMenuIds(plan.id, 'mobile');
+    const appFeatures = appIds.length
+        ? await EventMenu.findAll({
+            where: activeWhere(companyId, { id: { [Op.in]: appIds }, menu_group: 'app' }),
+            attributes: [...TAXONOMY_ATTRS, 'slug', 'menu_group'],
+            order: [['sort_order', 'ASC'], ['id', 'ASC']],
+        })
+        : [];
+
     // The admin-authored invitation templates this plan entitles them to. The
     // wizard narrows these further by the category actually chosen in
     // step 1 — done there rather than here so changing the category does not
@@ -454,6 +466,8 @@ const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
         menus: menus.map((r) => r.toJSON()),
         /** Slugs of the portal sidebar sections this plan grants on this platform. */
         portal_sections: portalSections,
+        /** The plan's mobile app features — each event can switch any of them off. */
+        app_features: appFeatures.map((r) => r.toJSON()),
         templates,
     };
 };
