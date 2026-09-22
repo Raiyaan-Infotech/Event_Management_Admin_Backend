@@ -13107,3 +13107,51 @@ Verified live on event #23:
 | Other guest #10 | no | 0 rows |
 
 No code change — the concern was the READING of the earlier report's table, not the code.
+
+## Session 47 — Template filters, event cover image, plan limits enforced, plan menus lose their platform
+
+> **Date:** 2026-09-22 | **Backend:** Event_Management_Admin_Backend · **Admin:** Event_Management_Admin_Frontend · **Portal:** event_client_single · **App:** Event_Invite_Mobile_App (.gitignore only)
+
+### 541. Template Category filter (admin list) and Design Style filter (portal wizard)
+
+- Admin `/admin/templates`: the existing filter is Event Category (`event_category_id`). Added a separate **Template Category** filter (`template_category_id`, the design family) with the already-built `useTemplateCategories`; backend `eventTemplate.service.getAll` now accepts `template_category_id`.
+- Portal create-event wizard step 4: **Design Style** select over the templates already narrowed by plan + step-1 category; options come from the styles actually present, hidden when only one; resets if the category changes and the style is no longer offered.
+
+### 542. Event cover image: mandatory, cropped, smaller
+
+Portal `event-wizard.tsx` `CoverImageField` (step 2): label "Event Image *", validated with the step's other mandatory fields (common toast + red border). A pick now opens the existing `ImageCropDialog` at 16:9 and uploads the cropped file (longest edge 1280, JPEG 0.9) — the raw camera photo was uploaded as-is before. Preview capped at `max-w-sm`. Also: every step-2 placeholder is now "Please enter …" instead of an example value.
+
+### 543. Plan limits are enforced
+
+`LIMIT_CATALOG` values were stored but read by nothing (§538). New `subscriptionPlan.service.getMenuLimit(planId, slug, key)` / `getFirstMenuLimit` (blank = unlimited). Enforced in the shared backend, so the portal and the app both get it:
+
+| Limit | Where | Plan used |
+|---|---|---|
+| `max_events` (event-information) | `clientEvent.createEvent` | client's current plan |
+| `max_guests_per_event` (event-information) | `clientGuest.createGuest`, `guestRegistration.join` (new row only) | the event's `subscription_plan_id` |
+| `max_rsvps` (rsvp, else event-information) | `guestRegistration.submitMyRsvp`, `join` when it records an answer | the event's `subscription_plan_id` |
+
+Catalogue fix: `guests-family` matched no real slug, so Max Family Members / Max Participants never rendered — split into `family` and `participants`. NOT enforced: `max_photos` / `max_videos` / `storage_gb` (no real gallery upload exists yet, §533), `max_family_members` / `max_participants` (not asked).
+
+### 544. Plan menus have no platform any more — `subscription_plan_menus.for_website` / `for_mobile` dropped
+
+Jamal: menus are no longer website/app (§520 Menu Type, §523 `event_menus.is_website` / `is_mobile`). The plan-menu W/M flags were the plan-side copy of that type (see the §524-era note "each grant's W/M follows the menu's own is_website / is_mobile"), left behind in the plan wizard.
+
+Rule now: a menu shows on a platform when the **plan** is sold there (`subscription_plans.for_website` / `for_mobile`, "Menu For") AND the menu's per-platform **Active** switch is on.
+- `clientPortal.grantedMenuIds`: plan flag + menu Active; `subscriptionPlan.update` drops the grants cache when "Menu For" changes (after commit).
+- `syncPlanMenus`, model, `initial_setup.sql`, `rebuild-event-menus.js` no longer carry the columns.
+- Admin: plan wizard Menu Selection = one "Included" checkbox per menu (limits kept when un-ticked); Manage Plan Menus + hook types lose the per-menu flags.
+- `tests/plan-menu-gating.test.js`: now locks the plan-level switch (checked in-process — the grants cache is per process, so a plan change made in the test cannot clear the :5001 server's copy; the older HTTP "updated immediately" checks in that test have the same limitation).
+- Tool `src/database/tools/drop-plan-menu-platform.js` (dry-run default, `--apply`, `--prod`, backup first, idempotent). The dry run compares old vs new grants per plan and platform.
+  - **Production dry run: no change** — 4 plans, 45 grants, every client sees exactly the same menus.
+  - **LOCAL applied** (backup `D:\Jamal\prod-backups\local-drop-plan-menu-platform-1790059167804.json`): 8 demo plans gain Agenda on mobile (their Agenda grant was website-only while Agenda is Active on mobile) — intended under the new rule.
+  - Local check 7/7: event-options for every client × 2 platforms, save with the wizard payload, "Menu For" off/on clears the cache immediately, duplicate copies every menu row.
+- Left alone: `apply-portal-section-menus.js` / `apply-menu-category-only.js` (historical, already unrunnable since §523) and Jamal's uncommitted `check-plan-menus.js`, which still selects the dropped columns and will now error.
+
+⚠ **Order for production: deploy the backend FIRST, then run `node src/database/tools/drop-plan-menu-platform.js --prod --apply`.** The old code's model selects both columns, so dropping them first breaks every plan read.
+
+### 545. `graphify-out/` ignored in the app and portal repos
+
+Mobile app and `event_client_single` `.gitignore` gain `graphify-out/` (same as backend + admin); the two graphify files that were staged / tracked were unstaged / untracked.
+
+**Open after this session:** nothing committed in any repo; production column drop (§544) waits on a backend deploy; `check-plan-menus.js` needs its plan-menu W/M queries removed.
