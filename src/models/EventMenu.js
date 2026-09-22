@@ -59,6 +59,13 @@ module.exports = (sequelize) => {
             allowNull: false,
             defaultValue: 1,
         },
+        // 1 = a default menu: a new plan starts with it ticked (the admin can
+        // untick it). 0 = an add-on feature, off until a plan adds it.
+        is_default: {
+            type: DataTypes.TINYINT,
+            allowNull: false,
+            defaultValue: 0,
+        },
         icon: {
             type: DataTypes.STRING(100),
             allowNull: true,

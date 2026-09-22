@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS \`client_preferences\` (
   \`time_zone\`         VARCHAR(64)  NOT NULL DEFAULT 'Asia/Kolkata',
 
   -- Display.
-  \`theme\`             ENUM('light','dark','system') NOT NULL DEFAULT 'system',
+  \`theme\`             ENUM('light','dark','system') NOT NULL DEFAULT 'light',
   \`default_landing\`   VARCHAR(40)  NOT NULL DEFAULT 'dashboard',
   \`items_per_page\`    SMALLINT UNSIGNED NOT NULL DEFAULT 20,
   \`compact_mode\`      TINYINT(1)   NOT NULL DEFAULT 0,

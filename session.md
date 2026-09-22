@@ -13192,3 +13192,23 @@ Jamal: "plan config why not update that form i already give that input". His lis
 - Still NOT enforced: images / videos / storage (no real gallery upload yet, §533).
 
 ⚠ **Production order:** (1) `node src/database/tools/apply-plan-limits.js --prod --apply` → (2) commit + push, wait for Render → (3) `node src/database/tools/apply-plan-limits.js --prod --drop-old --apply`. Skipping (1) breaks every plan read once the new code is live; running (3) before the deploy breaks them on the old code.
+
+**Production (found 2026-09-22 while starting §548):** Jamal had pushed §547 (`95d99a4`) and run both `apply-plan-limits.js` phases on production — `subscription_plans.max_events …storage_gb` present, `limits_json` gone. Production Free plan is now #12 (1 GB storage).
+
+### 548. Default menus + add-on features, Event Invitation menu, storage as number + unit
+
+Jamal: a list of default menus for every plan; every other menu in the Menu module is an add-on feature; storage 1–100 with an MB / GB dropdown, stored that way in the DB. Asked first — answers: Event Invitation = a NEW menu (the invitation card); keep Event Information AND Venue ("keep 13 … don't hardcode 13 anywhere"); "default" = ticked on new plans, removable; storage dropdown MB / GB / Unlimited.
+
+- **`event_menus.is_default`** (1 = default, 0 = add-on). The code only reads the flag — no list or count of defaults anywhere in app code. Menu form: "Plan Default" switch; list: Type column (Default / Add-on); view page shows it; `PATCH /event-menus/:id/toggle/is_default` allowed; list filter `?is_default=`.
+- **Plan wizard step 2:** two sections, Default Menus and Add-on Features. A NEW plan pre-ticks every default menu (once per category; editing a plan never re-ticks).
+- **Event Invitation** (`event-invitation`, core, same category/company as Event Information, icon mdi:email-open-outline). ⚠ App: `wedding_home_screen.dart` `_routes` has no entry, so the tile shows as "coming soon". The app's `view_invitation_screen.dart` is a static mockup ("You are sharing via WhatsApp") — deliberately NOT wired. A real in-app invitation view is a follow-up.
+- **Storage:** `storage_gb` → `storage_limit` (1–100) + `storage_unit` ENUM('MB','GB'), both NULL = unlimited. Service validates the pair (101 / 0 / KB refused; unit "unlimited" clears both). Billing returns `storage.limit` + `unit` (+ `limit_gb` computed, 500 MB → 0.49); portal Billing + invoice detail show the real unit.
+- `initial_setup.sql`: `is_default`, storage pair; also fixed `event_menus.menu_group` enum, which lacked `portal` / `app` (a fresh install would have rejected those menus).
+- **Tools:**
+  - `apply-default-menus.js` — adds `is_default`, creates Event Invitation, flags Jamal's 13 slugs (one-off data in the tool only), grants every default menu to every live plan (never removes). Safe before the deploy.
+  - `apply-plan-storage-unit.js` — phase 1 add pair + copy `storage_gb` (unit GB) BEFORE deploy; `--drop-old` drops `storage_gb` AFTER.
+  - **LOCAL applied both** (Event Invitation #20; 20 grants; 9 plans' 100 GB copied; backups `local-default-menus-1790073236043.json`, `local-plan-storage-drop-old-1790073236718.json`).
+  - **Production dry run:** is_default + Event Invitation to add; add-ons = invite-share, social-wall, guests, messages, splash-screens; Basic #9 gains agenda, family, wishes, near-by, downloads, chat, event-invitation; Standard #10 gains near-by, downloads, event-invitation; Premium #11 and Free #12 gain event-invitation. Storage: Free #12's 1 GB copies to 1 GB.
+- Checks on local: 11/11 (13 defaults / 5 add-ons read from the DB, Default toggle both ways, storage validation, 50 MB saved + read by billing, Unlimited clears, 100 GB). `tests/client-billing.test.js` 55/55. Admin + portal `tsc` clean. Not browser-tested.
+
+⚠ **Production order:** (1) `node src/database/tools/apply-default-menus.js --prod --apply` (live at once: Basic gets 7 more menus) → (2) `node src/database/tools/apply-plan-storage-unit.js --prod --apply` → (3) commit + push backend, admin, portal; wait for Render + Vercel → (4) `node src/database/tools/apply-plan-storage-unit.js --prod --drop-old --apply`.

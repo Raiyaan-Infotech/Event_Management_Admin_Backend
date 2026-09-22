@@ -18,7 +18,9 @@ const MODULE_SLUG = 'event_menus';
 //
 // A menu is scoped by CATEGORY only — event type, religion and the
 // Website/Mobile "menu type" were removed from the project. Which platform a
-// menu shows on is decided by the PLAN's W/M switch in Manage Plan Menus.
+// menu shows on is its own per-platform Active switch below.
+// `is_default`: a new plan starts with every default menu ticked; the rest are
+// add-on features.
 const WRITABLE_FIELDS = [
     'name',
     'slug',
@@ -28,6 +30,7 @@ const WRITABLE_FIELDS = [
     'event_category_id',
     'active_website',
     'active_mobile',
+    'is_default',
     'icon',
     'color',
     'sort_order',
@@ -54,11 +57,14 @@ const slugify = (value) =>
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '');
 
-const pickWritable = (data = {}) =>
-    WRITABLE_FIELDS.reduce((acc, key) => {
+const pickWritable = (data = {}) => {
+    const picked = WRITABLE_FIELDS.reduce((acc, key) => {
         if (data[key] !== undefined) acc[key] = data[key];
         return acc;
     }, {});
+    if (picked.is_default !== undefined) picked.is_default = toBit(picked.is_default, 0);
+    return picked;
+};
 
 const plainRow = (row) => (row && row.toJSON ? row.toJSON() : { ...row });
 
@@ -105,6 +111,11 @@ const getAll = async (query = {}, companyId = undefined) => {
     // Core / Additional / Custom section filter — idx_event_menus_group
     if (query.menu_group && query.menu_group !== 'all') {
         where.menu_group = String(query.menu_group).toLowerCase();
+    }
+
+    // Default menus vs add-on features.
+    if (query.is_default !== undefined && query.is_default !== '' && query.is_default !== 'all') {
+        where.is_default = toBit(query.is_default, 0);
     }
 
     const result = await baseService.getAll(EventMenu, MODEL_NAME, listQuery, {
@@ -187,13 +198,13 @@ const updateStatus = async (id, is_active, userId = null, companyId = undefined)
  * The field name is checked against this whitelist, so the route's `:field`
  * cannot be used to write an arbitrary column.
  */
-const TOGGLE_FIELDS = ['active_website', 'active_mobile'];
+const TOGGLE_FIELDS = ['active_website', 'active_mobile', 'is_default'];
 
 const updateToggle = async (id, field, value, userId = null, companyId = undefined) => {
     if (!TOGGLE_FIELDS.includes(field)) {
         throw ApiError.badRequest(`Unknown toggle "${field}".`);
     }
-    await baseService.update(EventMenu, MODEL_NAME, id, { [field]: toBit(value, 1) }, userId, companyId);
+    await baseService.update(EventMenu, MODEL_NAME, id, { [field]: toBit(value, field === 'is_default' ? 0 : 1) }, userId, companyId);
     invalidateGrants();
     return getById(id, companyId);
 };

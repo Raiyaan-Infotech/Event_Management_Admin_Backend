@@ -125,21 +125,37 @@ const ENDING_STATUSES = new Set(['cancelled', 'cancelling']);
  * ────────────────────────────────────────────────────────────────────────── */
 
 /**
- * A plan's limits — the five columns wizard step 4 writes on the plan itself
- * (see LIMIT_FIELDS in subscriptionPlan.service.js). A key is present only when
- * the plan sets it; absent = unlimited.
+ * A plan's limits — the columns wizard step 4 writes on the plan itself (see
+ * LIMIT_FIELDS in subscriptionPlan.service.js). A key is present only when the
+ * plan sets it; absent = unlimited. Storage comes back as `storage_limit` +
+ * `storage_unit` ('MB' / 'GB'), exactly as the admin entered it.
  */
-const PLAN_LIMIT_KEYS = ['max_events', 'max_guests_per_event', 'max_photos', 'max_videos', 'storage_gb'];
+const PLAN_COUNT_KEYS = ['max_events', 'max_guests_per_event', 'max_photos', 'max_videos'];
 
 const resolvePlanLimits = async (planId) => {
     if (!planId) return {};
-    const plan = await SubscriptionPlan.findByPk(planId, { attributes: ['id', ...PLAN_LIMIT_KEYS], raw: true });
+    const plan = await SubscriptionPlan.findByPk(planId, {
+        attributes: ['id', ...PLAN_COUNT_KEYS, 'storage_limit', 'storage_unit'],
+        raw: true,
+    });
     const limits = {};
-    for (const key of PLAN_LIMIT_KEYS) {
+    for (const key of PLAN_COUNT_KEYS) {
         const n = Number(plan?.[key]);
         if (Number.isInteger(n) && n > 0) limits[key] = n;
     }
+    const storage = Number(plan?.storage_limit);
+    if (Number.isInteger(storage) && storage > 0 && ['MB', 'GB'].includes(plan?.storage_unit)) {
+        limits.storage_limit = storage;
+        limits.storage_unit = plan.storage_unit;
+    }
     return limits;
+};
+
+/** 500 MB -> 0.49, 10 GB -> 10 — for the GB figure older readers expect. */
+const storageInGb = (limits) => {
+    if (!limits.storage_limit) return null;
+    const gb = limits.storage_unit === 'MB' ? limits.storage_limit / 1024 : limits.storage_limit;
+    return Math.round(gb * 100) / 100;
 };
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -470,7 +486,10 @@ const getUsage = async (clientId, subscription) => {
         },
         storage: {
             used_gb: null,
-            limit_gb: limits.storage_gb ?? null,
+            limit_gb: storageInGb(limits),
+            // As the admin set it — what the portal shows ("500 MB", "10 GB").
+            limit: limits.storage_limit ?? null,
+            unit: limits.storage_unit ?? null,
             available: false,
             reason: 'Storage usage is not measured yet.',
         },

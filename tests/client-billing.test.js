@@ -80,11 +80,14 @@ const at = (offsetDays) => new Date(Date.now() + offsetDays * day);
     ok('a free plan has no tax', free.total === 0 && free.tax_amount === 0);
 
     console.log('\n── resolvePlanLimits: the plan\'s own columns ─────');
-    const KEYS = ['max_events', 'max_guests_per_event', 'max_photos', 'max_videos', 'storage_gb'];
-    const plans = await SubscriptionPlan.findAll({ attributes: ['id', 'name', ...KEYS], order: [['id', 'ASC']], raw: true });
+    const KEYS = ['max_events', 'max_guests_per_event', 'max_photos', 'max_videos'];
+    const plans = await SubscriptionPlan.findAll({
+        attributes: ['id', 'name', ...KEYS, 'storage_limit', 'storage_unit'], order: [['id', 'ASC']], raw: true,
+    });
     for (const p of plans) {
         const limits = await billing.resolvePlanLimits(p.id);
         const expected = Object.fromEntries(KEYS.filter((k) => p[k]).map((k) => [k, Number(p[k])]));
+        if (p.storage_limit && p.storage_unit) Object.assign(expected, { storage_limit: p.storage_limit, storage_unit: p.storage_unit });
         ok(`plan ${p.id} ${p.name}: limits match its columns (unset = absent)`,
             JSON.stringify(limits) === JSON.stringify(expected), `${JSON.stringify(limits)} vs ${JSON.stringify(expected)}`);
     }

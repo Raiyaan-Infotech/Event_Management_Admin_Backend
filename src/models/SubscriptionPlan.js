@@ -46,7 +46,9 @@ module.exports = (sequelize) => {
         max_guests_per_event: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
         max_photos: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
         max_videos: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
-        storage_gb: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+        // A pair: 1–100 + MB / GB, both NULL = unlimited.
+        storage_limit: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+        storage_unit: { type: DataTypes.ENUM('MB', 'GB'), allowNull: true },
         currency_code: {
             type: DataTypes.STRING(10),
             allowNull: false,

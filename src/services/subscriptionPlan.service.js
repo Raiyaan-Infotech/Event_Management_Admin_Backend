@@ -26,7 +26,8 @@ const WRITABLE_FIELDS = [
     'currency_code', 'price', 'trial_days',
     'is_visible', 'is_active', 'sort_order',
     'plan_badge_id',
-    'max_events', 'max_guests_per_event', 'max_photos', 'max_videos', 'storage_gb',
+    'max_events', 'max_guests_per_event', 'max_photos', 'max_videos',
+    'storage_limit', 'storage_unit',
 ];
 
 /**
@@ -36,6 +37,9 @@ const WRITABLE_FIELDS = [
  * NULL = unlimited, which is what a blank field in the wizard means. There is
  * no RSVP limit: each guest answers once, so RSVPs can never exceed
  * `max_guests_per_event` — it caps both.
+ *
+ * Storage is a number + unit (`storage_limit` 1–100, `storage_unit` MB / GB),
+ * both NULL for unlimited.
  *
  * Enforced today: max_events (clientEvent.createEvent) and max_guests_per_event
  * (clientGuest.createGuest, guestRegistration.join). The photo / video / storage
@@ -47,35 +51,58 @@ const LIMIT_FIELDS = [
     { key: 'max_guests_per_event', label: 'Max Guests per Event' },
     { key: 'max_photos', label: 'Max Images' },
     { key: 'max_videos', label: 'Max Videos' },
-    { key: 'storage_gb', label: 'Storage Limit' },
 ];
 const LIMIT_KEYS = LIMIT_FIELDS.map((f) => f.key);
 
+const STORAGE_UNITS = ['MB', 'GB'];
+const STORAGE_MAX = 100;
+
+const isBlank = (raw) => raw === null || raw === undefined || String(raw).trim() === ''
+    || String(raw).trim().toLowerCase() === 'unlimited';
+
 /**
- * '' / null / 'Unlimited' -> null; a whole number >= 1 -> that number. Accepts
- * "100 GB" too, the shape the old per-menu storage select stored. Anything
+ * '' / null / 'Unlimited' -> null; a whole number >= 1 -> that number. Anything
  * else is refused rather than silently stored as unlimited.
+ *
+ * Storage travels as a pair: either both are set (1–100 and MB / GB) or both
+ * are NULL. A unit of "unlimited" (the dropdown's third option) clears both.
  */
 const normaliseLimits = (payload) => {
     for (const { key, label } of LIMIT_FIELDS) {
         if (payload[key] === undefined) continue;
         const raw = payload[key];
-        if (raw === null || raw === '' || String(raw).trim().toLowerCase() === 'unlimited') {
+        if (isBlank(raw)) {
             payload[key] = null;
             continue;
         }
-        const match = String(raw).trim().match(/^(\d+)(\s*gb)?$/i);
-        const n = match ? Number(match[1]) : NaN;
+        const n = /^\d+$/.test(String(raw).trim()) ? Number(raw) : NaN;
         if (!Number.isInteger(n) || n < 1) {
             throw ApiError.badRequest(`${label} must be a whole number of 1 or more, or blank for unlimited.`);
         }
         payload[key] = n;
     }
+
+    if (payload.storage_limit === undefined && payload.storage_unit === undefined) return;
+    if (isBlank(payload.storage_unit) || isBlank(payload.storage_limit)) {
+        payload.storage_limit = null;
+        payload.storage_unit = null;
+        return;
+    }
+    const unit = String(payload.storage_unit).trim().toUpperCase();
+    const n = /^\d+$/.test(String(payload.storage_limit).trim()) ? Number(payload.storage_limit) : NaN;
+    if (!STORAGE_UNITS.includes(unit)) {
+        throw ApiError.badRequest('Storage unit must be MB or GB.');
+    }
+    if (!Number.isInteger(n) || n < 1 || n > STORAGE_MAX) {
+        throw ApiError.badRequest(`Storage Limit must be a whole number from 1 to ${STORAGE_MAX}, or Unlimited.`);
+    }
+    payload.storage_limit = n;
+    payload.storage_unit = unit;
 };
 
 /**
- * A plan's limit for one key, or null (unlimited / no plan). Callers compare a
- * live count against this and refuse the write only when it is non-null.
+ * A plan's limit for one count, or null (unlimited / no plan). Callers compare
+ * a live count against this and refuse the write only when it is non-null.
  */
 const getPlanLimit = async (planId, key) => {
     if (!planId || !LIMIT_KEYS.includes(key)) return null;
