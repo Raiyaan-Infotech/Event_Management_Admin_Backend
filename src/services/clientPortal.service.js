@@ -52,6 +52,11 @@ const PLAN_ATTRS = [
     'id', 'name', 'plan_code', 'billing_cycle', 'short_description',
     'event_category_id',
     'currency_code', 'price', 'trial_days', 'is_active',
+    // The limits travel with the plan the wizard already asks for, so a screen
+    // that needs to say "you have used 5 of 1" does not depend on the billing
+    // endpoint answering as well.
+    'max_events', 'max_guests_per_event', 'max_photos', 'max_videos',
+    'storage_limit', 'storage_unit',
 ];
 
 const TAXONOMY_ATTRS = ['id', 'name', 'description', 'icon', 'color', 'sort_order', 'is_active'];
