@@ -24,7 +24,7 @@ const msg91Sms = require('./msg91Sms.service');
 // the host's would then disagree about the same event on the same day.
 const { deriveStatus, isFamilyCategory } = require('./clientEvent.service');
 const notificationTrigger = require('./notificationTrigger.service');
-const subscriptionPlanService = require('./subscriptionPlan.service');
+const clientGuestService = require('./clientGuest.service');
 const rsvpService = require('./clientRsvp.service');
 const notifications = require('./clientNotification.service');
 const clientPortalService = require('./clientPortal.service');
@@ -528,13 +528,10 @@ const join = async (client, payload = {}) => {
         // checked for a NEW row: a re-scan of an existing guest must never be
         // refused for a limit that guest already counts toward. It also caps
         // RSVPs — one answer per guest.
-        const maxGuests = await subscriptionPlanService.getPlanLimit(event.subscription_plan_id, 'max_guests_per_event');
-        if (maxGuests !== null) {
-            const guestCount = await EventGuest.count({ where: { event_id: event.id } });
-            if (guestCount >= maxGuests) {
-                throw ApiError.badRequest('This event has reached its guest limit. Please contact the host.');
-            }
-        }
+        // Same source as the host's own Add Guest (the host's current plan).
+        await clientGuestService.assertGuestCapacity(event.id, 1, {
+            message: 'This event has reached its guest limit. Please contact the host.',
+        });
 
         guest = await EventGuest.create({
             ...fields,

@@ -4,6 +4,8 @@ const {
     Event,
     EventGuest,
     EventGuestGroup,
+    ClientSubscription,
+    WebsiteClient,
 } = require('../models');
 const { Op } = Sequelize;
 const ApiError = require('../utils/apiError');
@@ -421,6 +423,58 @@ const getGuestById = async (clientId, guestId) => {
 };
 
 /**
+ * The guest cap for an event, read from the HOST's CURRENT plan — the same
+ * source Billing and the guest form show (clientBilling: latest subscription,
+ * falling back to the website_clients pointer). It used to read the plan the
+ * event was CREATED under, so an event made on a bigger plan kept that plan's
+ * cap after the client moved to Free: the portal said 5, the server allowed
+ * more (§558's known mismatch). It also made "upgrade your plan" a lie — an
+ * upgrade never raised the cap on an existing event. The event's own plan is
+ * now only the last fallback, for a host with no plan at all.
+ */
+const guestLimitFor = async (event, transaction) => {
+    const sub = await ClientSubscription.findOne({
+        where: { website_client_id: event.website_client_id },
+        attributes: ['id', 'subscription_plan_id'],
+        order: [['created_at', 'DESC']],
+        transaction,
+    });
+    let planId = sub?.subscription_plan_id ?? null;
+    if (!planId) {
+        const host = await WebsiteClient.findByPk(event.website_client_id, {
+            attributes: ['id', 'subscription_plan_id'],
+            transaction,
+        });
+        planId = host?.subscription_plan_id ?? event.subscription_plan_id ?? null;
+    }
+    return subscriptionPlanService.getPlanLimit(planId, 'max_guests_per_event');
+};
+
+/**
+ * Refuse when adding `adding` guest rows would take the event past its cap.
+ * Counts ROWS, not heads (§558). Pass a transaction to lock the event row:
+ * without it two quick saves both read "4 of 5" and both insert.
+ */
+const assertGuestCapacity = async (eventId, adding = 1, { transaction, message } = {}) => {
+    const event = await Event.findByPk(eventId, {
+        attributes: ['id', 'website_client_id', 'subscription_plan_id'],
+        transaction,
+        lock: transaction ? transaction.LOCK.UPDATE : undefined,
+    });
+    if (!event) return;
+
+    const maxGuests = await guestLimitFor(event, transaction);
+    if (maxGuests === null) return;
+
+    const guestCount = await EventGuest.count({ where: { event_id: eventId }, transaction });
+    if (guestCount + adding > maxGuests) {
+        throw ApiError.badRequest(
+            message ?? `This event has reached its guest limit of ${maxGuests}. Please upgrade your plan to add more guests.`
+        );
+    }
+};
+
+/**
  * Add a guest.
  *
  * A duplicate email on the SAME event is refused; the same person on two
@@ -437,21 +491,6 @@ const createGuest = async (clientId, companyId, body) => {
         throw ApiError.conflict(`${clash.name} is already on the guest list for this event.`);
     }
 
-    // Plan limit — see LIMIT_FIELDS in subscriptionPlan.service.js. Checked
-    // against the PLAN THE EVENT WAS CREATED UNDER, not the client's current
-    // one: an event keeps the limit it was built against even if the client's
-    // plan changes later.
-    const event = await Event.findByPk(data.event_id, { attributes: ['id', 'subscription_plan_id'] });
-    const maxGuests = await subscriptionPlanService.getPlanLimit(event?.subscription_plan_id, 'max_guests_per_event');
-    if (maxGuests !== null) {
-        const guestCount = await EventGuest.count({ where: { event_id: data.event_id } });
-        if (guestCount >= maxGuests) {
-            throw ApiError.badRequest(
-                `This event has reached its guest limit of ${maxGuests}. Please upgrade your plan to add more guests.`
-            );
-        }
-    }
-
     // Fall back to the default group when the form left it blank — that is what
     // "New guests will be added to this group by default" means.
     if (data.group_id === undefined) {
@@ -462,10 +501,15 @@ const createGuest = async (clientId, companyId, body) => {
         if (fallback) data.group_id = fallback.id;
     }
 
-    const guest = await EventGuest.create({
-        ...data,
-        website_client_id: clientId,
-        company_id: companyId ?? null,
+    // Plan limit (see assertGuestCapacity) — checked and inserted under one
+    // lock on the event row, so a double-click cannot slip a 6th guest past 5.
+    const guest = await sequelize.transaction(async (transaction) => {
+        await assertGuestCapacity(data.event_id, 1, { transaction });
+        return EventGuest.create({
+            ...data,
+            website_client_id: clientId,
+            company_id: companyId ?? null,
+        }, { transaction });
     });
 
     // Fire and forget — a failed feed row must never fail a guest that saved.
@@ -521,8 +565,18 @@ const updateGuest = async (clientId, guestId, body) => {
       without it the feed fills with duplicates every time a guest row is
       touched.
     */
+    // Moving a guest to another event adds a row there — same cap as a create.
+    const moving = data.event_id && Number(data.event_id) !== Number(guest.event_id);
+
     const before = guest.response_type;
-    await guest.update(data);
+    if (moving) {
+        await sequelize.transaction(async (transaction) => {
+            await assertGuestCapacity(data.event_id, 1, { transaction });
+            await guest.update(data, { transaction });
+        });
+    } else {
+        await guest.update(data);
+    }
     const after = guest.response_type;
 
     if (after !== before && ['yes', 'no', 'maybe'].includes(after)) {
@@ -658,4 +712,6 @@ module.exports = {
     present,
     composeName,
     applyResponse,
+    assertGuestCapacity,
+    guestLimitFor,
 };

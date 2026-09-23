@@ -13419,3 +13419,20 @@ Jamal asked for his own production client to be reset for testing. All five of h
 5. **Free plan is 1 event and lifetime-counted**, so that account cannot create again without a limit change or a hard delete.
 6. **The date lock is UI-only** (§559) and the portal/backend guest-limit plan mismatch (§558) both remain.
 7. **Nothing here was tested in a browser or on a device** — backend in-process checks, `tsc` and `flutter analyze` (0 errors) only.
+
+### 563. Guest limit: the server now enforces the plan the portal shows
+
+Jamal: Free plan says 5 guests per event, yet on live a 6th guest saved from the Add Guest form.
+
+**Cause — §558's known mismatch, plus two open doors.** The portal reads the guest cap from the host's CURRENT plan (Billing → 5 on Free). `createGuest` enforced the plan the EVENT was created under — an event made on a bigger plan (or a client moved to Free afterwards) kept that plan's cap, so the server accepted #6. The form's own block is only a hint (it can read a stale guest count), so the server is the real guard, and it was reading the wrong plan. It also made "upgrade your plan" untrue: an upgrade never raised an existing event's cap.
+
+Also found: the CSV import had NO limit check at all, and editing a guest onto another event skipped it. Two quick saves could both read "4 of 5" and both insert.
+
+**Fix (`clientGuest.service.js`):**
+- `guestLimitFor(event)` — host's latest `client_subscriptions` plan (same source as Billing), falling back to `website_clients.subscription_plan_id`, then the event's own plan.
+- `assertGuestCapacity(eventId, adding, { transaction })` — counts ROWS; locks the event row when given a transaction.
+- `createGuest` checks + inserts in one locked transaction; `updateGuest` checks when `event_id` changes; `clientGuestImport.commitImport` refuses the whole file if any event would go over (message says how many are left); `guestRegistration.join` uses the same helper.
+
+⚠ Decision reversed: an event no longer keeps the cap it was created under. A downgrade to Free stops NEW guests on an event already past 5; existing guests are untouched.
+
+Verified locally: at cap refused / one under allowed on 6 events; simulated live case in a rolled-back transaction (host moved to Free Trial Plan, event still on plan 7 with 18 guests) → refused "guest limit of 5". Existing 6th guest on live is NOT removed — delete it by hand if wanted.

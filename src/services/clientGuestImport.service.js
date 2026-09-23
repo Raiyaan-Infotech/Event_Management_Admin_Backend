@@ -471,6 +471,30 @@ const commitImport = async (clientId, companyId, { content, defaultEventId = nul
     if (rows.length === 0) return outcome;
 
     return sequelize.transaction(async (transaction) => {
+        // Plan limit, per event, all-or-nothing: an import that would take any
+        // event past its cap is refused whole rather than silently cut short.
+        // Before this, a CSV was the way round the guest limit entirely.
+        const perEvent = new Map();
+        for (const r of rows) perEvent.set(r.event_id, (perEvent.get(r.event_id) || 0) + 1);
+        for (const [eventId, adding] of perEvent) {
+            const event = await Event.findByPk(eventId, {
+                attributes: ['id', 'title', 'website_client_id', 'subscription_plan_id'],
+                transaction,
+                lock: transaction.LOCK.UPDATE,
+            });
+            if (!event) continue;
+            const maxGuests = await guestService.guestLimitFor(event, transaction);
+            if (maxGuests === null) continue;
+            const used = await EventGuest.count({ where: { event_id: eventId }, transaction });
+            if (used + adding > maxGuests) {
+                const left = Math.max(0, maxGuests - used);
+                throw ApiError.badRequest(
+                    `"${event.title}" has a guest limit of ${maxGuests} and already has ${used}. `
+                    + `This file adds ${adding}, but only ${left} more can be added. Please upgrade your plan or import fewer guests.`
+                );
+            }
+        }
+
         const createdGroups = [];
 
         if (createGroups) {
