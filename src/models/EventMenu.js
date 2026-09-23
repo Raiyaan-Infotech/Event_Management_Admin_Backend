@@ -34,30 +34,17 @@ module.exports = (sequelize) => {
             type: DataTypes.STRING(300),
             allowNull: true,
         },
-        // Drives the Core / Additional / Custom sections on Manage Plan Menus.
-        // 'portal' = a client-portal SIDEBAR section (Guests, Messages, …), not
-        // an event feature: never offered by the event wizard. See
-        // apply-portal-section-menus.js.
-        // 'app' = a mobile APP feature (Chat, Wishes, Invite & Share, …): granted
-        // by the plan alone, not chosen per event. See apply-app-feature-menus.js.
+        // A label only: Core or Add-on. WHERE a menu appears (mobile tile,
+        // portal sidebar section, event menu) is a property of the feature and
+        // lives in utils/menuPlacement.js, not in this column.
         menu_group: {
-            type: DataTypes.ENUM('core', 'additional', 'custom', 'portal', 'app'),
+            type: DataTypes.ENUM('core', 'addon'),
             allowNull: false,
             defaultValue: 'core',
         },
         event_category_id: {
             type: DataTypes.INTEGER.UNSIGNED,
             allowNull: true,
-        },
-        active_website: {
-            type: DataTypes.TINYINT,
-            allowNull: false,
-            defaultValue: 1,
-        },
-        active_mobile: {
-            type: DataTypes.TINYINT,
-            allowNull: false,
-            defaultValue: 1,
         },
         // 1 = a default menu: a new plan starts with it ticked (the admin can
         // untick it). 0 = an add-on feature, off until a plan adds it.

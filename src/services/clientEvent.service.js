@@ -15,6 +15,7 @@ const {
 const { Op } = Sequelize;
 const ApiError = require('../utils/apiError');
 const eventQr = require('../utils/eventQr');
+const { isAppFeature, isPortalSection } = require('../utils/menuPlacement');
 const clientPortalService = require('./clientPortal.service');
 const mediaService = require('./media.service');
 const subscriptionPlanService = require('./subscriptionPlan.service');
@@ -635,7 +636,7 @@ const isFamilyCategory = (relationship, groupName) =>
 const presentOne = async (event, { platform = 'website', isOwner = true, viewerIsFamily = false } = {}) => {
     const presented = present(event);
 
-    const grantedIds = await clientPortalService.ownerGrantedMenuIds(presented.website_client_id, platform);
+    const grantedIds = await clientPortalService.ownerGrantedMenuIds(presented.website_client_id);
     const granted = new Set(grantedIds);
     const visibleIds = presented.menu_ids.map(Number).filter((id) => granted.has(id));
 
@@ -671,7 +672,7 @@ const presentOne = async (event, { platform = 'website', isOwner = true, viewerI
                 // name / icon / color / sort_order: the app draws its Explore
                 // tiles straight from these (Menu Management is the source of
                 // the label, icon and order — nothing about a tile is hardcoded).
-                attributes: ['id', 'name', 'slug', 'menu_group', 'icon', 'color', 'sort_order'],
+                attributes: ['id', 'name', 'slug', 'icon', 'color', 'sort_order'],
                 order: [['sort_order', 'ASC'], ['id', 'ASC']],
                 raw: true,
             })
@@ -693,9 +694,9 @@ const presentOne = async (event, { platform = 'website', isOwner = true, viewerI
         // The groups are disjoint, so a row lands in exactly one bucket and the
         // two buckets keep the order they were concatenated in before. Ordering
         // inside each is still the query's (sort_order, id).
-        if (row.menu_group === 'app' || row.menu_group === 'portal') {
+        if (isAppFeature(row.slug) || isPortalSection(row.slug)) {
             if (!wantsApp) continue;
-            if (row.menu_group === 'app' && switchedOff.has(Number(row.id))) continue;
+            if (isAppFeature(row.slug) && switchedOff.has(Number(row.id))) continue;
             if (!isOwner) {
                 // See HOST_ONLY_MENU_SLUGS: this opens the host's guest
                 // register, which answers a participant with an empty list.

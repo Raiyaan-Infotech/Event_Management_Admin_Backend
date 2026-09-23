@@ -15,6 +15,7 @@ const bcrypt = require('bcryptjs');
 const ApiError = require('../utils/apiError');
 const mediaService = require('./media.service');
 const { TtlCache } = require('../utils/ttlCache');
+const { isAppFeature, isPortalSection, isEventMenu } = require('../utils/menuPlacement');
 
 /**
  * Plan gating is read on EVERY event open and every options call, is identical
@@ -292,26 +293,25 @@ const platformFromHeader = (value) =>
     String(value || '').trim().toLowerCase() === 'flutter' ? 'mobile' : 'website';
 
 /**
- * The menu ids a plan grants ON ONE PLATFORM.
+ * The menu ids a plan grants.
  *
- * Neither a plan nor a plan menu has a platform (session §520, §544, §546): a
- * plan grants its menus everywhere, and the menu's own per-platform Active
- * switch in Menu Management (`active_website` / `active_mobile`) decides where
- * it shows — switching a menu off for the app hides it there for every plan.
+ * No platform anywhere in this answer (session §520, §544, §546, §552): a plan
+ * grants its menus everywhere, and a menu is either Active or it is not. Where a
+ * granted menu then appears is decided by the menu itself at the point of use
+ * (utils/menuPlacement), not by the grant.
  */
-const grantedMenuIds = async (planId, platform = 'website') => {
-    const activeFlag = platform === 'mobile' ? 'active_mobile' : 'active_website';
+const grantedMenuIds = async (planId) => {
     // Cached: the same answer for every guest of every event on this plan, and
     // it only changes when an admin saves the plan or a menu — which busts it
     // explicitly (see `invalidatePlanGrants`, called from subscriptionPlan.service
     // and eventMenu.service).
-    return planGrantsCache.wrap(`${planId}:${platform}`, async () => {
+    return planGrantsCache.wrap(String(planId), async () => {
         const grants = await SubscriptionPlanMenu.findAll({
             where: { plan_id: planId },
             attributes: ['menu_id'],
             include: [{
                 model: EventMenu, as: 'menu', attributes: [], required: true,
-                where: { [activeFlag]: 1 },
+                where: { is_active: 1 },
             }],
         });
         return grants.map((g) => Number(g.menu_id));
@@ -327,7 +327,7 @@ const grantedMenuIds = async (planId, platform = 'website') => {
  */
 const invalidatePlanGrants = (planId) => {
     if (planId === undefined || planId === null) planGrantsCache.invalidate();
-    else planGrantsCache.invalidatePrefix(`${planId}:`);
+    else planGrantsCache.invalidate(String(planId));
     ownerPlanCache.invalidate();
 };
 
@@ -339,7 +339,7 @@ const invalidatePlanGrants = (planId) => {
  * A missing or inactive plan grants nothing, the same answer `getEventOptions`
  * gives, so a lapsed plan cannot keep features visible on old events.
  */
-const ownerGrantedMenuIds = async (ownerClientId, platform = 'website') => {
+const ownerGrantedMenuIds = async (ownerClientId) => {
     /*
       ONE query for the owner's ACTIVE plan id, not two.
       This used to be `WebsiteClient.findByPk` followed by
@@ -368,13 +368,13 @@ const ownerGrantedMenuIds = async (ownerClientId, platform = 'website') => {
         return Number(row?.plan_id) || 0;
     });
     if (!planId) return [];
-    return grantedMenuIds(planId, platform);
+    return grantedMenuIds(planId);
 };
 
 /**
- * `platform` narrows the plan's menus to the ones granted on that platform
- * (see `grantedMenuIds`). Defaults to the website — the portal, and the
- * create/update validation, which only the portal drives.
+ * `platform` decides which GROUPS of the granted menus are returned — app
+ * features on mobile, portal sections in the portal — not which menus the plan
+ * grants, which is the same everywhere.
  */
 const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
     const client = await WebsiteClient.findByPk(clientId);
@@ -416,10 +416,9 @@ const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
         where: catWhere, attributes: TAXONOMY_ATTRS, order: [['sort_order', 'ASC'], ['id', 'ASC']],
     });
 
-    // The menus the PLAN grants ON THIS PLATFORM — not the catalogue. Read
-    // through the join so a menu the admin later deselects from the plan (or
-    // from this platform) disappears here too.
-    const menuIds = await grantedMenuIds(plan.id, platform);
+    // The menus the PLAN grants — not the catalogue. Read through the join so a
+    // menu the admin later deselects from the plan disappears here too.
+    const menuIds = await grantedMenuIds(plan.id);
 
     const granted = menuIds.length
         ? await EventMenu.findAll({
@@ -431,27 +430,19 @@ const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
         })
         : [];
 
-    // Two different things share the grant table. Event FEATURES are what the
-    // wizard offers and an event stores; PORTAL SECTIONS ('portal' group) only
-    // decide which sidebar sections the client sees, so they are kept out of
-    // `menus` — the wizard would otherwise offer "Guests" as an event feature,
-    // and event create validation (which reads `menus`) would accept it.
-    // App features ('app') are not per-event choices either — the plan alone
-    // grants them — so the wizard must not offer them as event menus.
-    const menus = granted.filter((m) => m.menu_group !== 'portal' && m.menu_group !== 'app');
-    const portalSections = granted.filter((m) => m.menu_group === 'portal').map((m) => m.slug);
+    // Three different things share the grant table, told apart by the menu
+    // itself (see utils/menuPlacement). Event FEATURES are what the wizard
+    // offers and an event stores; PORTAL SECTIONS only decide which sidebar
+    // sections the client sees, so they are kept out of `menus` — the wizard
+    // would otherwise offer "Guests" as an event feature, and event create
+    // validation (which reads `menus`) would accept it. App features are not
+    // per-event choices either — the plan alone grants them.
+    const menus = granted.filter((m) => isEventMenu(m.slug));
+    const portalSections = granted.filter((m) => isPortalSection(m.slug)).map((m) => m.slug);
 
     // The plan's mobile APP features, for the wizard's per-event on/off
-    // switches. Read on MOBILE whatever platform is asking: they are Active on
-    // mobile only, so the website grant list never contains them.
-    const appIds = await grantedMenuIds(plan.id, 'mobile');
-    const appFeatures = appIds.length
-        ? await EventMenu.findAll({
-            where: activeWhere(companyId, { id: { [Op.in]: appIds }, menu_group: 'app' }),
-            attributes: [...TAXONOMY_ATTRS, 'slug', 'menu_group'],
-            order: [['sort_order', 'ASC'], ['id', 'ASC']],
-        })
-        : [];
+    // switches.
+    const appFeatures = granted.filter((m) => isAppFeature(m.slug));
 
     // The admin-authored invitation templates this plan entitles them to. The
     // wizard narrows these further by the category actually chosen in

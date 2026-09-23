@@ -61,7 +61,7 @@ const rsvpEnabledFor = async (event) => {
     const rsvpIds = onEvent.filter((m) => /^rsvp(-\d+)?$/.test(m.slug)).map((m) => Number(m.id));
     if (!rsvpIds.length) return false;
 
-    const granted = await clientPortalService.ownerGrantedMenuIds(event.website_client_id, 'mobile');
+    const granted = await clientPortalService.ownerGrantedMenuIds(event.website_client_id);
     return rsvpIds.some((id) => granted.includes(id));
 };
 

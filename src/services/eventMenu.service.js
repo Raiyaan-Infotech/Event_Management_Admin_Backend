@@ -28,8 +28,6 @@ const WRITABLE_FIELDS = [
     'remarks',
     'menu_group',
     'event_category_id',
-    'active_website',
-    'active_mobile',
     'is_default',
     'icon',
     'color',
@@ -193,12 +191,12 @@ const updateStatus = async (id, is_active, userId = null, companyId = undefined)
 };
 
 /**
- * One endpoint for the per-platform Active switches, so a switch flip writes a
- * single column instead of round-tripping the whole row.
+ * One endpoint for the list's quick switches, so a flip writes a single column
+ * instead of round-tripping the whole row.
  * The field name is checked against this whitelist, so the route's `:field`
  * cannot be used to write an arbitrary column.
  */
-const TOGGLE_FIELDS = ['active_website', 'active_mobile', 'is_default'];
+const TOGGLE_FIELDS = ['is_active', 'is_default'];
 
 const updateToggle = async (id, field, value, userId = null, companyId = undefined) => {
     if (!TOGGLE_FIELDS.includes(field)) {

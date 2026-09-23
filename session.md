@@ -13228,3 +13228,48 @@ Why they were missing: step 3 lists `/client/event-options` `menus`, which exclu
 - Not changed: the `/client/events/:id/family` and `/participants` endpoints still answer when the tile is switched off — the tile is hidden, the data route is not gated by it.
 
 ⚠ **Production order:** (1) `node src/database/tools/apply-event-app-feature-toggles.js --prod --apply` → (2) deploy backend + portal. The new Event model selects the column.
+
+### 550. Portal screens caught up to §547's real plan limits — two were still saying "no limit exists"
+
+Jamal, ahead of manually testing the plan limits: asked whether they're actually wired into the client portal. Two screens were left over from before §547 and actively said the opposite of what is now true:
+
+- **Profile "Plan & Usage" card** stated in its own text: *"Usage limits are not shown because a plan does not carry any — it has a price… but no ceiling on events, guests or messages."* False since §547. Now reads real limits via the same `useBillingOverview()` Billing already uses (so the two screens cannot disagree): Events Created shows `used / max_events` with a real ratio bar; Guests Added shows a "Up to N per event" note instead of a bar, because the plan caps guests PER EVENT — there is no single account-wide total for a bar to be a ratio of.
+- **Billing overview tile + single-invoice usage row** (`billing/page.tsx`, `invoices/[id]/invoice-detail.tsx`): both already fetched `guests.per_event_limit` from the backend but never rendered it — the Guests tile said **"No limit set on your plan"** even when the plan has a 250-per-event cap. Both now show "Up to 250 per event" in that case.
+- Storage / Events / Messages tiles were already correct (limit + unit flow through unchanged since §547/§548).
+
+Verified against local data (client #21, Wedding Special: max_events 5, max_guests_per_event 250, storage 100 GB) — `getOverview()` returns `events.limit=5`, `guests.limit=null` + `per_event_limit=250`, `storage.limit=100`/`unit=GB`, all matching the plan row directly. 4/4. Portal `tsc` clean. Not browser-tested.
+
+### 551. §548's default list revised — Event Information out, Venue moved to last
+
+Jamal: drop Event Information from the defaults; keep Venue, but as the 12th (last) default rather than where "Event Info (or) Venue" sat in the middle of the list.
+
+New default order (12): Event Invitation, RSVP, Agenda, Participants, Gallery, Family, Wishes, Contact Us, Near By, Downloads, Chat, Venue. Everything else (Event Information, Invite & Share, Social Wall, Guests, Messages, Splash Screens) is now an add-on, in its previous relative order, sort_order continuing on from the defaults.
+
+Tool `src/database/tools/apply-menu-order-update.js` (dry-run default, `--apply`, `--prod`): content edit, not a schema change — same as flipping a menu's Default switch and using Change Order in the admin, for every affected menu in one pass. Raw SQL, not `eventMenu.service`, on purpose: the script's own process has no plan-grants cache to invalidate, and the running server's (60s TTL) clears itself regardless.
+- Event Information keeps every plan grant it already had — this only changes what a NEW plan starts pre-ticked with, per §548's "ticked by default, removable" decision.
+- **LOCAL applied**: 12 menus reordered, Event Information flipped to add-on; re-run = 0 changes. Verified via `eventMenu.service`: default order is exactly the 12 above with `venue` last, Event Information confirmed out of defaults and into add-ons.
+- **Production dry run**: identical diff to local (same starting catalogue from §548) — 12 reorders, 1 default flip, nothing else. Not yet applied.
+
+⚠ Production: `node src/database/tools/apply-menu-order-update.js --prod --apply`. No deploy needed first — `is_default` and `sort_order` already exist in the code from §548.
+
+### 552. Menu form: one Active/Inactive switch, not a per-platform split
+
+Jamal: "i told you already not show like this and show active inactive only" — the Menu form's "Active / Inactive Status" panel still showed two separate switches (Website / Mobile App). Replaced with one switch; toggling it sets `active_website` and `active_mobile` together. No backend or portal change needed — `clientPortal.grantedMenuIds` already reads the two columns independently and does not assume any particular UI, so writing them equal from the form just keeps them in sync. Verified in-process on local (6/6): switching Agenda off removes it from both website and mobile grants and from `/client/event-options`; switching back on restores both. Admin `tsc` clean.
+
+⚠ The lower-level `PATCH /event-menus/:id/toggle/:field` route still accepts `active_website` / `active_mobile` individually (unused by any current UI — the list page's per-platform quick-toggles were already removed earlier). Not a live inconsistency risk today, but worth knowing if a future screen calls it directly.
+
+**End of session — open items:**
+1. **Production has NOT been migrated for §547–§551.** Run in this order, backend deployed between steps 2 and 4:
+   - `apply-plan-limits.js --prod --apply` (done — Jamal ran this already)
+   - `apply-default-menus.js --prod --apply`
+   - `apply-plan-storage-unit.js --prod --apply`
+   - deploy backend + admin + portal
+   - `apply-plan-storage-unit.js --prod --drop-old --apply`
+   - `apply-event-app-feature-toggles.js --prod --apply`
+   - `apply-menu-order-update.js --prod --apply`
+2. Nothing from today's session 47 work is committed to git beyond what was staged earlier in the session — check `git status` in backend, admin, and portal before assuming any of this is saved.
+3. `src/database/tools/check-plan-menus.js` (Jamal's own uncommitted tool) still queries the dropped `subscription_plan_menus.for_website/for_mobile` and `limits_json` columns — will error until updated.
+4. Family / Participants tiles: switching the tile off hides it in the app, but `GET /client/events/:id/family` and `/participants` are not gated by that same switch — the data endpoint still answers if called directly.
+5. Max Images / Max Videos / Storage limits are stored and shown but not enforced anywhere — no real gallery upload feature exists yet.
+6. Event Invitation (the new default menu) has no route in the mobile app's `wedding_home_screen.dart` `_routes` map — the tile will show as unbuilt/coming soon until that's wired.
+7. Nothing in this session was tested in an actual browser — only backend/in-process checks and `tsc`. Admin, portal, and mobile screens should be clicked through by hand.
