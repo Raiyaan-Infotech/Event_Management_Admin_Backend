@@ -475,6 +475,39 @@ const assertGuestCapacity = async (eventId, adding = 1, { transaction, message }
 };
 
 /**
+ * Guest capacity per event, for the Add Guest gate — the guest twin of
+ * `events_used` on /client/event-options. Uses guestLimitFor, so the portal
+ * blocks at exactly the number createGuest refuses at. Counts ROWS.
+ */
+const getGuestCapacity = async (clientId) => {
+    const events = await Event.findAll({
+        where: { website_client_id: clientId },
+        attributes: ['id', 'name', 'website_client_id', 'subscription_plan_id'],
+        order: [['start_date', 'ASC']],
+    });
+    if (events.length === 0) return { limit: null, events: [] };
+
+    // Every event of one host shares the host's current plan, so one lookup.
+    const limit = await guestLimitFor(events[0]);
+
+    const counts = await EventGuest.findAll({
+        where: { event_id: { [Op.in]: events.map((e) => e.id) } },
+        attributes: ['event_id', [Sequelize.fn('COUNT', Sequelize.col('id')), 'used']],
+        group: ['event_id'],
+        raw: true,
+    });
+    const usedBy = new Map(counts.map((c) => [Number(c.event_id), Number(c.used)]));
+
+    return {
+        limit,
+        events: events.map((e) => {
+            const used = usedBy.get(e.id) || 0;
+            return { event_id: e.id, name: e.name, used, full: limit !== null && used >= limit };
+        }),
+    };
+};
+
+/**
  * Add a guest.
  *
  * A duplicate email on the SAME event is refused; the same person on two
@@ -714,4 +747,5 @@ module.exports = {
     applyResponse,
     assertGuestCapacity,
     guestLimitFor,
+    getGuestCapacity,
 };

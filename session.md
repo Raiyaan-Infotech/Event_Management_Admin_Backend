@@ -13436,3 +13436,10 @@ Also found: the CSV import had NO limit check at all, and editing a guest onto a
 ⚠ Decision reversed: an event no longer keeps the cap it was created under. A downgrade to Free stops NEW guests on an event already past 5; existing guests are untouched.
 
 Verified locally: at cap refused / one under allowed on 6 events; simulated live case in a rolled-back transaction (host moved to Free Trial Plan, event still on plan 7 with 18 guests) → refused "guest limit of 5". Existing 6th guest on live is NOT removed — delete it by hand if wanted.
+
+### 564. Add Guest gated like Create Event
+
+Jamal: "still able to open the 6th guest form — do it the same way event works". Create Event uses `EventLimitGate`: the server sends limit + used up front and the wizard never opens when full. Guests now copy it:
+- **Backend:** `GET /client/guests/capacity` → `{ limit, events: [{ event_id, name, used, full }] }` (`clientGuest.getGuestCapacity`, same `guestLimitFor` as the save).
+- **Portal:** `useGuestCapacity()`; `guests/_components/guest-limit-gate.tsx` wraps Add Guest and Import Guests — when EVERY event is full it shows "Guest limit reached" + View Plan & Billing instead of the form. The limit is per event, so when only some are full the form opens and full events are disabled in the picker as "— Full (5/5)". The form no longer reads Billing's `per_event_limit` or `useGuestStats`, so its number cannot differ from the server's.
+- `tsc` clean. Capacity service checked against local data. Not browser-tested.

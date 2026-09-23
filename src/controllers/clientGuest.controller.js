@@ -42,6 +42,12 @@ const stats = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, data, 'Guest stats retrieved');
 });
 
+/** Per-event guest limit + count, so Add Guest can refuse before the form opens. */
+const capacity = asyncHandler(async (req, res) => {
+    const data = await guestService.getGuestCapacity(req.websiteClient.id);
+    return ApiResponse.success(res, data, 'Guest capacity retrieved');
+});
+
 const getById = asyncHandler(async (req, res) => {
     const guest = await guestService.getGuestById(req.websiteClient.id, req.params.id);
     if (!guest) throw ApiError.notFound('Guest not found.');
@@ -193,7 +199,7 @@ const sampleCsv = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
-    list, stats, formOptions, getById, create, update, remove, bulk,
+    list, stats, capacity, formOptions, getById, create, update, remove, bulk,
     listGroups, allGroups, groupStats, getGroup, createGroup, updateGroup, removeGroup,
     previewImport, commitImport, exportGuests, sampleCsv,
 };
