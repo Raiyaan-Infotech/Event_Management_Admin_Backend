@@ -32,10 +32,29 @@ const isPortalSection = (slug) => PORTAL_SECTION_SLUGS.includes(String(slug));
 /** An event menu is everything that is neither of the above. */
 const isEventMenu = (slug) => !isAppFeature(slug) && !isPortalSection(slug);
 
+/**
+ * Menus an event always keeps. Every plan grants them (the admin plan wizard
+ * shows them ticked and disabled) and no event can switch them off, so a create
+ * or update that omits one has them added back rather than refused.
+ */
+const LOCKED_MENU_SLUGS = [
+    'splash-screens',
+    'event-invitation',
+    'participants',
+    'venue',
+    'rsvp',
+    'agenda',
+    'guests',
+];
+
+const isLockedMenu = (slug) => LOCKED_MENU_SLUGS.includes(String(slug));
+
 module.exports = {
     APP_FEATURE_SLUGS,
     PORTAL_SECTION_SLUGS,
+    LOCKED_MENU_SLUGS,
     isAppFeature,
     isPortalSection,
     isEventMenu,
+    isLockedMenu,
 };

@@ -15,7 +15,7 @@ const {
 const { Op } = Sequelize;
 const ApiError = require('../utils/apiError');
 const eventQr = require('../utils/eventQr');
-const { isAppFeature, isPortalSection } = require('../utils/menuPlacement');
+const { isAppFeature, isPortalSection, isLockedMenu } = require('../utils/menuPlacement');
 const clientPortalService = require('./clientPortal.service');
 const mediaService = require('./media.service');
 const subscriptionPlanService = require('./subscriptionPlan.service');
@@ -299,7 +299,12 @@ const normalise = async (clientId, body, { partial = false } = {}) => {
                 throw ApiError.badRequest('One or more selected menus do not match the event category.');
             }
         }
-        data.menu_ids = ids;
+
+        // Locked menus are added back rather than refused: the client did not
+        // choose to drop them (the switch is disabled), so a payload without one
+        // is a stale or hand-made request, not an instruction.
+        const locked = options.menus.filter((m) => isLockedMenu(m.slug)).map((m) => m.id);
+        data.menu_ids = [...new Set([...ids, ...locked])];
     }
 
     // ── Step 3 — the plan's app features this event switches OFF ────────────
@@ -307,7 +312,11 @@ const normalise = async (clientId, body, { partial = false } = {}) => {
     // dropped rather than refused — an OFF entry for a feature the plan no
     // longer grants cannot turn anything on, so it is only noise.
     if (has('disabled_app_menu_ids')) {
-        const appIds = new Set((options.app_features ?? []).map((m) => Number(m.id)));
+        // A locked feature is never switchable, so it is dropped from the OFF
+        // list for the same reason a locked menu is added back above.
+        const appIds = new Set(
+            (options.app_features ?? []).filter((m) => !isLockedMenu(m.slug)).map((m) => Number(m.id))
+        );
         const raw = Array.isArray(picked.disabled_app_menu_ids) ? picked.disabled_app_menu_ids : [];
         data.disabled_app_menu_ids = [...new Set(raw.map(Number).filter((id) => appIds.has(id)))];
     }
