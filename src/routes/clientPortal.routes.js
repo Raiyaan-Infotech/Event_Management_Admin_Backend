@@ -499,6 +499,12 @@ router.post(
 );
 router.delete('/gallery/:itemId', galleryController.remove);
 
+// Gallery categories — per event, host-authored. Declared after the item routes
+// so '/gallery/categories' can never be read as an item id.
+router.get('/events/:id/gallery/categories', galleryController.listCategories);
+router.post('/events/:id/gallery/categories', galleryController.createCategory);
+router.delete('/gallery/categories/:categoryId', galleryController.removeCategory);
+
 // The app's read: the ACTIVE splash for one event, or null. Declared BEFORE
 // `/splash-screens/:id` — the same ordering trap as `/events/stats`, since
 // Express would otherwise match "for-event" as an id.

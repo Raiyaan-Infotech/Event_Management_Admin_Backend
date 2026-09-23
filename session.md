@@ -13273,3 +13273,149 @@ Jamal: "i told you already not show like this and show active inactive only" —
 5. Max Images / Max Videos / Storage limits are stored and shown but not enforced anywhere — no real gallery upload feature exists yet.
 6. Event Invitation (the new default menu) has no route in the mobile app's `wedding_home_screen.dart` `_routes` map — the tile will show as unbuilt/coming soon until that's wired.
 7. Nothing in this session was tested in an actual browser — only backend/in-process checks and `tsc`. Admin, portal, and mobile screens should be clicked through by hand.
+
+## Session 48 — The platform columns finally leave the code, plan limits stop being decorative, and the gallery becomes real
+
+> **Date:** 2026-09-23 | **Backend:** Event_Management_Admin_Backend · **Admin:** Event_Management_Admin_Frontend · **Portal:** event_client_single · **App:** Event_Invite_Mobile_App
+
+### 553. `event_menus.active_website` / `active_mobile` removed — production was right, local was stale
+
+Jamal, on being told production lacked the columns: "no need that is we already removed that configuration". Correct — and the mistake was mine: I read production as the side out of date. Production never had them; LOCAL did, and the CODE still used them, so the next deploy would have thrown *Unknown column 'active_website'* on the first menu read.
+
+- `EventMenu` model (the real risk — the model made EVERY query select them), `eventMenu.service` `WRITABLE_FIELDS` and `TOGGLE_FIELDS` (now `is_active` / `is_default`), `initial_setup.sql`.
+- `clientPortal.grantedMenuIds` gates on `is_active: 1`, matching the `activeWhere` convention used everywhere else in that file. The now-meaningless `platform` argument is gone from `grantedMenuIds` / `ownerGrantedMenuIds` and their two callers; the cache key went from `planId:platform` to `planId`.
+- Admin menu form writes one `is_active` switch; the view page shows one Active row; hook types and `EventMenuToggleField` updated.
+- Tool `drop-menu-active-platform.js` (dry-run default, backs up first). **LOCAL applied** (backup `local-drop-menu-active-platform-1790140874624.json`). The dry run proved the split was redundant: the 10 rows that disagreed were exactly the `app` group (website=0) and `portal` group (mobile=0), which `menu_group` already carried.
+
+⚠ Also found: production was missing `event_menus.remarks`, a field the Menu form has written (300 chars, with its own counter) and the view page has rendered for a while. Added with `add-menu-remarks.js` — **applied to production**.
+
+### 554. `menu_group` is a LABEL now — placement moved to `utils/menuPlacement.js`
+
+Jamal: "not based on this group based menu showing that portal app web like that if you have menu you know where it was present why need group just rename group as core and add on".
+
+The group used to decide WHERE a menu appears (`app` = mobile tile, `portal` = portal sidebar section), which made placement an editable dropdown — an admin could move "Guests" into the event wizard by accident. Placement is a property of the feature, so it moved to slug lists:
+
+- **`src/utils/menuPlacement.js`** — `APP_FEATURE_SLUGS` (8), `PORTAL_SECTION_SLUGS` (3), `isAppFeature` / `isPortalSection` / `isEventMenu`.
+- `clientPortal.getEventOptions` splits event menus / portal sections / app features on slugs; `clientEvent.presentOne` gates app rows the same way and no longer selects `menu_group` at all.
+- Enum collapsed to `enum('core','addon')` in the model, `initial_setup.sql` and the frontend type. Mapping follows the Default/Add-on decision already stored: `is_default = 1 -> core`, `0 -> addon` (local 12 core / 6 addon).
+- Tool `collapse-menu-group.js` — widens the enum, rewrites rows, narrows it, because narrowing with rows still holding 'app' would blank them. Backs up first.
+- Also dropped the two never-used enum values (`additional`, `custom` — 0 rows on both databases).
+
+⚠ **Deploy order matters and I got it backwards first.** OLD code reads `menu_group === 'app'`, so collapsing the values while it is serving removes every app tile and portal section. NEW code ignores the column for placement and works with either. So: **deploy first, then collapse** — the opposite of the usual rule.
+
+Verified after the change on local: 7 event menus, 3 portal sections `[guests, messages, splash-screens]`, 8 app features, nothing leaked, website and mobile identical (correct — placement, not platform, decides now).
+
+### 555. Plan Configuration — step 4 renamed, and the real numbers applied
+
+Jamal's wording: "plan limit replace Plan Configuration", with Max Gallery Image / Max Gallery Videos / Max Guest (Per Event) / Max Gallery Storage. Rename only — enforcement untouched, Max Events stays ("keep that i will tell that other config rename only").
+
+Wizard step 4 card, its Review card and the plan detail page all updated together so the three screens cannot disagree.
+
+**Tool `apply-plan-config.js`** matches on the FIRST WORD of the plan name, because the ids and the names differ between databases (production "Free" / local "Free Trial Plan"). **Applied to local and production:**
+
+| Plan | Events | Img | Video | Storage | Guests |
+|---|---|---|---|---|---|
+| Free | 1 | 5 | 1 | 15 MB | 5 |
+| Basic | 2 | 7 | 2 | 25 MB | 10 |
+| Standard | 3 | 9 | 3 | 50 MB | 15 |
+| Premium | 5 | 15 | 5 | 100 MB | 25 |
+
+### 556. Seven locked menus — and the bug that made a save DELETE them
+
+Jamal: Splash, Event Invitation, Participants, Venue, RSVP, Agenda, Guest are on every plan and every event, and the toggle cannot be turned off. Asked where to lock it — answer: "Both" (plan wizard AND Menu Management).
+
+`LOCKED_MENU_SLUGS` lives in `utils/menuPlacement.js` (backend) and `lib/locked-menus.ts` (admin + portal, one list each so they cannot drift).
+
+**The bug, and it was mine.** I shipped the lock as UI-only: the checkbox rendered `checked={locked || included}` while the SELECTION STATE never contained the locked menu. `syncPlanMenus` destroys every grant not in the incoming payload — so saving a plan silently DELETED `guests`. That is why Jamal's ticked Guests "didn't show": the save removed it. Production proof at the time: Free plan #12 granted 13 menus, `guests` not among them.
+
+Fixed where it actually matters:
+- **`syncPlanMenus` unions the locked menus into `incoming` before the destroy runs** — no payload from any screen can drop them.
+- Admin wizard `selectedIds` unions the locked ids, so what is drawn and what is sent cannot diverge.
+- Portal event wizard: both switch lists (event menus AND Mobile App Features) render them on + disabled; the payload force-includes them and never puts a locked feature in `disabled_app_menu_ids`.
+- `clientEvent.normalise` adds locked menus back into `menu_ids` and drops locked ids from the OFF list — a hand-made API call cannot strip them either.
+
+Test with the exact payload the old wizard sent (11 menus, omitting all 7): **18 grants before, 18 after, 7/7 locked kept.**
+
+Also `align-locked-menus.js` (additive only): `is_default = 1` for the seven, plus a grant row for every missing (plan × locked menu) pair. **Applied to local and production** — production added 3 grants (Free was missing `guests` and `splash-screens`, Basic missing `splash-screens`). That is what put the Guests section back in a Free client's portal.
+
+### 557. The event limit stops being decorative — and the delete-and-recreate loophole closes
+
+Two separate problems, found in order.
+
+**It only told you after five steps.** `createEvent` refused correctly, but the portal wizard let the whole form be filled first. New `EventLimitGate` wraps the create page (every "Create New Event" link lands there, so one gate covers six entry points).
+
+Two false starts worth recording:
+1. It first read the limit from `/client/billing/overview`, and I wrote it fail-open — so a billing failure silently reopened the wizard. A screen whose job is to refuse must not depend on a second service.
+2. It then read the count from the events LIST, which shows live events only — that disagrees with the backend the moment anything is deleted.
+
+Settled: `PLAN_ATTRS` carries the limits so `/client/event-options` (which the wizard already calls) returns `plan.max_events`, and `getEventOptions` returns **`events_used`**, counted server-side exactly as the create counts it.
+
+**The loophole, spotted by Jamal:** "i create event then dlt after i able to create new one? that is user able to create unlimited event?" — correct. Deletes are soft (`paranoid: true`), and the count ignored deleted rows, so create → delete → repeat gave unlimited events on any plan. Now counted with `paranoid: false` in THREE places that must agree: `createEvent`, the billing usage tile, and `events_used`.
+
+Proof: `max_events` forced to 1, create #1 succeeded, deleted it, `events_used` still reported 1 of 1, create #2 refused.
+
+⚠ The cap is now LIFETIME, not concurrent. On Free (1 event) a mistaken create-then-delete locks the account out permanently. The softer variant — counting deleted events only within the current billing period — was offered and not taken.
+
+### 558. Guest limit surfaced the same way; RSVP has no separate limit
+
+Backend enforcement verified both directions on event #22: at the cap, *"This event has reached its guest limit of 36"*; with one seat free, created.
+
+The guest form now shows a red inline warning under the event picker and disables Add Guest once that event is full. It counts **rows, not heads** — event #22 is 36 rows but 62 heads, and `clientGuest.createGuest` counts rows, so using heads would have blocked people early.
+
+No separate RSVP limit exists (§547): one guest = one answer, so `max_guests_per_event` caps both.
+
+⚠ Known mismatch: the portal reads `per_event_limit` from the CLIENT's current plan, while the backend enforces the plan the EVENT was created under. They differ for an event created under an older plan.
+
+### 559. Event dates are confirmed when picked, and locked once created
+
+Three changes on the portal wizard, all driven by one rule — the date cannot be corrected later, so it is confirmed before it is set:
+- Start/End Date render **disabled in edit mode**, with a hint saying why.
+- Picking a date on a NEW event opens a confirm dialog. Only a COMPLETE, sane date asks: a native `<input type="date">` fires on every partial keystroke, and prompting at "0002-01-01" while someone types the year is unusable.
+- The review screen confirms before saving ("Create this event? … The event date cannot be changed afterwards"), wording switching to "Save these changes?" in edit mode.
+
+All three share one `Dialog` driven by one `confirm` state. The submit was extracted into `submitEvent()` — a first attempt used a "confirmed" flag, which would never have re-fired the save.
+
+⚠ The date lock is UI-only: `PUT /client/events/:id` still accepts `start_date` / `end_date`.
+
+### 560. The event gallery is real — plan limits finally mean something
+
+Until now `max_photos`, `max_videos` and `storage_limit` were stored, displayed and enforced by NOTHING, because no gallery existed (§533). The app's gallery screen was a mock: hardcoded counts ("All Photos 132, Highlights 28") over `kWallPhotos` stock images, taking no eventId and making no API call, with an `_upload()` that showed a success toast and a 500ms delay.
+
+**Backend.** `event_gallery_items` (typed image/video, `size_bytes`, `uploaded_by`, FK ON DELETE CASCADE) — video and uploader columns included from the start so the video phase needs no second migration. Endpoints: list, usage, upload (multipart), delete. Built on the existing upload path (multer memory storage → S3 → sharp → CloudFront), which already accepted video for splash media.
+
+Three limits of three different shapes:
+- `max_photos` / `max_videos` — PER EVENT, read from the plan the event was created under
+- `storage_limit` — PER ACCOUNT, every event's media summed
+- 2MB image / 5MB video — a fixed product rule, not a plan column
+
+All checked BEFORE the S3 upload, so a refused file never reaches the bucket. Multer's ceiling is the 5MB video cap with the 2MB image cap applied in the service, which knows the type — enforcing 2MB at the door would kill a legitimate 3MB video.
+
+Verified: 3MB image refused, 6MB video refused, PDF refused, photos 1/2 → 2/2 → refused, videos 1/1 → refused, storage *"Your plan includes 1MB of storage and 0MB is left. This file is 2MB."*, delete frees the bytes.
+
+**Mobile app.** The app had NEVER uploaded a file — `ApiClient` had no multipart verb at all. Added `ApiClient.upload()` (FormData, progress callback, same error mapping so a plan refusal arrives as the server's own wording), `gallery_repository.dart`, a real gallery screen (quota card, All/Photos/Videos filter, empty state, pull-to-refresh) and a real upload screen (pick → crop → POST with a progress bar).
+
+### 561. Gallery categories, and who may upload
+
+Jamal: "gallery category needed do that", "event organizer or client able to upload img and video participant able to view only".
+
+- **`event_gallery_categories`** — per EVENT, not global ("Mehendi" belongs to one wedding). `event_gallery_items.category_id` is nullable with ON DELETE SET NULL: deleting a category returns its photos to Uncategorised rather than deleting them. Applied to local AND production.
+- Categories carry live item counts, computed rather than stored — a counter drifts the first time an item is deleted by another path. `?category_id=0` means Uncategorised, which is a real filter and must not be confused with an absent parameter.
+- **Read is host OR participant; write is host only.** `resolveEventForView` uses the same `participant_client_id` lookup `clientEvent` uses for `is_owner`, so the two cannot disagree. The response carries `can_upload`, and the app hides Upload and the delete buttons on it. A participant sees the HOST's quota, not their own.
+- Delete is now a HARD delete of the row plus the S3 file: a soft-deleted row whose object is already gone can only be "restored" into a broken image. Confirmation dialogs on both item and category delete, and the item delete got a visible ✕ — a long-press-only delete is a delete nobody finds.
+
+Verified: outsider refused, participant sees items with `can_upload=false`, participant upload refused, participant delete refused, category delete keeps its photos, item delete leaves no row.
+
+### 562. Production data, repaired
+
+Jamal asked for his own production client to be reset for testing. All five of his events were already soft-deleted (and so still held slots under §557's lifetime counting). Hard-deleted with a full backup — 15 guests, 12 messages and 2 response logs cascaded; 10 notifications and 1 splash screen had `event_id` set to NULL (`prod-jamal-events-purge-1790158718807.json`). One live event recreated through `clientEvent.createEvent` so the QR was issued properly (#27, `qr_version 1`).
+
+**End of session — production and local schemas now MATCH: 0 missing tables, 0 missing columns.**
+
+**Open items:**
+1. **The upload screen has no category picker.** The API, service and repository all accept `category_id`; nothing in the UI supplies it, so every upload lands Uncategorised and category counts stay at 0. Moving an existing photo between categories would also need a `PATCH /client/gallery/:itemId`, which does not exist.
+2. **`add_category_screen.dart` and `/event/gallery/add-category` are orphaned** — replaced by an inline "+ Add" chip. Delete them or repoint that screen at the real API; having both is the problem.
+3. **Video cannot be used from the app.** The backend accepts and limits MP4/WebM/MOV, but the app has no video picker and no player (no `video_player` / `chewie` in pubspec). Video tiles draw a play icon that does nothing.
+4. **Organizer login is requested but not designed.** `events.organizer` / `contact_phone` are free text with no account behind them, and login requires an existing `website_clients` row. Granting an organizer host-level edit/delete means the `event.website_client_id === clientId` check stops being the definition of access in five services (events, guests, gallery, messages, splash). Four decisions are outstanding: whether the organizer gets a real account, how far the access goes, what happens when that phone is already a client, and whether editing `contact_phone` silently grants or revokes access.
+5. **Free plan is 1 event and lifetime-counted**, so that account cannot create again without a limit change or a hard delete.
+6. **The date lock is UI-only** (§559) and the portal/backend guest-limit plan mismatch (§558) both remain.
+7. **Nothing here was tested in a browser or on a device** — backend in-process checks, `tsc` and `flutter analyze` (0 errors) only.

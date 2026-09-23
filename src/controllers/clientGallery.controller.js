@@ -24,4 +24,22 @@ const remove = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, result, 'Removed.');
 });
 
-module.exports = { list, usage, upload, remove };
+const listCategories = asyncHandler(async (req, res) => {
+    const result = await service.listCategories(req.websiteClient.id, Number(req.params.id));
+    return ApiResponse.success(res, { categories: result }, 'Categories loaded.');
+});
+
+const createCategory = asyncHandler(async (req, res) => {
+    const result = await service.createCategory(req.websiteClient.id, req.params.id, req.body);
+    return ApiResponse.created(res, { category: result }, 'Category added.');
+});
+
+const removeCategory = asyncHandler(async (req, res) => {
+    const result = await service.removeCategory(req.websiteClient.id, req.params.categoryId);
+    return ApiResponse.success(res, result, 'Category removed.');
+});
+
+module.exports = {
+    list, usage, upload, remove,
+    listCategories, createCategory, removeCategory,
+};

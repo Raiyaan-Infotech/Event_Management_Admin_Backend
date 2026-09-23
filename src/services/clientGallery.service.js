@@ -1,4 +1,6 @@
-const { Sequelize, EventGalleryItem, Event, WebsiteClient } = require('../models');
+const {
+    Sequelize, EventGalleryItem, EventGalleryCategory, Event, EventGuest, WebsiteClient,
+} = require('../models');
 const { Op } = Sequelize;
 const ApiError = require('../utils/apiError');
 const mediaService = require('./media.service');
@@ -49,6 +51,35 @@ const resolveEvent = async (clientId, rawId) => {
     return event;
 };
 
+/**
+ * The event as a VIEWER may see it: the host, or a participant of it.
+ *
+ * Writing is host-only (`resolveEvent`), reading is not — a participant opens
+ * the gallery to look at the photos, which is the entire point of it. The
+ * membership test is the same `participant_client_id` lookup `clientEvent`
+ * uses to decide `is_owner`, so the two cannot disagree about who is in.
+ */
+const resolveEventForView = async (clientId, rawId) => {
+    const eventId = Number(rawId);
+    if (!eventId) throw ApiError.badRequest('Please choose an event.');
+
+    const event = await Event.findByPk(eventId, {
+        attributes: ['id', 'name', 'subscription_plan_id', 'company_id', 'website_client_id'],
+    });
+    if (!event) throw ApiError.notFound('That event was not found.');
+
+    const isOwner = Number(event.website_client_id) === Number(clientId);
+    if (isOwner) return { event, isOwner };
+
+    const membership = await EventGuest.findOne({
+        where: { event_id: event.id, participant_client_id: clientId },
+        attributes: ['id'],
+    });
+    if (!membership) throw ApiError.notFound('That event is not on your account.');
+
+    return { event, isOwner: false };
+};
+
 const present = (row) => {
     const item = row.toJSON ? row.toJSON() : row;
     return {
@@ -60,6 +91,7 @@ const present = (row) => {
         file_name: item.file_name,
         mime_type: item.mime_type,
         size_bytes: Number(item.size_bytes || 0),
+        category_id: item.category_id ?? null,
         caption: item.caption,
         sort_order: item.sort_order,
         created_at: item.created_at,
@@ -79,7 +111,7 @@ const storageUsedFor = async (clientId) => {
  * the counts, the limits and what is left.
  */
 const getUsage = async (clientId, eventId) => {
-    const event = await resolveEvent(clientId, eventId);
+    const { event } = await resolveEventForView(clientId, eventId);
 
     // The plan the EVENT was created under, matching how the guest limit is
     // read — an event keeps the limits it was built against.
@@ -89,11 +121,14 @@ const getUsage = async (clientId, eventId) => {
         subscriptionPlanService.getPlanLimit(planId, 'max_videos'),
     ]);
 
+    // Storage and plan belong to the event's OWNER, not to whoever is looking:
+    // a participant reading the gallery must see the host's quota, not their own.
+    const ownerId = event.website_client_id ?? clientId;
     const [photos, videos, storageUsed, client] = await Promise.all([
         EventGalleryItem.count({ where: { event_id: event.id, type: 'image' } }),
         EventGalleryItem.count({ where: { event_id: event.id, type: 'video' } }),
-        storageUsedFor(clientId),
-        WebsiteClient.findByPk(clientId, { attributes: ['subscription_plan_id'] }),
+        storageUsedFor(ownerId),
+        WebsiteClient.findByPk(ownerId, { attributes: ['subscription_plan_id'] }),
     ]);
 
     const plan = client?.subscription_plan_id
@@ -116,10 +151,16 @@ const getUsage = async (clientId, eventId) => {
 };
 
 const listItems = async (clientId, eventId, query = {}) => {
-    const event = await resolveEvent(clientId, eventId);
+    const { event, isOwner } = await resolveEventForView(clientId, eventId);
 
     const where = { event_id: event.id };
     if (query.type === 'image' || query.type === 'video') where.type = query.type;
+    // `?category_id=0` means Uncategorised, which is a real filter — an absent
+    // parameter means "everything" and must not be confused with it.
+    if (query.category_id !== undefined && query.category_id !== '') {
+        const catId = Number(query.category_id);
+        where.category_id = catId > 0 ? catId : null;
+    }
 
     const items = await EventGalleryItem.findAll({
         where,
@@ -128,8 +169,103 @@ const listItems = async (clientId, eventId, query = {}) => {
 
     return {
         items: items.map(present),
+        categories: await listCategories(clientId, event.id),
         usage: await getUsage(clientId, eventId),
+        /** Participants view only — the app hides its Upload button on this. */
+        can_upload: isOwner,
     };
+};
+
+/**
+ * The event's categories, each with how many items it holds.
+ *
+ * The count is what makes a chip worth showing ("Ceremony 12"), and it is
+ * computed here rather than trusted to a stored counter that drifts the first
+ * time an item is deleted by any other path.
+ */
+const listCategories = async (clientId, eventId) => {
+    const rows = await EventGalleryCategory.findAll({
+        where: { event_id: eventId },
+        order: [['sort_order', 'ASC'], ['id', 'ASC']],
+    });
+
+    const counts = await EventGalleryItem.findAll({
+        where: { event_id: eventId },
+        attributes: ['category_id', [Sequelize.fn('COUNT', Sequelize.col('id')), 'n']],
+        group: ['category_id'],
+        raw: true,
+    });
+    const byId = new Map(counts.map((c) => [c.category_id, Number(c.n)]));
+
+    return rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        icon: r.icon,
+        sort_order: r.sort_order,
+        item_count: byId.get(r.id) || 0,
+    }));
+};
+
+const createCategory = async (clientId, eventId, body = {}) => {
+    const event = await resolveEvent(clientId, eventId);
+
+    const name = String(body.name || '').trim().slice(0, 120);
+    if (!name) throw ApiError.badRequest('Please enter a category name.');
+
+    const clash = await EventGalleryCategory.findOne({
+        where: { event_id: event.id, name },
+        attributes: ['id'],
+    });
+    if (clash) throw ApiError.conflict(`"${name}" is already a category on this event.`);
+
+    const last = await EventGalleryCategory.max('sort_order', { where: { event_id: event.id } });
+
+    const row = await EventGalleryCategory.create({
+        event_id: event.id,
+        website_client_id: clientId,
+        name,
+        icon: typeof body.icon === 'string' ? body.icon.slice(0, 100) : null,
+        sort_order: Number.isFinite(Number(last)) ? Number(last) + 1 : 0,
+        company_id: event.company_id ?? null,
+    });
+
+    return { id: row.id, name: row.name, icon: row.icon, sort_order: row.sort_order, item_count: 0 };
+};
+
+/**
+ * Delete a category. Its items are NOT deleted — the FK is ON DELETE SET NULL,
+ * so they fall back to Uncategorised. Removing a label must never remove the
+ * photos filed under it.
+ */
+const removeCategory = async (clientId, categoryId) => {
+    const row = await EventGalleryCategory.findOne({
+        where: { id: Number(categoryId) || 0, website_client_id: clientId },
+    });
+    if (!row) throw ApiError.notFound('That category was not found.');
+
+    const eventId = row.event_id;
+    await EventGalleryItem.update(
+        { category_id: null }, { where: { category_id: row.id } }
+    );
+    await row.destroy({ force: true });
+
+    return { removed: true, categories: await listCategories(clientId, eventId) };
+};
+
+/**
+ * A category id proven to belong to THIS event, or null.
+ *
+ * A stray id is dropped rather than refused: it cannot leak another event's
+ * photos into this gallery (the item's own event_id decides that), so the
+ * worst case is an uncategorised photo, not a failed upload.
+ */
+const resolveCategoryId = async (eventId, raw) => {
+    const id = Number(raw);
+    if (!id) return null;
+    const row = await EventGalleryCategory.findOne({
+        where: { id, event_id: eventId }, attributes: ['id'],
+    });
+    return row ? row.id : null;
 };
 
 /**
@@ -208,6 +344,7 @@ const uploadItem = async (clientId, eventId, file, body = {}) => {
         // The stored size, not the incoming one: images are compressed on the
         // way in, and charging for the pre-compression bytes would be wrong.
         size_bytes: Number(stored.size || size),
+        category_id: await resolveCategoryId(event.id, body.category_id),
         caption: typeof body.caption === 'string' ? body.caption.slice(0, 300) : null,
         sort_order: Number.isFinite(Number(last)) ? Number(last) + 1 : 0,
         uploaded_by: clientId,
@@ -218,8 +355,16 @@ const uploadItem = async (clientId, eventId, file, body = {}) => {
 };
 
 /**
- * Remove an item. Soft delete, but the bytes come back: unlike an event slot,
- * storage is a resource you are holding, not an entitlement you have spent.
+ * Remove an item — the row AND the file, together.
+ *
+ * A HARD delete on purpose. A soft-deleted row whose S3 object is already gone
+ * is a row that can be "restored" into a broken image, and the bytes are freed
+ * either way, so there is nothing for the row to still represent. The file is
+ * deleted first: an orphaned object nobody can reach is a worse outcome than a
+ * row briefly outliving its file.
+ *
+ * Host only — `website_client_id` is the owner, so a participant cannot delete
+ * somebody else's photos.
  */
 const removeItem = async (clientId, itemId) => {
     const item = await EventGalleryItem.findOne({
@@ -229,7 +374,7 @@ const removeItem = async (clientId, itemId) => {
 
     const eventId = item.event_id;
     await mediaService.deleteFile(item.url).catch(() => null);
-    await item.destroy();
+    await item.destroy({ force: true });
 
     return { removed: true, usage: await getUsage(clientId, eventId) };
 };
@@ -241,6 +386,9 @@ module.exports = {
     VIDEO_MIMES,
     getUsage,
     listItems,
+    listCategories,
+    createCategory,
+    removeCategory,
     uploadItem,
     removeItem,
 };

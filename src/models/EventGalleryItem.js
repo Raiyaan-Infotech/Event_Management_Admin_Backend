@@ -22,6 +22,8 @@ module.exports = (sequelize) => {
             allowNull: false,
             defaultValue: 'image',
         },
+        /** NULL = Uncategorised. Set null when its category is deleted. */
+        category_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
         url: { type: DataTypes.STRING(500), allowNull: false },
         /** Video poster. NULL for an image, whose own url is its thumbnail. */
         thumbnail_url: { type: DataTypes.STRING(500), allowNull: true },
@@ -47,6 +49,9 @@ module.exports = (sequelize) => {
 
     EventGalleryItem.associate = (models) => {
         EventGalleryItem.belongsTo(models.Event, { foreignKey: 'event_id', as: 'event' });
+        EventGalleryItem.belongsTo(models.EventGalleryCategory, {
+            foreignKey: 'category_id', as: 'category',
+        });
     };
 
     return EventGalleryItem;
