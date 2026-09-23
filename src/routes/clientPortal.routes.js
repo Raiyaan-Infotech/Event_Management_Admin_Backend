@@ -12,6 +12,8 @@ const guestProfileController = require('../controllers/clientGuestProfile.contro
 const securityController = require('../controllers/clientSecurity.controller');
 const deviceController = require('../controllers/clientDevice.controller');
 const splashController = require('../controllers/clientSplashScreen.controller');
+const galleryController = require('../controllers/clientGallery.controller');
+const galleryService = require('../services/clientGallery.service');
 const guestRegistrationController = require('../controllers/guestRegistration.controller');
 const eventNotificationTemplateController = require('../controllers/clientEventNotificationTemplate.controller');
 const { isWebsiteClientAuthenticated } = require('../middleware/websiteClientAuth');
@@ -457,6 +459,45 @@ router.post(
     },
     splashController.uploadMedia,
 );
+
+/**
+ * Event gallery — real photos and videos, replacing the app's mock screen.
+ *
+ * Multer's ceiling is the VIDEO cap, the larger of the two; the per-type caps
+ * (2MB image / 5MB video) are enforced in the service, which knows the file's
+ * type. Enforcing 2MB here would reject a legitimate 3MB video before anything
+ * could tell the difference.
+ */
+const galleryUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: galleryService.MAX_VIDEO_BYTES },
+    fileFilter: (req, file, cb) => {
+        const allowed = [...galleryService.IMAGE_MIMES, ...galleryService.VIDEO_MIMES];
+        if (allowed.includes(file.mimetype)) return cb(null, true);
+        cb(new Error('Please choose a JPG, PNG, WEBP or GIF image, or an MP4, WebM or MOV video.'), false);
+    },
+});
+
+router.get('/events/:id/gallery', galleryController.list);
+router.get('/events/:id/gallery/usage', galleryController.usage);
+router.post(
+    '/events/:id/gallery',
+    (req, res, next) => {
+        galleryUpload.single('file')(req, res, (err) => {
+            if (err) {
+                return res.status(400).json({
+                    success: false,
+                    message: err.code === 'LIMIT_FILE_SIZE'
+                        ? `That file is larger than ${Math.round(galleryService.MAX_VIDEO_BYTES / (1024 * 1024))}MB.`
+                        : err.message || 'That file could not be uploaded.',
+                });
+            }
+            next();
+        });
+    },
+    galleryController.upload,
+);
+router.delete('/gallery/:itemId', galleryController.remove);
 
 // The app's read: the ACTIVE splash for one event, or null. Declared BEFORE
 // `/splash-screens/:id` — the same ordering trap as `/events/stats`, since

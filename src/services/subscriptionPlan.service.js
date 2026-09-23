@@ -11,6 +11,7 @@ const {
 } = require('../models');
 const { Op } = Sequelize;
 const baseService = require('./base.service');
+const { LOCKED_MENU_SLUGS } = require('../utils/menuPlacement');
 const ApiError = require('../utils/apiError');
 const logger = require('../utils/logger');
 
@@ -227,6 +228,26 @@ const syncPlanMenus = async (planId, menus, transaction) => {
             sort_order: m.sort_order ?? index,
         }))
         .filter((m) => !Number.isNaN(m.menu_id));
+
+    /*
+      The locked menus are added back whatever the payload says.
+
+      This is not belt-and-braces: the destroy below removes every grant NOT in
+      the payload, so a screen that renders a locked menu as ticked while
+      leaving it out of its own submission silently DELETES that grant — which
+      is how the Free plan lost `guests` and a client portal ended up with no
+      Guests section. The rule is "every plan grants these", so it is enforced
+      where the grants are actually written rather than trusted to each caller.
+    */
+    const locked = await EventMenu.findAll({
+        where: { slug: { [Op.in]: LOCKED_MENU_SLUGS }, deleted_at: null },
+        attributes: ['id'],
+    });
+    for (const row of locked) {
+        if (!incoming.some((m) => m.menu_id === row.id)) {
+            incoming.push({ menu_id: row.id, sort_order: incoming.length });
+        }
+    }
 
     const keepIds = incoming.map((m) => m.menu_id);
 
