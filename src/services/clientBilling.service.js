@@ -442,7 +442,10 @@ const getUsage = async (clientId, subscription) => {
             : { [Op.gte]: periodStart };
     }
 
-    const events = await Event.count({ where: eventWhere });
+    // Deleted events are counted, because they still spend a slot against
+    // `max_events` (see clientEvent.createEvent). If this counted only live rows
+    // the usage tile would read 4 of 5 while the next create was refused.
+    const events = await Event.count({ where: eventWhere, paranoid: false });
 
     // Guests are counted in HEADS (party_size), which is what a caterer means
     // and what the guest module's own Total Guests tile reports. Scoped to the

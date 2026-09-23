@@ -422,7 +422,14 @@ const createEvent = async (clientId, body) => {
     // rest of the body against), not the plan any existing event was created under.
     const maxEvents = await subscriptionPlanService.getPlanLimit(plan.id, 'max_events');
     if (maxEvents !== null) {
-        const eventCount = await Event.count({ where: { website_client_id: client.id } });
+        // `paranoid: false` — a DELETED event still spends its slot. Counting
+        // only live rows made the limit meaningless: create, delete, repeat, and
+        // a one-event plan creates events for ever. Deleting is how you tidy the
+        // list, not how you buy another event.
+        const eventCount = await Event.count({
+            where: { website_client_id: client.id },
+            paranoid: false,
+        });
         if (eventCount >= maxEvents) {
             throw ApiError.badRequest(
                 `Your plan allows a maximum of ${maxEvents} event${maxEvents === 1 ? '' : 's'}. Please upgrade your plan to create more.`

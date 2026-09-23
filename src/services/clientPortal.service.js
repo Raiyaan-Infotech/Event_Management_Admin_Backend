@@ -7,6 +7,7 @@ const {
     EventMenu,
     EventCategory,
     EventTemplate,
+    Event,
     FrameStyle,
     Decoration,
 } = require('../models');
@@ -455,8 +456,19 @@ const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
     // cost a round trip mid-wizard.
     const templates = await templatesForPlan(companyId, plan);
 
+    // What the client has already spent against `max_events`, counted the same
+    // way createEvent counts it — deleted events included. Sent here so the
+    // wizard can refuse before the first field instead of after the last one,
+    // and so it cannot disagree with the answer the create will give.
+    const eventsUsed = await Event.count({
+        where: { website_client_id: clientId },
+        paranoid: false,
+    });
+
     return {
         plan: plan.toJSON(),
+        /** Events created on this account, deleted ones included. */
+        events_used: eventsUsed,
         reason: menus.length ? null : 'Your plan does not include any menus yet. Please contact us.',
         categories: categories.map((r) => r.toJSON()),
         menus: menus.map((r) => r.toJSON()),
