@@ -6,6 +6,7 @@ const {
     EventGuestGroup,
     ClientSubscription,
     WebsiteClient,
+    SubscriptionPlan,
 } = require('../models');
 const { Op } = Sequelize;
 const ApiError = require('../utils/apiError');
@@ -423,31 +424,38 @@ const getGuestById = async (clientId, guestId) => {
 };
 
 /**
- * The guest cap for an event, read from the HOST's CURRENT plan — the same
- * source Billing and the guest form show (clientBilling: latest subscription,
- * falling back to the website_clients pointer). It used to read the plan the
- * event was CREATED under, so an event made on a bigger plan kept that plan's
- * cap after the client moved to Free: the portal said 5, the server allowed
- * more (§558's known mismatch). It also made "upgrade your plan" a lie — an
- * upgrade never raised the cap on an existing event. The event's own plan is
- * now only the last fallback, for a host with no plan at all.
+ * The guest cap for an event, read from the HOST's CURRENT plan.
+ *
+ * It used to read the plan the EVENT was created under, so an event made on a
+ * bigger plan kept that plan's cap after the client moved to Free (§558).
+ *
+ * Order matters (§566): `website_clients.subscription_plan_id` is the
+ * entitlement pointer (see clientBilling's header) and is read FIRST. The
+ * subscription row came first in §563 and that was wrong on production: client
+ * #26's subscription row still pointed at plan 8, a Free plan soft-deleted in
+ * the plan reset, whose limit reads as "unlimited" — while the pointer and the
+ * event both said plan 12 (Free, 5). A plan that no longer exists is skipped,
+ * never treated as unlimited.
  */
 const guestLimitFor = async (event, transaction) => {
-    const sub = await ClientSubscription.findOne({
-        where: { website_client_id: event.website_client_id },
-        attributes: ['id', 'subscription_plan_id'],
-        order: [['created_at', 'DESC']],
-        transaction,
-    });
-    let planId = sub?.subscription_plan_id ?? null;
-    if (!planId) {
-        const host = await WebsiteClient.findByPk(event.website_client_id, {
+    const [host, sub] = await Promise.all([
+        WebsiteClient.findByPk(event.website_client_id, { attributes: ['id', 'subscription_plan_id'], transaction }),
+        ClientSubscription.findOne({
+            where: { website_client_id: event.website_client_id },
             attributes: ['id', 'subscription_plan_id'],
+            order: [['created_at', 'DESC']],
             transaction,
-        });
-        planId = host?.subscription_plan_id ?? event.subscription_plan_id ?? null;
+        }),
+    ]);
+
+    const candidates = [host?.subscription_plan_id, sub?.subscription_plan_id, event.subscription_plan_id]
+        .map(Number).filter(Boolean);
+    for (const planId of candidates) {
+        // Paranoid model: a soft-deleted plan comes back null and is skipped.
+        const plan = await SubscriptionPlan.findByPk(planId, { attributes: ['id', 'max_guests_per_event'], transaction });
+        if (plan) return subscriptionPlanService.getPlanLimit(plan.id, 'max_guests_per_event');
     }
-    return subscriptionPlanService.getPlanLimit(planId, 'max_guests_per_event');
+    return null;
 };
 
 /**

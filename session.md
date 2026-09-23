@@ -13452,3 +13452,17 @@ Jamal: "rsvp has same limit as guest, fix that issue like that". Before: the gue
 - Called from: Add Guest (response yes), Edit Guest (response/party size/event change), bulk Accepted, CSV import (Yes rows), host RSVP edit (`clientRsvp.update`), guest's own RSVP (`submitMyRsvp`), QR join with a Yes. Guest-facing message: "Sorry, this event is full and cannot take more RSVPs. Please contact the host."
 - Guest ROW limit (§563) unchanged — still rows, still 5 invitations on Free.
 - Verified on local (host temporarily on Free Trial Plan, restored): RSVP edit to Yes refused at 21/5, bulk Accepted refused, same-size re-save allowed, 5 people on an empty event allowed, 6 refused; no guest row changed.
+
+### 566. The real cause on production: a subscription row pointing at a DELETED plan
+
+Checked live (read-only). Client #26 (Jamal), event #27 "Jamal & Ayesha — Nikah Ceremony": 6 guests, all `manual`, created 2026-09-23.
+- `website_clients.subscription_plan_id` = 12 (Free, max 5) and `events.subscription_plan_id` = 12 — correct.
+- `client_subscriptions` #3 = plan **8** — the OLD Free plan, soft-deleted 2026-09-22 in the plan reset, `max_guests_per_event` NULL. The reset moved the pointer, not the subscription row.
+- The portal form's limit came from Billing, which reads the subscription row → plan 8 → no limit → **the form never blocked**. That is why the 6th form opened.
+- §563's `guestLimitFor` read the subscription row FIRST, so after that push the server ALSO read plan 8 → unlimited. Made it worse for this account.
+
+Fix: `guestLimitFor` reads the entitlement pointer (`website_clients`) first, then the subscription row, then the event's plan, and SKIPS any plan that no longer exists instead of treating it as unlimited. Verified against live data read-only: client 26 → limit 5, event 27 full, 7th guest refused.
+
+Not explained: the pre-§563 server read the event's plan (12 → 5) and should have refused #6 at 18:57 IST on 09-23. Either that deploy was not live on Render at the time, or something else — unverified.
+
+Open: `client_subscriptions` #3 still points at deleted plan 8, so Billing shows the wrong plan for client #26. Needs a one-row production fix (→ 12). Clients #27/#28 already hold more guests than their plan allows (15/10, 16/15) — seeded before limits; the gate now blocks new ones, existing rows kept.
