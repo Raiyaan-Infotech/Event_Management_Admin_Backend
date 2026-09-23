@@ -475,6 +475,52 @@ const assertGuestCapacity = async (eventId, adding = 1, { transaction, message }
 };
 
 /**
+ * RSVP cap: the PEOPLE answering Yes on an event (sum of `party_size`) may not
+ * exceed the same per-event number as the guest limit. Without it, 5 guest rows
+ * on Free could each bring up to 50 people.
+ *
+ * `changes` = [{ guestId|null, heads }] — the guests this save will leave on
+ * Yes, with their new party size (null guestId = a new row). Their current Yes
+ * heads are left out of `used` so re-saving an answer never counts it twice. A
+ * save that does not raise the event's Yes total is always allowed, so an event
+ * already over (data from before this rule) can still be edited down.
+ * Only 'yes' counts: 'maybe' is not a booking.
+ */
+const assertRsvpCapacity = async (eventId, changes, { transaction, message } = {}) => {
+    const list = (changes || []).filter((c) => c && Number(c.heads) > 0);
+    if (!list.length) return;
+
+    const event = await Event.findByPk(eventId, {
+        attributes: ['id', 'website_client_id', 'subscription_plan_id'],
+        transaction,
+    });
+    if (!event) return;
+    const max = await guestLimitFor(event, transaction);
+    if (max === null) return;
+
+    const ids = list.map((c) => c.guestId).filter(Boolean);
+    const [yesTotal, yesChanged] = await Promise.all([
+        EventGuest.sum('party_size', { where: { event_id: eventId, response_type: 'yes' }, transaction }),
+        ids.length
+            ? EventGuest.sum('party_size', {
+                where: { event_id: eventId, response_type: 'yes', id: { [Op.in]: ids } }, transaction,
+            })
+            : 0,
+    ]);
+    const used = (Number(yesTotal) || 0) - (Number(yesChanged) || 0);
+    const adding = list.reduce((n, c) => n + Number(c.heads), 0);
+
+    if (adding <= (Number(yesChanged) || 0)) return; // not raising the total
+    if (used + adding > max) {
+        const left = Math.max(0, max - used);
+        throw ApiError.badRequest(
+            message ?? `This event's RSVP limit is ${max} ${max === 1 ? 'person' : 'people'} and ${used} already said yes, `
+                + `so only ${left} more can attend. Please upgrade your plan to allow more.`
+        );
+    }
+};
+
+/**
  * Guest capacity per event, for the Add Guest gate — the guest twin of
  * `events_used` on /client/event-options. Uses guestLimitFor, so the portal
  * blocks at exactly the number createGuest refuses at. Counts ROWS.
@@ -538,6 +584,9 @@ const createGuest = async (clientId, companyId, body) => {
     // lock on the event row, so a double-click cannot slip a 6th guest past 5.
     const guest = await sequelize.transaction(async (transaction) => {
         await assertGuestCapacity(data.event_id, 1, { transaction });
+        if (data.response_type === 'yes') {
+            await assertRsvpCapacity(data.event_id, [{ guestId: null, heads: Number(data.party_size) || 1 }], { transaction });
+        }
         return EventGuest.create({
             ...data,
             website_client_id: clientId,
@@ -601,15 +650,22 @@ const updateGuest = async (clientId, guestId, body) => {
     // Moving a guest to another event adds a row there — same cap as a create.
     const moving = data.event_id && Number(data.event_id) !== Number(guest.event_id);
 
+    // RSVP cap — only when this save leaves the guest on Yes with a new answer,
+    // a new party size, or on a different event.
+    const finalEventId = moving ? Number(data.event_id) : guest.event_id;
+    const finalResponse = data.response_type ?? guest.response_type;
+    const finalHeads = Number(data.party_size ?? guest.party_size) || 1;
+    const rsvpTouched = moving || data.response_type !== undefined || data.party_size !== undefined;
+
     const before = guest.response_type;
-    if (moving) {
-        await sequelize.transaction(async (transaction) => {
-            await assertGuestCapacity(data.event_id, 1, { transaction });
-            await guest.update(data, { transaction });
-        });
-    } else {
-        await guest.update(data);
-    }
+    await sequelize.transaction(async (transaction) => {
+        if (moving) await assertGuestCapacity(data.event_id, 1, { transaction });
+        if (rsvpTouched && finalResponse === 'yes') {
+            // A moved guest's old Yes is on the OTHER event, so nothing to exclude here.
+            await assertRsvpCapacity(finalEventId, [{ guestId: moving ? null : guest.id, heads: finalHeads }], { transaction });
+        }
+        await guest.update(data, { transaction });
+    });
     const after = guest.response_type;
 
     if (after !== before && ['yes', 'no', 'maybe'].includes(after)) {
@@ -677,6 +733,17 @@ const bulkUpdate = async (clientId, guestIds, action, value) => {
         const response = status === 'accepted' ? 'yes'
             : status === 'declined' ? 'no'
                 : status === 'pending' ? 'maybe' : 'none';
+
+        // Marking guests Accepted books their party — RSVP cap per event.
+        if (response === 'yes') {
+            const picked = await EventGuest.findAll({ where: scope, attributes: ['id', 'event_id', 'party_size'] });
+            const byEvent = new Map();
+            for (const g of picked) {
+                if (!byEvent.has(g.event_id)) byEvent.set(g.event_id, []);
+                byEvent.get(g.event_id).push({ guestId: g.id, heads: Number(g.party_size) || 1 });
+            }
+            for (const [eventId, changes] of byEvent) await assertRsvpCapacity(eventId, changes);
+        }
         const [affected] = await EventGuest.update(
             {
                 rsvp_status: status,
@@ -748,4 +815,5 @@ module.exports = {
     assertGuestCapacity,
     guestLimitFor,
     getGuestCapacity,
+    assertRsvpCapacity,
 };

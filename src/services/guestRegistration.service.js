@@ -519,6 +519,13 @@ const join = async (client, payload = {}) => {
         });
     }
 
+    // RSVP cap — people saying Yes, same per-event number as the guest limit.
+    if (writeAnswer && response === 'yes') {
+        await clientGuestService.assertRsvpCapacity(event.id, [{ guestId: existing?.id ?? null, heads: extra + 1 }], {
+            message: 'Sorry, this event is full and cannot take more RSVPs. Please contact the host.',
+        });
+    }
+
     let guest;
     if (existing) {
         await existing.update(fields); // invite_source untouched — see the header
@@ -870,6 +877,12 @@ const submitMyRsvp = async (clientId, rawEventId, body = {}) => {
         if (!Number.isInteger(partySize) || partySize < 1 || partySize > 50) {
             throw ApiError.badRequest('Number of guests must be between 1 and 50.');
         }
+    }
+
+    if (response === 'yes') {
+        await clientGuestService.assertRsvpCapacity(eventId, [{ guestId: guest.id, heads: partySize }], {
+            message: 'Sorry, this event is full and cannot take more RSVPs. Please contact the host.',
+        });
     }
 
     const before = snapshotAnswer(guest);

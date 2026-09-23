@@ -13443,3 +13443,12 @@ Jamal: "still able to open the 6th guest form — do it the same way event works
 - **Backend:** `GET /client/guests/capacity` → `{ limit, events: [{ event_id, name, used, full }] }` (`clientGuest.getGuestCapacity`, same `guestLimitFor` as the save).
 - **Portal:** `useGuestCapacity()`; `guests/_components/guest-limit-gate.tsx` wraps Add Guest and Import Guests — when EVERY event is full it shows "Guest limit reached" + View Plan & Billing instead of the form. The limit is per event, so when only some are full the form opens and full events are disabled in the picker as "— Full (5/5)". The form no longer reads Billing's `per_event_limit` or `useGuestStats`, so its number cannot differ from the server's.
 - `tsc` clean. Capacity service checked against local data. Not browser-tested.
+
+### 565. RSVP limit counts PEOPLE, same number as the guest limit
+
+Jamal: "rsvp has same limit as guest, fix that issue like that". Before: the guest cap counted invitation ROWS, and each RSVP could bring up to 50 people (`party_size`), so Free's 5 guests could be 250 attending.
+
+- `clientGuest.assertRsvpCapacity(eventId, [{ guestId, heads }])`: sum of `party_size` for `response_type = 'yes'` on the event may not exceed `max_guests_per_event` (host's current plan, via `guestLimitFor`). Only YES counts — maybe is not a booking. The changed guests' current Yes is excluded so re-saving never double-counts; a save that does not RAISE the Yes total is always allowed, so events already over (old data) can still be edited down.
+- Called from: Add Guest (response yes), Edit Guest (response/party size/event change), bulk Accepted, CSV import (Yes rows), host RSVP edit (`clientRsvp.update`), guest's own RSVP (`submitMyRsvp`), QR join with a Yes. Guest-facing message: "Sorry, this event is full and cannot take more RSVPs. Please contact the host."
+- Guest ROW limit (§563) unchanged — still rows, still 5 invitations on Free.
+- Verified on local (host temporarily on Free Trial Plan, restored): RSVP edit to Yes refused at 21/5, bulk Accepted refused, same-size re-save allowed, 5 people on an empty event allowed, 6 refused; no guest row changed.

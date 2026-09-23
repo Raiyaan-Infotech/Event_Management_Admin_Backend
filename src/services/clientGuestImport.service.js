@@ -493,6 +493,14 @@ const commitImport = async (clientId, companyId, { content, defaultEventId = nul
                     + `This file adds ${adding}, but only ${left} more can be added. Please upgrade your plan or import fewer guests.`
                 );
             }
+
+            // Rows that arrive already answering Yes book their party — RSVP cap.
+            const yesRows = rows.filter((r) => r.event_id === eventId && r.response_type === 'yes');
+            await guestService.assertRsvpCapacity(
+                eventId,
+                yesRows.map((r) => ({ guestId: null, heads: Number(r.party_size) || 1 })),
+                { transaction },
+            );
         }
 
         const createdGroups = [];
