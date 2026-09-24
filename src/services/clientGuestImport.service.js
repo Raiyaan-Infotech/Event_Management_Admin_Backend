@@ -34,7 +34,7 @@ const guestService = require('./clientGuest.service');
  *   phone mangling Excel turns +919876543210 into 9.19877E+11 and eats the '+'.
  *   header drift   "First Name*" / "first_name" / "FIRST NAME" all mean one thing.
  *   blank rows     Excel appends empties; they are not errors, they are nothing.
- *   in-file dupes  two rows with the same email, before the DB is even consulted.
+ *   in-file dupes  two rows with the same mobile number, before the DB is even consulted.
  *   partial fail   row 7 being bad must not roll back rows 1-6 the user wanted.
  */
 
@@ -69,7 +69,8 @@ const HEADER_MAP = {
     table_number: ['table number', 'table'],
 };
 
-const REQUIRED = ['first_name', 'email'];
+// Mobile is mandatory, email optional (§576).
+const REQUIRED = ['first_name', 'mobile'];
 
 /** Strip the trailing '*', lowercase, collapse whitespace, drop the BOM. */
 const normaliseHeader = (raw) =>
@@ -270,9 +271,10 @@ const analyse = async (clientId, { content, defaultEventId = null }) => {
 
     const existing = await EventGuest.findAll({
         where: { website_client_id: clientId },
-        attributes: ['event_id', 'email'],
+        attributes: ['event_id', 'mobile'],
     });
-    const alreadyThere = new Set(existing.map((g) => `${g.event_id}::${(g.email || '').toLowerCase()}`));
+    const digits = (v) => String(v || '').replace(/\D/g, '').slice(-10);
+    const alreadyThere = new Set(existing.filter((g) => g.mobile).map((g) => `${g.event_id ?? ''}::${digits(g.mobile)}`));
 
     const valid = [];
     const errors = [];
@@ -299,12 +301,14 @@ const analyse = async (clientId, { content, defaultEventId = null }) => {
         const firstName = get('first_name').trim();
         const email = get('email').trim().toLowerCase();
 
-        if (!firstName && !email) return; // a blank trailing row is nothing, not an error
+        const rawMobile = get('mobile').trim();
+        if (!firstName && !email && !rawMobile) return; // a blank trailing row is nothing, not an error
 
         const rowErrors = [];
         if (!firstName) rowErrors.push('First name is required.');
-        if (!email) rowErrors.push('Email is required.');
-        else if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) rowErrors.push('Email is not valid.');
+        if (!rawMobile) rowErrors.push('Mobile number is required.');
+        // Email is optional — checked only when given.
+        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) rowErrors.push('Email is not valid.');
 
         // ── Resolve the event ──────────────────────────────────────────────
         let eventId = null;
@@ -323,9 +327,9 @@ const analyse = async (clientId, { content, defaultEventId = null }) => {
             }
         } else if (defaultEventId) {
             eventId = defaultEventId;
-        } else {
-            rowErrors.push('No event given, and no event was chosen for this import.');
         }
+        // else: no event — the row goes into the phone book (§572). A guest is a
+        // contact on the account; only scanning a QR attaches somebody to an event.
 
         // ── Phones ─────────────────────────────────────────────────────────
         const mobile = cleanPhone(get('mobile'));
@@ -339,14 +343,14 @@ const analyse = async (clientId, { content, defaultEventId = null }) => {
         }
 
         // ── Duplicates ─────────────────────────────────────────────────────
-        const key = `${eventId}::${email}`;
+        const key = `${eventId ?? ''}::${digits(mobile.value)}`;
         if (seenInFile.has(key)) {
             skipped.push({ row: rowNumber, name: firstName, email, reason: 'Duplicate of an earlier row in this file.' });
             return;
         }
         if (alreadyThere.has(key)) {
-            // The design's own guideline: "Duplicate email addresses will be skipped."
-            skipped.push({ row: rowNumber, name: firstName, email, reason: 'Already on this event’s guest list.' });
+            // The design's own guideline: "Duplicate mobile numbers will be skipped."
+            skipped.push({ row: rowNumber, name: firstName, email, reason: eventId ? 'Already on this event’s list.' : 'Already in your guest list.' });
             return;
         }
         seenInFile.add(key);
@@ -374,7 +378,7 @@ const analyse = async (clientId, { content, defaultEventId = null }) => {
             first_name: firstName.slice(0, 100),
             last_name: get('last_name').trim().slice(0, 100) || null,
             name: guestService.composeName(firstName, get('last_name').trim(), firstName),
-            email,
+            email: email || null,
             dial_code: '+91',
             mobile: mobile.value,
             whatsapp: whatsapp.value,
@@ -476,12 +480,15 @@ const commitImport = async (clientId, companyId, { content, defaultEventId = nul
         // silently cut short. Before this, a CSV was the way round the limit.
         const maxGuests = await guestService.guestLimitFor({ website_client_id: clientId, subscription_plan_id: null }, transaction);
         if (maxGuests !== null) {
-            const used = await EventGuest.count({ where: { website_client_id: clientId }, transaction });
-            if (used + rows.length > maxGuests) {
+            // Phone book only: rows that name an event are participants and
+            // are limited by Max RSVP, not Max Guests.
+            const used = await EventGuest.count({ where: { website_client_id: clientId, event_id: null }, transaction });
+            const adding = rows.filter((r) => !r.event_id).length;
+            if (used + adding > maxGuests) {
                 const left = Math.max(0, maxGuests - used);
                 throw ApiError.badRequest(
                     `Your plan allows ${maxGuests} guests in total and you already have ${used}. `
-                    + `This file adds ${rows.length}, but only ${left} more can be added. Please upgrade your plan or import fewer guests.`
+                    + `This file adds ${adding}, but only ${left} more can be added. Please upgrade your plan or import fewer guests.`
                 );
             }
         }

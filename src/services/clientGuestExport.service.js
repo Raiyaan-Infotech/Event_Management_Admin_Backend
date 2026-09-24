@@ -24,8 +24,8 @@ const { Event, EventGuest, EventGuestGroup } = require('../models');
 const COLUMNS = [
     ['First Name*', (g) => g.first_name || g.name],
     ['Last Name', (g) => g.last_name],
-    ['Email*', (g) => g.email],
-    ['Phone Number', (g) => g.mobile],
+    ['Email', (g) => g.email],
+    ['Phone Number*', (g) => g.mobile],
     ['WhatsApp Number', (g) => g.whatsapp],
     // Written by the export, optional on the way in. This is the fix.
     ['Event ID', (g) => g.event_id],

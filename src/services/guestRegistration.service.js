@@ -519,7 +519,7 @@ const join = async (client, payload = {}) => {
         });
     }
 
-    // RSVP cap — people saying Yes, same per-event number as the guest limit.
+    // RSVP cap — people saying Yes, against the plan's Max RSVP (per event).
     if (writeAnswer && response === 'yes') {
         await clientGuestService.assertRsvpCapacity(event.id, [{ guestId: existing?.id ?? null, heads: extra + 1 }], {
             message: 'Sorry, this event is full and cannot take more RSVPs. Please contact the host.',
@@ -531,14 +531,10 @@ const join = async (client, payload = {}) => {
         await existing.update(fields); // invite_source untouched — see the header
         guest = existing;
     } else {
-        // Plan limit — see LIMIT_FIELDS in subscriptionPlan.service.js. Only
-        // checked for a NEW row: a re-scan of an existing guest must never be
-        // refused for a limit that guest already counts toward. It also caps
-        // RSVPs — one answer per guest.
-        // Same source as the host's own Add Guest (the host's current plan).
-        await clientGuestService.assertGuestCapacity(event.website_client_id, 1, {
-            message: 'This event has reached its guest limit. Please contact the host.',
-        });
+        // NO guest-limit check here (§572). Somebody who scans the QR is a
+        // PARTICIPANT of this event, not a phone-book contact, so they must not
+        // spend — or be refused by — the host's Max Guests. What limits them is
+        // the RSVP cap, checked above when they answer yes.
 
         guest = await EventGuest.create({
             ...fields,

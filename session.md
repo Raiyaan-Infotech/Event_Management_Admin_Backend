@@ -13597,3 +13597,46 @@ Jamal: "DLT ALL GUEST NOW". All 67 `event_guests` rows on production removed (th
 Backed up first — `prod-guests-purge-1790234456545.json` in the repo root: 67 guests, 51 event_messages, 2 response logs, 14 notifications carrying a guest_id.
 
 Cascades checked BEFORE deleting, not discovered after: `event_messages`, `event_guest_response_logs`, `event_guest_notes`, `event_guest_reminders`, `event_guest_tags` are ON DELETE CASCADE; `client_notifications.guest_id` is SET NULL. After: guests 0, messages 0, response logs 0, no notification still pointing at a guest. Events, clients and plans untouched.
+
+### 574. Checked the RSVP guard end to end — and found the QR join still spending the phone-book limit
+
+Jamal: "did you wire up that RSVP guardian? what happens on the 6th RSVP?"
+
+**Wired at every place a yes can be saved:** Add/Edit Guest, bulk Accepted, CSV import, host RSVP edit (`clientRsvp.update`), the participant's own RSVP (`submitMyRsvp`), and QR join.
+
+**Bug found:** `guestRegistration.join` still called `assertGuestCapacity` for every NEW participant. Under §572 a QR scanner is a participant, not a phone-book contact — so once a host's phone book was full, strangers were refused at the door with "guest limit", and the host's Max Guests was being charged for people who never were contacts. Removed. What limits a participant is the RSVP cap, checked when they answer yes.
+
+**Verified (local, rolled back):** Free-style plan, RSVP 5 / Max Guests 1 — RSVPs 1–5 accepted, **#6 refused: "This event has reached its RSVP limit of 5 attendees. Please upgrade your plan to accept more RSVPs."**; participants got in despite the phone-book limit being 1; when one attendee flips to maybe, the place is freed for a new yes.
+
+The participant on their phone sees the shorter *"Sorry, this event is full and cannot take more RSVPs. Please contact the host."*
+
+**Known gap:** the cap counts people saying YES only. A participant who scans and answers maybe/no or never answers is not counted, so an event can hold more than the limit in total participants — deliberate (§565), but say if attendance should count everyone who scans.
+
+### 575. CSV import joins the phone book; a 50-guest sample file
+
+Jamal asked how to test Max Guests and Max RSVP, and for a 50-row import CSV.
+
+**Bug found while building the file:** `clientGuestImport.analyse` still rejected any row with no event ("No event given, and no event was chosen for this import"), so under §572 a phone-book import was impossible. An event-less row is now valid and goes into the phone book (`event_id` NULL). The limit check in `commitImport` counts phone-book rows only (`event_id IS NULL`) and adds only the file's event-less rows; rows that name an event are participants and are limited by Max RSVP. The duplicate message reads "Already in your guest list" for event-less rows.
+
+**File:** `docs/samples/guests-import-50.csv` — 50 rows, 12 columns (First Name*, Last Name, Email*, Phone Number, WhatsApp Number, Guest Group, Title, City, State, Country, Dietary Preference, Notes), NO event column, groups Family / Close Friends / Colleagues / Relatives, all `@example.com`.
+
+**Verified locally (host's plan limit changed, restored, imported rows deleted):** limit 30 → refused whole ("adds 50, but only 30 more can be added"); limit 50 → imported 50, skipped 0, failed 0; same file again → imported 0, skipped 50 (duplicates). The portal's import page already treats Default Event as optional, so no frontend change.
+
+### 576. Mobile is mandatory, email optional — and why Jamal's import still failed
+
+Jamal pasted 50 rows of *"No event given, and no event was chosen for this import"* and asked for mobile mandatory / email optional.
+
+**The import errors were not a bug.** That message was removed in §575 — the string no longer exists in the codebase. His portal was calling the DEPLOYED backend, which is still pre-§570. Nothing from §569–575 has been pushed, so live still demands an event per row. Nothing to fix; it goes away on deploy.
+
+**Mobile mandatory / email optional** — the phone number is what an invitation is shared to, so it is the field a contact cannot be without:
+- `clientGuest.normalise` — `email` optional (validated only when given, `''` → NULL); `mobile` required with *"Please enter the guest's mobile number."*
+- **The duplicate key moved from email to mobile**, compared on the last 10 digits, per (event, mobile) with NULL as its own bucket. Email could not stay the key once it became optional.
+- `clientGuestImport` — `REQUIRED = ['first_name', 'mobile']`; a row with no email is valid; duplicate detection and the in-file dupe check both use the mobile digits.
+- `clientGuestExport` — headers now `Email` and `Phone Number*`.
+- Portal form — Phone Number gains `required` + error styling, Email Address loses it; `GuestPayload.mobile` is now required, `email` optional. `tsc` clean.
+
+**Sample file regenerated:** `docs/samples/guests-import-50.csv` — `Phone Number*` before `Email`, and **10 of the 50 rows deliberately have no email** so the optional path is exercised.
+
+**Verified locally (plan limit raised then restored, rows deleted):** preview 50 valid / 0 errors / 0 skipped; import 50 imported, 4 groups created, **10 rows stored with email NULL**; manual add with no email saved; with no mobile refused; a second guest on the same mobile refused as a duplicate; an invalid email still refused when one is given.
+
+⚠ Existing rows may have no mobile (the column was never required), so the duplicate check treats them all as one NULL bucket. Nothing was backfilled; production guests are empty anyway (§573).

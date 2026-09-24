@@ -182,3 +182,8 @@ qa-reports/*/
 # permission approvals and absolute local temp paths. Not meant to be shared;
 # .claude/settings.json (the real shared config) is unaffected.
 .claude/settings.local.json
+
+# Production data backups taken before a destructive fix — real names,
+# emails and phone numbers. Keep them locally, never in the repo.
+prod-*.json
+local-*.json

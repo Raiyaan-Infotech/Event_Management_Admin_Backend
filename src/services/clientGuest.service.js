@@ -218,19 +218,21 @@ const normalise = async (clientId, body, { partial = false, existing = null } = 
         );
     }
 
-    if (required('email')) {
+    // Email is OPTIONAL, mobile is MANDATORY (§576): the phone number is what an
+    // invitation is shared to, and the key a contact is recognised by.
+    if (has('email')) {
         const email = str(picked.email, 255);
-        if (!email) throw ApiError.badRequest('Please enter the guest’s email address.');
-        if (!EMAIL.test(email)) throw ApiError.badRequest('Please enter a valid email address.');
-        data.email = email.toLowerCase();
+        if (email && !EMAIL.test(email)) throw ApiError.badRequest('Please enter a valid email address.');
+        data.email = email ? email.toLowerCase() : null;
     }
 
     if (has('dial_code')) data.dial_code = str(picked.dial_code, 8);
     // Digits, +, spaces and dashes only — a pasted "(+91) 98765-43210" is fine,
     // a name in the phone box is not.
     for (const field of ['mobile', 'whatsapp']) {
-        if (!has(field)) continue;
+        if (!has(field) && !(field === 'mobile' && required('mobile'))) continue;
         const value = str(picked[field], 20);
+        if (field === 'mobile' && !value) throw ApiError.badRequest('Please enter the guest’s mobile number.');
         if (value && !/^[+\d][\d\s-]{4,}$/.test(value)) {
             throw ApiError.badRequest('Please enter a valid phone number.');
         }
@@ -647,10 +649,10 @@ const getGuestCapacity = async (clientId) => {
 const createGuest = async (clientId, companyId, body) => {
     const data = await normalise(clientId, body, { partial: false });
 
-    // Same email twice on the same event — or twice on the general list — is a
-    // duplicate. The same person on two different events is normal.
+    // Same mobile twice on the same event — or twice on the general list — is a
+    // duplicate (the phone number is the key, since email is optional). The same person on two different events is normal.
     const clash = await EventGuest.findOne({
-        where: { website_client_id: clientId, event_id: data.event_id ?? null, email: data.email },
+        where: { website_client_id: clientId, event_id: data.event_id ?? null, mobile: data.mobile },
         attributes: ['id', 'name'],
     });
     if (clash) {
@@ -712,12 +714,12 @@ const updateGuest = async (clientId, guestId, body) => {
 
     const data = await normalise(clientId, body, { partial: true, existing: guest.toJSON() });
 
-    if (data.email || data.event_id !== undefined) {
+    if (data.mobile || data.event_id !== undefined) {
         const clash = await EventGuest.findOne({
             where: {
                 website_client_id: clientId,
                 event_id: (data.event_id !== undefined ? data.event_id : guest.event_id) ?? null,
-                email: data.email ?? guest.email,
+                mobile: data.mobile ?? guest.mobile,
                 id: { [Op.ne]: guest.id },
             },
             attributes: ['id', 'name'],
