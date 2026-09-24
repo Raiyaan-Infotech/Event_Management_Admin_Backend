@@ -77,7 +77,7 @@ const portalService = require('../../services/clientPortal.service');
 const splashService = require('../../services/clientSplashScreen.service');
 const mediaService = require('../../services/media.service');
 
-const { sequelize, WebsiteClient, SubscriptionPlan, Event, EventGuest, EventMessage, SplashScreen, Sequelize } = db;
+const { sequelize, WebsiteClient, SubscriptionPlan, Event, EventParticipant, EventMessage, SplashScreen, Sequelize } = db;
 const { Op } = Sequelize;
 
 const SPLASH_MARK = '[Showcase] ';
@@ -785,7 +785,7 @@ function inviteRows(guests, client) {
         const delivered = i % 7 !== 3;
         return {
             event_id: g.event_id,
-            guest_id: g.id,
+            participant_id: g.id,
             website_client_id: client.id,
             channel: i % 5 === 4 ? 'email' : 'whatsapp',
             kind: 'invite',
@@ -817,7 +817,7 @@ async function clear(client, items) {
     for (const s of splashes) await splashService.deleteSplashScreen(client.id, s.id);
 
     const messages = ids.length ? await EventMessage.destroy({ where: { event_id: { [Op.in]: ids } }, force: true }) : 0;
-    const guests = ids.length ? await EventGuest.destroy({ where: { event_id: { [Op.in]: ids } }, force: true }) : 0;
+    const guests = ids.length ? await EventParticipant.destroy({ where: { event_id: { [Op.in]: ids } }, force: true }) : 0;
     const gone = ids.length ? await Event.destroy({ where: { id: { [Op.in]: ids } } }) : 0;
     console.log(`  removed ${gone} event(s), ${guests} guest(s), ${messages} invite record(s), ${splashes.length} splash screen(s)`);
 }
@@ -920,7 +920,7 @@ async function clear(client, items) {
             const cover = await uploadCover(item, client);
             const event = await eventService.createEvent(client.id, eventBody(item, options, client, theme, cover));
 
-            const guests = await EventGuest.bulkCreate(guestRows(event, client, item, i * 7, set.responses));
+            const guests = await EventParticipant.bulkCreate(guestRows(event, client, item, i * 7, set.responses));
             const invites = set.responses ? await EventMessage.bulkCreate(inviteRows(guests, client)) : [];
 
             const splash = await splashService.createSplashScreen(client.id, client.company_id, {

@@ -1,6 +1,6 @@
 const cron = require('node-cron');
 
-const { Sequelize, Event, EventGuest, EventMessage, EventMessageCampaign, WebsiteClient } = require('../models');
+const { Sequelize, Event, EventParticipant, EventMessage, EventMessageCampaign, WebsiteClient } = require('../models');
 
 const { Op } = Sequelize;
 const logger = require('../utils/logger');
@@ -80,10 +80,10 @@ const fire = async (campaign) => {
         */
         const recipientIds = (await EventMessage.findAll({
             where: { campaign_id: campaign.id },
-            attributes: ['guest_id'],
-        })).map((r) => r.guest_id).filter(Boolean);
+            attributes: ['participant_id'],
+        })).map((r) => r.participant_id).filter(Boolean);
 
-        const eligible = await EventGuest.findAll({
+        const eligible = await EventParticipant.findAll({
             where: { id: { [Op.in]: recipientIds } },
             attributes: ['id', 'name', 'participant_client_id'],
         });

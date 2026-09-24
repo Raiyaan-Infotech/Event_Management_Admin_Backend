@@ -1255,8 +1255,8 @@ CREATE TABLE IF NOT EXISTS `event_categories` (
   KEY `idx_event_categories_listing` (`company_id`,`deleted_at`,`is_active`,`sort_order`)
 ) ENGINE=InnoDB AUTO_INCREMENT=12 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Table structure for `event_guest_groups`
-CREATE TABLE IF NOT EXISTS `event_guest_groups` (
+-- Table structure for `guest_groups`
+CREATE TABLE IF NOT EXISTS `guest_groups` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `website_client_id` int unsigned NOT NULL,
   `company_id` int DEFAULT NULL,
@@ -1272,17 +1272,18 @@ CREATE TABLE IF NOT EXISTS `event_guest_groups` (
   KEY `idx_guest_groups_client` (`website_client_id`,`deleted_at`),
   KEY `idx_guest_groups_default` (`website_client_id`,`is_default`,`deleted_at`),
   CONSTRAINT `fk_guest_groups_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Table structure for `event_guest_notes`
--- The host's own notes ABOUT a guest. `event_guests`.`notes` is a different
+-- Table structure for `guest_notes`
+-- The host's own notes ABOUT a guest. `event_participants`.`notes` is a different
 -- thing and STAYS: that is what the GUEST said with their response. Two
 -- authors, two lifetimes — merging them loses which of the two a sentence
 -- came from.
-CREATE TABLE IF NOT EXISTS `event_guest_notes` (
+CREATE TABLE IF NOT EXISTS `guest_notes` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `website_client_id` int unsigned NOT NULL,
-  `guest_id` int unsigned NOT NULL,
+  `participant_id` int unsigned DEFAULT NULL,
+  `guest_id` int unsigned DEFAULT NULL,
   `title` varchar(150) COLLATE utf8mb4_unicode_ci NOT NULL,
   `body` mediumtext COLLATE utf8mb4_unicode_ci COMMENT 'HTML from the rich text editor',
   `category` enum('general','personal','dietary','communication','reminder','logistics') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'general',
@@ -1293,21 +1294,25 @@ CREATE TABLE IF NOT EXISTS `event_guest_notes` (
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `deleted_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
-  KEY `idx_guest_notes_guest` (`guest_id`,`deleted_at`),
+  KEY `idx_guest_notes_participant` (`participant_id`,`deleted_at`),
   KEY `idx_guest_notes_client` (`website_client_id`,`deleted_at`),
+  KEY `idx_guest_notes_participant_pinned` (`participant_id`,`is_pinned`,`created_at`),
+  KEY `idx_guest_notes_guest` (`guest_id`),
   KEY `idx_guest_notes_pinned` (`guest_id`,`is_pinned`,`created_at`),
-  CONSTRAINT `fk_guest_notes_guest` FOREIGN KEY (`guest_id`) REFERENCES `event_guests` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
-  CONSTRAINT `fk_guest_notes_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+  CONSTRAINT `fk_guest_notes_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_guest_notes_guest` FOREIGN KEY (`guest_id`) REFERENCES `guests` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_guest_notes_participant` FOREIGN KEY (`participant_id`) REFERENCES `event_participants` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Table structure for `event_guest_reminders`
+-- Table structure for `guest_reminders`
 -- `status` DOES NOT store "upcoming" or "overdue" — that is a fact about
 -- `due_at` versus now, and a stored one goes stale the moment the date passes.
 -- Nothing FIRES these: no job runner, no SMTP. It is a list the host reads.
-CREATE TABLE IF NOT EXISTS `event_guest_reminders` (
+CREATE TABLE IF NOT EXISTS `guest_reminders` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `website_client_id` int unsigned NOT NULL,
-  `guest_id` int unsigned NOT NULL,
+  `participant_id` int unsigned DEFAULT NULL,
+  `guest_id` int unsigned DEFAULT NULL,
   `note_id` int unsigned DEFAULT NULL COMMENT 'Optional: a reminder can stand on its own',
   `title` varchar(150) COLLATE utf8mb4_unicode_ci NOT NULL,
   `due_at` datetime NOT NULL,
@@ -1318,25 +1323,27 @@ CREATE TABLE IF NOT EXISTS `event_guest_reminders` (
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `deleted_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
-  KEY `idx_guest_reminders_guest` (`guest_id`,`deleted_at`),
+  KEY `idx_guest_reminders_participant` (`participant_id`,`deleted_at`),
   KEY `idx_guest_reminders_due` (`website_client_id`,`status`,`due_at`),
   KEY `idx_guest_reminders_note` (`note_id`),
-  CONSTRAINT `fk_guest_reminders_guest` FOREIGN KEY (`guest_id`) REFERENCES `event_guests` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
-  CONSTRAINT `fk_guest_reminders_note` FOREIGN KEY (`note_id`) REFERENCES `event_guest_notes` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
-  CONSTRAINT `fk_guest_reminders_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+  KEY `idx_guest_reminders_guest` (`guest_id`),
+  CONSTRAINT `fk_guest_reminders_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_guest_reminders_guest` FOREIGN KEY (`guest_id`) REFERENCES `guests` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_guest_reminders_note` FOREIGN KEY (`note_id`) REFERENCES `guest_notes` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_guest_reminders_participant` FOREIGN KEY (`participant_id`) REFERENCES `event_participants` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Table structure for `event_guest_response_logs`
+-- Table structure for `event_participant_response_logs`
 -- APPEND ONLY. Nothing updates or deletes a row here — a history you can edit
--- is not a history. The CURRENT answer still lives on `event_guests`; this is
+-- is not a history. The CURRENT answer still lives on `event_participants`; this is
 -- how it got there, and the two are never alternatives to each other.
 -- `from_response_type` is NULL on a first entry: there was no previous answer,
 -- and 'none' would claim they had actively said nothing before.
-CREATE TABLE IF NOT EXISTS `event_guest_response_logs` (
+CREATE TABLE IF NOT EXISTS `event_participant_response_logs` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `website_client_id` int unsigned NOT NULL,
-  `guest_id` int unsigned NOT NULL,
-  `event_id` int unsigned NOT NULL COMMENT 'Denormalised on purpose: the tab lists one person across many events',
+  `participant_id` int unsigned NOT NULL,
+  `event_id` int unsigned NOT NULL,
   `from_response_type` enum('none','yes','no','maybe') COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'NULL = the first entry. Not the same as none',
   `to_response_type` enum('none','yes','no','maybe') COLLATE utf8mb4_unicode_ci NOT NULL,
   `party_size` tinyint unsigned NOT NULL DEFAULT '1',
@@ -1348,34 +1355,38 @@ CREATE TABLE IF NOT EXISTS `event_guest_response_logs` (
   `changed_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  KEY `idx_response_logs_guest` (`guest_id`,`changed_at`),
+  KEY `idx_response_logs_guest` (`participant_id`,`changed_at`),
   KEY `idx_response_logs_client` (`website_client_id`,`changed_at`),
   KEY `idx_response_logs_event` (`event_id`),
-  CONSTRAINT `fk_response_logs_guest` FOREIGN KEY (`guest_id`) REFERENCES `event_guests` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_response_logs_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `fk_response_logs_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
-  CONSTRAINT `fk_response_logs_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+  CONSTRAINT `fk_response_logs_guest` FOREIGN KEY (`participant_id`) REFERENCES `event_participants` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Table structure for `event_guest_tags`
+-- Table structure for `guest_tags`
 -- A row per tag, not a JSON array on the guest: tags are the thing people
 -- filter and count by, and a JSON column cannot be indexed for that.
 -- The UNIQUE key includes `deleted_at` so removing a tag does not hold its
 -- label hostage against being added back.
-CREATE TABLE IF NOT EXISTS `event_guest_tags` (
+CREATE TABLE IF NOT EXISTS `guest_tags` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `website_client_id` int unsigned NOT NULL,
-  `guest_id` int unsigned NOT NULL,
+  `participant_id` int unsigned DEFAULT NULL,
+  `guest_id` int unsigned DEFAULT NULL,
   `label` varchar(60) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `color` varchar(9) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'NULL = let the UI derive it from the label, so no two screens disagree',
+  `color` varchar(9) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'NULL = let the UI pick from the label, so no two screens disagree',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `deleted_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_participant_tag` (`participant_id`,`label`,`deleted_at`),
   UNIQUE KEY `uniq_guest_tag` (`guest_id`,`label`,`deleted_at`),
   KEY `idx_guest_tags_client` (`website_client_id`,`deleted_at`),
   KEY `idx_guest_tags_label` (`website_client_id`,`label`,`deleted_at`),
-  CONSTRAINT `fk_guest_tags_guest` FOREIGN KEY (`guest_id`) REFERENCES `event_guests` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
-  CONSTRAINT `fk_guest_tags_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+  KEY `idx_guest_tags_guest` (`guest_id`),
+  CONSTRAINT `fk_guest_tags_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_guest_tags_guest` FOREIGN KEY (`guest_id`) REFERENCES `guests` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_guest_tags_participant` FOREIGN KEY (`participant_id`) REFERENCES `event_participants` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table structure for `event_gallery_items`
@@ -1402,16 +1413,66 @@ CREATE TABLE IF NOT EXISTS `event_gallery_items` (
   CONSTRAINT `fk_event_gallery_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Table structure for `event_guests`
-CREATE TABLE IF NOT EXISTS `event_guests` (
+-- Table structure for `guests` — the client phone book (§581)
+CREATE TABLE IF NOT EXISTS `guests` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
-  `event_id` int unsigned DEFAULT NULL COMMENT 'NULL = a general guest on the client list, not tied to an event',
   `website_client_id` int unsigned NOT NULL,
+  `company_id` int DEFAULT NULL,
+  `group_id` int unsigned DEFAULT NULL,
+  `title` varchar(30) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `first_name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `last_name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `name` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `date_of_birth` date DEFAULT NULL,
+  `gender` enum('male','female','other') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `email` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `dial_code` varchar(8) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT '+91',
+  `mobile` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `whatsapp` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `company` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `relationship` varchar(60) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `relationship_option_id` int unsigned DEFAULT NULL,
+  `address_line1` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `address_line2` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `city` varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `state` varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `postal_code` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `country` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT 'India',
+  `dietary_preference` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `food_preference_option_id` int unsigned DEFAULT NULL,
+  `special_requirements` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `notes` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `photo` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `source` enum('manual','import') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'manual',
+  `migrated_from_guest_id` int unsigned DEFAULT NULL COMMENT 'event_guests.id this row was moved from (§581)',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_guests_client` (`website_client_id`,`deleted_at`),
+  KEY `idx_guests_mobile` (`website_client_id`,`mobile`),
+  KEY `idx_guests_group` (`group_id`,`deleted_at`),
+  KEY `idx_guests_migrated` (`migrated_from_guest_id`),
+  KEY `fk_guests_food_option` (`food_preference_option_id`),
+  KEY `fk_guests_relationship_option` (`relationship_option_id`),
+  CONSTRAINT `fk_guests_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_guests_food_option` FOREIGN KEY (`food_preference_option_id`) REFERENCES `guest_food_preference_options` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_guests_group` FOREIGN KEY (`group_id`) REFERENCES `guest_groups` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_guests_relationship_option` FOREIGN KEY (`relationship_option_id`) REFERENCES `guest_relationship_options` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='The client phone book (§581). Participants live in event_guests.';
+
+-- Table structure for `event_participants`
+CREATE TABLE IF NOT EXISTS `event_participants` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `event_id` int unsigned NOT NULL COMMENT 'The event this participant joined (§581)',
+  `website_client_id` int unsigned NOT NULL,
+  `guest_id` int unsigned DEFAULT NULL COMMENT 'The phone-book guest this participant is (§581)',
   `company_id` int DEFAULT NULL,
   `group_id` int unsigned DEFAULT NULL,
   `name` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
   `first_name` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `last_name` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `gender` enum('male','female','other') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `title` varchar(30) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Mr. / Ms. / Mrs.',
   `date_of_birth` date DEFAULT NULL COMMENT 'Asked on the Add Guest forms. NULL = not given',
   `email` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -1422,7 +1483,7 @@ CREATE TABLE IF NOT EXISTS `event_guests` (
   `table_number` varchar(30) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Merge field {table_number}',
   `party_size` tinyint unsigned NOT NULL DEFAULT '1',
   `rsvp_status` enum('not_responded','invited','pending','accepted','declined') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'not_responded',
-  `invite_source` enum('whatsapp','email','sms','manual','import') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'manual',
+  `invite_source` enum('whatsapp','email','sms','manual','import','qr') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'manual',
   `invited_at` datetime DEFAULT NULL COMMENT 'NULL = added but not yet invited',
   `responded_at` datetime DEFAULT NULL,
   `notes` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -1436,6 +1497,7 @@ CREATE TABLE IF NOT EXISTS `event_guests` (
   `postal_code` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `country` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT 'India',
   `dietary_preference` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `food_preference_option_id` int unsigned DEFAULT NULL,
   `special_requirements` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `plus_one` tinyint NOT NULL DEFAULT '0',
   `plus_one_count` tinyint unsigned NOT NULL DEFAULT '0',
@@ -1444,7 +1506,9 @@ CREATE TABLE IF NOT EXISTS `event_guests` (
   `photo` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Guest portrait, same storage as every other upload',
   `accommodation` enum('unknown','required','not_required') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'unknown' COMMENT 'unknown = never asked, which is not the same as not_required',
   `relationship` varchar(60) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Relationship / Role on the profile header. Free text: a fixed list would exclude the real one',
+  `relationship_option_id` int unsigned DEFAULT NULL,
   `added_by_client_id` int unsigned DEFAULT NULL COMMENT 'Who added this guest. NULL = added before this was recorded, and stays NULL',
+  `participant_client_id` int unsigned DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_event_guests_event` (`event_id`,`deleted_at`),
   KEY `idx_event_guests_client` (`website_client_id`,`deleted_at`),
@@ -1452,10 +1516,18 @@ CREATE TABLE IF NOT EXISTS `event_guests` (
   KEY `idx_event_guests_source` (`invite_source`,`deleted_at`),
   KEY `idx_event_guests_responded` (`responded_at`),
   KEY `idx_event_guests_group` (`group_id`,`deleted_at`),
+  KEY `fk_event_guests_relationship_option` (`relationship_option_id`),
+  KEY `fk_event_guests_food_option` (`food_preference_option_id`),
+  KEY `idx_event_guests_participant` (`participant_client_id`,`deleted_at`),
+  KEY `idx_event_guests_guest` (`guest_id`,`deleted_at`),
   CONSTRAINT `fk_event_guests_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `fk_event_guests_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
-  CONSTRAINT `fk_event_guests_group` FOREIGN KEY (`group_id`) REFERENCES `event_guest_groups` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=130 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  CONSTRAINT `fk_event_guests_food_option` FOREIGN KEY (`food_preference_option_id`) REFERENCES `guest_food_preference_options` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_event_guests_group` FOREIGN KEY (`group_id`) REFERENCES `guest_groups` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_event_guests_guest` FOREIGN KEY (`guest_id`) REFERENCES `guests` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_event_guests_participant_client` FOREIGN KEY (`participant_client_id`) REFERENCES `website_clients` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_event_guests_relationship_option` FOREIGN KEY (`relationship_option_id`) REFERENCES `guest_relationship_options` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table structure for `event_menus`
 CREATE TABLE IF NOT EXISTS `event_menus` (
@@ -1523,9 +1595,9 @@ CREATE TABLE IF NOT EXISTS `event_messages` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `event_id` int unsigned NOT NULL,
   `campaign_id` int unsigned DEFAULT NULL,
-  `guest_id` int unsigned DEFAULT NULL,
+  `participant_id` int unsigned DEFAULT NULL,
   `website_client_id` int unsigned NOT NULL,
-  `channel` enum('whatsapp','email','sms') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `channel` enum('whatsapp','email','sms','push') COLLATE utf8mb4_unicode_ci NOT NULL,
   `kind` enum('invite','reminder','update','thank_you') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'invite',
   `status` enum('queued','sent','delivered','failed') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'sent',
   `sent_at` datetime DEFAULT NULL,
@@ -1533,23 +1605,23 @@ CREATE TABLE IF NOT EXISTS `event_messages` (
   `opened_at` datetime DEFAULT NULL,
   `clicked_at` datetime DEFAULT NULL,
   `failed_reason` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `sender` enum('client','system') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'system' COMMENT 'Who caused this message. One login per account, so this is the ACTOR, not a user',
-  `sender_client_id` int unsigned DEFAULT NULL COMMENT 'The account that sent it, when sender = client',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `deleted_at` datetime DEFAULT NULL,
+  `sender` enum('client','system') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'system' COMMENT 'Who caused this message. Existing rows are system: nobody recorded otherwise',
+  `sender_client_id` int unsigned DEFAULT NULL COMMENT 'The account that sent it, when sender = client',
   PRIMARY KEY (`id`),
   KEY `idx_event_messages_event` (`event_id`,`deleted_at`),
   KEY `idx_event_messages_client` (`website_client_id`,`deleted_at`),
   KEY `idx_event_messages_channel` (`channel`,`deleted_at`),
   KEY `idx_event_messages_sent` (`sent_at`),
-  KEY `fk_event_messages_guest` (`guest_id`),
+  KEY `fk_event_messages_guest` (`participant_id`),
   KEY `idx_event_messages_campaign` (`campaign_id`,`deleted_at`),
   CONSTRAINT `fk_event_messages_campaign` FOREIGN KEY (`campaign_id`) REFERENCES `event_message_campaigns` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `fk_event_messages_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `fk_event_messages_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
-  CONSTRAINT `fk_event_messages_guest` FOREIGN KEY (`guest_id`) REFERENCES `event_guests` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=118 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  CONSTRAINT `fk_event_messages_guest` FOREIGN KEY (`participant_id`) REFERENCES `event_participants` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table structure for `event_templates`
 CREATE TABLE IF NOT EXISTS `event_templates` (
@@ -10513,7 +10585,7 @@ CREATE TABLE IF NOT EXISTS `client_notifications` (
   `title` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
   `body` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `event_id` int unsigned DEFAULT NULL,
-  `guest_id` int unsigned DEFAULT NULL,
+  `participant_id` int unsigned DEFAULT NULL,
   `link` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'In-app path the row opens. NULL = nothing to open.',
   `meta` json DEFAULT NULL COMMENT 'Extra detail for the side panel. Never load-bearing.',
   `is_read` tinyint(1) NOT NULL DEFAULT '0',
@@ -10526,10 +10598,10 @@ CREATE TABLE IF NOT EXISTS `client_notifications` (
   KEY `idx_client_notifications_unread` (`website_client_id`,`is_read`,`archived_at`),
   KEY `idx_client_notifications_category` (`website_client_id`,`category`,`archived_at`),
   KEY `idx_client_notifications_event` (`event_id`),
-  KEY `idx_client_notifications_guest` (`guest_id`),
+  KEY `idx_client_notifications_guest` (`participant_id`),
   CONSTRAINT `fk_client_notifications_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `fk_client_notifications_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
-  CONSTRAINT `fk_client_notifications_guest` FOREIGN KEY (`guest_id`) REFERENCES `event_guests` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
+  CONSTRAINT `fk_client_notifications_guest` FOREIGN KEY (`participant_id`) REFERENCES `event_participants` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `client_notification_prefs` (

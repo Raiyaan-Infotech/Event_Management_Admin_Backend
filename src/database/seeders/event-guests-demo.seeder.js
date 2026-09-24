@@ -20,7 +20,7 @@ if (process.argv.includes('prod')) {
     process.exit(1);
 }
 
-const { Event, EventGuest, EventMessage, sequelize } = require('../../models');
+const { Event, EventParticipant, EventMessage, sequelize } = require('../../models');
 
 const CLEAR = process.argv.includes('--clear');
 const MARK = 'demo-seed';
@@ -57,17 +57,17 @@ const daysAgo = (n, jitterHours = 12) => {
 
     if (CLEAR) {
         // Messages first — they FK to guests.
-        const guestIds = (await EventGuest.findAll({ where: { notes: MARK }, attributes: ['id'] })).map((g) => g.id);
+        const guestIds = (await EventParticipant.findAll({ where: { notes: MARK }, attributes: ['id'] })).map((g) => g.id);
         const msgs = guestIds.length
-            ? await EventMessage.destroy({ where: { guest_id: guestIds }, force: true })
+            ? await EventMessage.destroy({ where: { participant_id: guestIds }, force: true })
             : 0;
-        const gone = await EventGuest.destroy({ where: { notes: MARK }, force: true });
+        const gone = await EventParticipant.destroy({ where: { notes: MARK }, force: true });
         console.log(`removed ${gone} demo guests and ${msgs} demo messages`);
         await sequelize.close();
         return;
     }
 
-    const existing = await EventGuest.count({ where: { notes: MARK } });
+    const existing = await EventParticipant.count({ where: { notes: MARK } });
     if (existing > 0) {
         console.log(`${existing} demo guests already present — run with --clear first to reseed.`);
         await sequelize.close();
@@ -121,7 +121,7 @@ const daysAgo = (n, jitterHours = 12) => {
             });
         }
 
-        const created = await EventGuest.bulkCreate(guestRows);
+        const created = await EventParticipant.bulkCreate(guestRows);
         totalGuests += created.length;
 
         for (const guest of created) {
@@ -145,7 +145,7 @@ const daysAgo = (n, jitterHours = 12) => {
 
             messageRows.push({
                 event_id: event.id,
-                guest_id: guest.id,
+                participant_id: guest.id,
                 website_client_id: event.website_client_id,
                 channel,
                 kind: 'invite',

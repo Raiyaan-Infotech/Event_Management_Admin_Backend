@@ -1,6 +1,6 @@
 const {
     Sequelize, sequelize,
-    Event, EventGuest, EventGuestGroup,
+    Event, EventParticipant, GuestGroup,
     EventMessage, EventMessageCampaign, ClientDeviceToken,
 } = require('../models');
 const { Op, fn, col, literal } = Sequelize;
@@ -350,7 +350,7 @@ async function resolveAudience(clientId, { eventId, audience, groupIds, guestIds
       a guest, and inventing one that nothing ever sets would make the toggle
       decorative.
     */
-    const guests = await EventGuest.findAll({
+    const guests = await EventParticipant.findAll({
         where,
         attributes: [
             'id', 'name', 'first_name', 'last_name', 'email',
@@ -442,7 +442,7 @@ const getComposer = async (client, { eventId } = {}) => {
         where: { website_client_id: client.id, status: { [Op.ne]: 'cancelled' } },
         attributes: [
             'id', 'name', 'start_date', 'start_time', 'venue_name', 'venue_address', 'status',
-            [literal(`(SELECT COUNT(*) FROM event_guests g
+            [literal(`(SELECT COUNT(*) FROM event_participants g
                         WHERE g.event_id = Event.id
                           AND g.deleted_at IS NULL)`), 'guest_count'],
         ],
@@ -472,18 +472,18 @@ const getComposer = async (client, { eventId } = {}) => {
     let guestCount = 0;
 
     if (chosen) {
-        groups = await EventGuestGroup.findAll({
+        groups = await GuestGroup.findAll({
             where: { website_client_id: client.id },
             attributes: [
                 'id', 'name', 'color',
-                [literal(`(SELECT COUNT(*) FROM event_guests g
-                            WHERE g.group_id = EventGuestGroup.id
+                [literal(`(SELECT COUNT(*) FROM event_participants g
+                            WHERE g.group_id = GuestGroup.id
                               AND g.event_id = ${Number(chosen.id)}
                               AND g.deleted_at IS NULL)`), 'guest_count'],
             ],
             order: [['name', 'ASC']],
         });
-        guestCount = await EventGuest.count({
+        guestCount = await EventParticipant.count({
             where: { website_client_id: client.id, event_id: chosen.id },
         });
     }
@@ -735,7 +735,7 @@ const send = async (client, body = {}) => {
             eligible.map((g) => ({
                 event_id: event.id,
                 campaign_id: created.id,
-                guest_id: g.id,
+                participant_id: g.id,
                 website_client_id: client.id,
                 channel,
                 kind: kind === 'custom' ? 'update' : kind,
@@ -748,7 +748,7 @@ const send = async (client, body = {}) => {
         // Marks the guests as invited, which is what drives the RSVP funnel.
         // Only for an actual invite — a reminder does not re-invite anybody.
         if (kind === 'invite' && !scheduledAt) {
-            await EventGuest.update(
+            await EventParticipant.update(
                 { rsvp_status: 'invited', invited_at: new Date(), invite_source: channel },
                 {
                     where: {
@@ -891,7 +891,7 @@ async function deliverPush(campaign, eligible, { title, body, event, client }) {
     if (deliveredGuestIds.length) {
         await EventMessage.update(
             { status: 'sent', sent_at: now, delivered_at: now },
-            { where: { campaign_id: campaign.id, guest_id: { [Op.in]: deliveredGuestIds } } },
+            { where: { campaign_id: campaign.id, participant_id: { [Op.in]: deliveredGuestIds } } },
         );
     }
 
@@ -908,7 +908,7 @@ async function deliverPush(campaign, eligible, { title, body, event, client }) {
             // eslint-disable-next-line no-await-in-loop
             await EventMessage.update(
                 { status: 'failed', failed_reason: reason },
-                { where: { campaign_id: campaign.id, guest_id: { [Op.in]: ids } } },
+                { where: { campaign_id: campaign.id, participant_id: { [Op.in]: ids } } },
             );
         }
     }
@@ -1181,7 +1181,7 @@ const getCampaign = async (client, id) => {
     const deliveries = await EventMessage.findAll({
         where: { campaign_id: campaign.id },
         include: [{
-            association: 'guest',
+            association: 'participant',
             attributes: ['id', 'name', 'email', 'mobile', 'whatsapp'],
             required: false,
             paranoid: false,
@@ -1206,7 +1206,7 @@ const getCampaign = async (client, id) => {
         // Rendered for the first real recipient, so the record shows what was
         // actually sent rather than the template with braces in it.
         preview: render(campaign.body, {
-            guest: deliveries[0]?.guest,
+            guest: deliveries[0]?.participant,
             event: campaign.event,
             hostName: client.name,
         }),
@@ -1217,8 +1217,9 @@ const getCampaign = async (client, id) => {
             delivered_at: d.delivered_at,
             opened_at: d.opened_at,
             failed_reason: d.failed_reason,
-            guest: d.guest
-                ? { id: d.guest.id, name: d.guest.name, email: d.guest.email, mobile: d.guest.mobile }
+            // API key stays `guest` (the portal reads it); the row is a participant.
+            guest: d.participant
+                ? { id: d.participant.id, name: d.participant.name, email: d.participant.email, mobile: d.participant.mobile }
                 : null,
         })),
         channel_state: state,

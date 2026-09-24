@@ -1,7 +1,13 @@
 const { DataTypes } = require('sequelize');
 
 /**
- * A person invited to an event.
+ * A PARTICIPANT of one event (§581) — somebody who joined it, usually by
+ * scanning its QR. The client's phone book is `guests`; `guest_id`
+ * links a participant to the guest they are, when there is one. A stranger
+ * who scanned the QR has none, and is no less a participant for it.
+ *
+ * RSVP, party size and table number live here because they are answers about
+ * THIS event.
  *
  * `rsvp_status` carries `no_response` as a real value rather than NULL: a guest
  * who was invited and has not replied is a KNOWN state — it is a slice of the
@@ -12,13 +18,16 @@ const { DataTypes } = require('sequelize');
  * invited by WhatsApp can later be emailed a reminder.
  */
 module.exports = (sequelize) => {
-    const EventGuest = sequelize.define('EventGuest', {
+    const EventParticipant = sequelize.define('EventParticipant', {
         id: { type: DataTypes.INTEGER.UNSIGNED, primaryKey: true, autoIncrement: true },
-        // NULL = a general guest on the client's list, not (yet) tied to an event (§570).
-        event_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+        // Always set: a participant belongs to an event (§581). The phone book
+        // moved to client_contacts.
+        event_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
         // Denormalised from the event so guest queries scope by owner without a
         // join. The event stays the source of truth.
         website_client_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
+        /** The phone-book guest this participant is, when they are one (§581). */
+        guest_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
         company_id: { type: DataTypes.INTEGER, allowNull: true },
 
         /**
@@ -109,7 +118,7 @@ module.exports = (sequelize) => {
          * What the GUEST said with their response.
          *
          * ⚠ Not the host's notes about them — those are rows in
-         * `event_guest_notes`. Two authors, two lifetimes; merging them would
+         * `guest_notes`. Two authors, two lifetimes; merging them would
          * lose which of the two a sentence came from.
          */
         notes: { type: DataTypes.STRING(500), allowNull: true },
@@ -160,7 +169,7 @@ module.exports = (sequelize) => {
          */
         participant_client_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
     }, {
-        tableName: 'event_guests',
+        tableName: 'event_participants',
         timestamps: true,
         paranoid: true,
         createdAt: 'created_at',
@@ -168,5 +177,5 @@ module.exports = (sequelize) => {
         deletedAt: 'deleted_at',
     });
 
-    return EventGuest;
+    return EventParticipant;
 };

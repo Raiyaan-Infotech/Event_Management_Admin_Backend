@@ -12,10 +12,14 @@ const { DataTypes } = require('sequelize');
  * tag could never be removed and added back.
  */
 module.exports = (sequelize) => {
-    const EventGuestTag = sequelize.define('EventGuestTag', {
+    const GuestTag = sequelize.define('GuestTag', {
         id: { type: DataTypes.INTEGER.UNSIGNED, primaryKey: true, autoIncrement: true },
         website_client_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
-        guest_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
+        // Host notes are about the PERSON, so they hang off the phone-book guest
+        // (§581). `participant_id` is the older link to an event_participants row, kept
+        // for rows written against a participant before the split.
+        participant_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+        guest_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
 
         label: { type: DataTypes.STRING(60), allowNull: false },
         /**
@@ -27,7 +31,7 @@ module.exports = (sequelize) => {
          */
         color: { type: DataTypes.STRING(9), allowNull: true },
     }, {
-        tableName: 'event_guest_tags',
+        tableName: 'guest_tags',
         timestamps: true,
         paranoid: true,
         createdAt: 'created_at',
@@ -35,5 +39,5 @@ module.exports = (sequelize) => {
         deletedAt: 'deleted_at',
     });
 
-    return EventGuestTag;
+    return GuestTag;
 };

@@ -1,28 +1,16 @@
-const { sequelize, Event, EventGuest, EventGuestGroup } = require('../models');
+const { sequelize, Guest, GuestGroup } = require('../models');
 const ApiError = require('../utils/apiError');
 const guestService = require('./clientGuest.service');
 
 /**
  * CSV guest import — the four-step wizard.
  *
- * ── HOW A ROW FINDS ITS EVENT ────────────────────────────────────────────────
- * The sample CSV names the event as TEXT (`Event Name*`), not an id. The
- * industry-standard resolution, and what this does:
- *
- *   1. `Event ID` column, if present and it belongs to this client  <- wins
- *   2. otherwise an exact, case-insensitive match on `Event Name`
- *   3. otherwise the event chosen on the upload step
- *   4. otherwise the row is REPORTED, never guessed
- *
- * An `Event ID` column is included in the EXPORT so a re-import round-trips
- * exactly, while a hand-made file can leave it out and be matched by name. That
- * is the pattern Mailchimp/HubSpot-style importers use, and it is why the name
- * column stays: nobody can hand-type ids.
- *
- * **A non-matching name never creates an event.** A typo would otherwise spawn
- * a junk event that then shows up in My Events, the dashboard and Analytics.
- * Two events sharing a name is reported as ambiguous rather than resolved
- * arbitrarily.
+ * ── ROWS ARE GUESTS, NOT INVITATIONS (§581) ──────────────────────────────
+ * The import fills the client's PHONE BOOK (`guests`). A guest has
+ * no event — the invitation is shared, and only scanning a QR attaches a person
+ * to an event — so Event / RSVP / table columns in a file are reported as
+ * unmapped rather than read. Rows are keyed by MOBILE (§576): a number already
+ * in the phone book, or twice in the file, is skipped.
  *
  * ── WHAT ACTUALLY BREAKS CSV IMPORTS ─────────────────────────────────────────
  * Every one of these is handled below, because every one of them is common:
@@ -48,13 +36,7 @@ const HEADER_MAP = {
     email: ['email', 'email address', 'e-mail', 'mail'],
     mobile: ['phone number', 'phone', 'mobile', 'mobile number', 'contact'],
     whatsapp: ['whatsapp number', 'whatsapp', 'whats app number'],
-    event_name: ['event name', 'event'],
-    event_id: ['event id', 'event_id'],
     group_name: ['guest group', 'group', 'group name'],
-    rsvp_status: ['rsvp status', 'status', 'rsvp'],
-    response_type: ['response type', 'response'],
-    plus_one: ['plus one allowed', 'plus one', 'plusone'],
-    plus_one_count: ['plus one count', 'plusone count'],
     company: ['company / organization', 'company', 'organization', 'organisation'],
     title: ['title / salutation', 'title', 'salutation'],
     address_line1: ['address line 1', 'address1', 'address'],
@@ -66,7 +48,6 @@ const HEADER_MAP = {
     dietary_preference: ['dietary preference', 'dietary preferences', 'diet'],
     special_requirements: ['special requirements', 'special requirement', 'requirements'],
     notes: ['notes', 'note', 'remarks'],
-    table_number: ['table number', 'table'],
 };
 
 // Mobile is mandatory, email optional (§576).
@@ -181,32 +162,6 @@ const cleanPhone = (raw) => {
     return { value: cleaned.slice(0, 20) };
 };
 
-const YES = new Set(['yes', 'y', 'true', '1', 'allowed']);
-const NO = new Set(['no', 'n', 'false', '0', '']);
-
-const parseBool = (raw) => {
-    const value = String(raw ?? '').trim().toLowerCase();
-    if (YES.has(value)) return 1;
-    if (NO.has(value)) return 0;
-    return null;
-};
-
-/** The CSV's words for status, mapped to what the column stores. */
-const STATUS_WORDS = {
-    accepted: 'accepted', attending: 'accepted', going: 'accepted', yes: 'accepted',
-    declined: 'declined', 'not attending': 'declined', no: 'declined',
-    pending: 'pending', maybe: 'pending',
-    invited: 'invited', sent: 'invited',
-    'not responded': 'not_responded', '': 'not_responded', 'no response': 'not_responded',
-};
-
-const RESPONSE_WORDS = {
-    yes: 'yes', y: 'yes', attending: 'yes',
-    no: 'no', n: 'no', declined: 'no',
-    maybe: 'maybe', pending: 'maybe',
-    '': 'none',
-};
-
 /**
  * Parse and validate, WITHOUT writing anything.
  *
@@ -214,7 +169,7 @@ const RESPONSE_WORDS = {
  * caller sees exactly what would be created, and which rows would be refused
  * and why, before anything touches the database.
  */
-const analyse = async (clientId, { content, defaultEventId = null }) => {
+const analyse = async (clientId, { content }) => {
     if (typeof content !== 'string' || !content.trim()) {
         throw ApiError.badRequest('The file is empty.');
     }
@@ -246,35 +201,20 @@ const analyse = async (clientId, { content, defaultEventId = null }) => {
         );
     }
 
-    // Everything needed to resolve names to ids, read once.
-    const [events, groups] = await Promise.all([
-        Event.findAll({
-            where: { website_client_id: clientId },
-            attributes: ['id', 'name'],
-        }),
-        EventGuestGroup.findAll({
-            where: { website_client_id: clientId },
-            attributes: ['id', 'name'],
-        }),
-    ]);
-
-    const eventsByName = new Map();
-    for (const event of events) {
-        const key = event.name.trim().toLowerCase();
-        // Keep a list, not the last one — two events sharing a name has to be
-        // reported as ambiguous, and that is only knowable if both are kept.
-        if (!eventsByName.has(key)) eventsByName.set(key, []);
-        eventsByName.get(key).push(event);
-    }
-    const eventIds = new Set(events.map((e) => e.id));
+    // Group names → ids, read once.
+    const groups = await GuestGroup.findAll({
+        where: { website_client_id: clientId },
+        attributes: ['id', 'name'],
+    });
     const groupsByName = new Map(groups.map((g) => [g.name.trim().toLowerCase(), g]));
 
-    const existing = await EventGuest.findAll({
+    // Mobiles already in the phone book, by last 10 digits (§576).
+    const existing = await Guest.findAll({
         where: { website_client_id: clientId },
-        attributes: ['event_id', 'mobile'],
+        attributes: ['mobile'],
     });
     const digits = (v) => String(v || '').replace(/\D/g, '').slice(-10);
-    const alreadyThere = new Set(existing.filter((g) => g.mobile).map((g) => `${g.event_id ?? ''}::${digits(g.mobile)}`));
+    const alreadyThere = new Set(existing.filter((c) => c.mobile).map((c) => digits(c.mobile)));
 
     const valid = [];
     const errors = [];
@@ -310,27 +250,6 @@ const analyse = async (clientId, { content, defaultEventId = null }) => {
         // Email is optional — checked only when given.
         if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) rowErrors.push('Email is not valid.');
 
-        // ── Resolve the event ──────────────────────────────────────────────
-        let eventId = null;
-        const rawEventId = Number(get('event_id'));
-        const eventName = get('event_name').trim();
-
-        if (rawEventId && eventIds.has(rawEventId)) {
-            eventId = rawEventId;
-        } else if (eventName) {
-            const matches = eventsByName.get(eventName.toLowerCase()) ?? [];
-            if (matches.length === 1) eventId = matches[0].id;
-            else if (matches.length > 1) {
-                rowErrors.push(`You have ${matches.length} events called "${eventName}". Add an Event ID column to say which.`);
-            } else {
-                rowErrors.push(`No event called "${eventName}". Create it first, or correct the spelling.`);
-            }
-        } else if (defaultEventId) {
-            eventId = defaultEventId;
-        }
-        // else: no event — the row goes into the phone book (§572). A guest is a
-        // contact on the account; only scanning a QR attaches somebody to an event.
-
         // ── Phones ─────────────────────────────────────────────────────────
         const mobile = cleanPhone(get('mobile'));
         const whatsapp = cleanPhone(get('whatsapp'));
@@ -343,14 +262,14 @@ const analyse = async (clientId, { content, defaultEventId = null }) => {
         }
 
         // ── Duplicates ─────────────────────────────────────────────────────
-        const key = `${eventId ?? ''}::${digits(mobile.value)}`;
+        const key = digits(mobile.value);
         if (seenInFile.has(key)) {
             skipped.push({ row: rowNumber, name: firstName, email, reason: 'Duplicate of an earlier row in this file.' });
             return;
         }
         if (alreadyThere.has(key)) {
             // The design's own guideline: "Duplicate mobile numbers will be skipped."
-            skipped.push({ row: rowNumber, name: firstName, email, reason: eventId ? 'Already on this event’s list.' : 'Already in your guest list.' });
+            skipped.push({ row: rowNumber, name: firstName, email, reason: 'Already in your guest list.' });
             return;
         }
         seenInFile.add(key);
@@ -364,14 +283,8 @@ const analyse = async (clientId, { content, defaultEventId = null }) => {
             else newGroups.add(groupName);
         }
 
-        const statusWord = get('rsvp_status').trim().toLowerCase();
-        const responseWord = get('response_type').trim().toLowerCase();
-        const plusOne = parseBool(get('plus_one')) ?? 0;
-        const plusCount = Number(get('plus_one_count')) || 0;
-
         valid.push({
             row: rowNumber,
-            event_id: eventId,
             group_id: groupId,
             group_name: groupId ? null : (groupName || null),
             title: get('title').trim().slice(0, 30) || null,
@@ -383,10 +296,7 @@ const analyse = async (clientId, { content, defaultEventId = null }) => {
             mobile: mobile.value,
             whatsapp: whatsapp.value,
             company: get('company').trim().slice(0, 200) || null,
-            table_number: get('table_number').trim().slice(0, 30) || null,
-            rsvp_status: STATUS_WORDS[statusWord] ?? 'not_responded',
-            response_type: RESPONSE_WORDS[responseWord] ?? 'none',
-            invite_source: 'import',
+            source: 'import',
             address_line1: get('address_line1').trim().slice(0, 255) || null,
             address_line2: get('address_line2').trim().slice(0, 255) || null,
             city: get('city').trim().slice(0, 120) || null,
@@ -395,8 +305,6 @@ const analyse = async (clientId, { content, defaultEventId = null }) => {
             country: get('country').trim().slice(0, 100) || 'India',
             dietary_preference: get('dietary_preference').trim().slice(0, 255) || null,
             special_requirements: get('special_requirements').trim().slice(0, 500) || null,
-            plus_one: plusOne,
-            plus_one_count: plusOne ? Math.min(20, Math.max(0, plusCount)) : 0,
             notes: get('notes').trim().slice(0, 500) || null,
         });
     });
@@ -460,8 +368,8 @@ const parseCsv = async (clientId, options) => {
  * the rest. A file of 500 with three bad rows imports 497 — rolling all of it
  * back because of row 7 is the behaviour people hate most about importers.
  */
-const commitImport = async (clientId, companyId, { content, defaultEventId = null, createGroups = false }) => {
-    const result = await analyse(clientId, { content, defaultEventId });
+const commitImport = async (clientId, companyId, { content, createGroups = false }) => {
+    const result = await analyse(clientId, { content });
     const rows = result.valid;
 
     const outcome = {
@@ -475,30 +383,19 @@ const commitImport = async (clientId, companyId, { content, defaultEventId = nul
     if (rows.length === 0) return outcome;
 
     return sequelize.transaction(async (transaction) => {
-        // Plan limit, all-or-nothing: the account's TOTAL guest count (§569). An
-        // import that would take it over the cap is refused whole rather than
-        // silently cut short. Before this, a CSV was the way round the limit.
-        const maxGuests = await guestService.guestLimitFor({ website_client_id: clientId, subscription_plan_id: null }, transaction);
+        // Plan limit, all-or-nothing: the phone book's TOTAL (§569). An import
+        // that would take it over the cap is refused whole rather than silently
+        // cut short. Before this, a CSV was the way round the limit.
+        const maxGuests = await guestService.guestLimitFor({ website_client_id: clientId }, transaction);
         if (maxGuests !== null) {
-            // Phone book only: rows that name an event are participants and
-            // are limited by Max RSVP, not Max Guests.
-            const used = await EventGuest.count({ where: { website_client_id: clientId, event_id: null }, transaction });
-            const adding = rows.filter((r) => !r.event_id).length;
-            if (used + adding > maxGuests) {
+            const used = await Guest.count({ where: { website_client_id: clientId }, transaction });
+            if (used + rows.length > maxGuests) {
                 const left = Math.max(0, maxGuests - used);
                 throw ApiError.badRequest(
                     `Your plan allows ${maxGuests} guests in total and you already have ${used}. `
-                    + `This file adds ${adding}, but only ${left} more can be added. Please upgrade your plan or import fewer guests.`
+                    + `This file adds ${rows.length}, but only ${left} more can be added. Please upgrade your plan or import fewer guests.`
                 );
             }
-        }
-
-        // Rows that name an event are participants of it (§578): Max RSVP
-        // per event caps them, all-or-nothing like the guest limit.
-        const perEvent = new Map();
-        for (const r of rows) if (r.event_id) perEvent.set(r.event_id, (perEvent.get(r.event_id) || 0) + 1);
-        for (const [eventId, adding] of perEvent) {
-            await guestService.assertParticipantCapacity(eventId, adding, { transaction });
         }
 
         const createdGroups = [];
@@ -506,7 +403,7 @@ const commitImport = async (clientId, companyId, { content, defaultEventId = nul
         if (createGroups) {
             const wanted = [...new Set(rows.map((r) => r.group_name).filter(Boolean))];
             for (const name of wanted) {
-                const group = await EventGuestGroup.create(
+                const group = await GuestGroup.create(
                     {
                         website_client_id: clientId,
                         company_id: companyId ?? null,
@@ -525,17 +422,13 @@ const commitImport = async (clientId, companyId, { content, defaultEventId = nul
             ...rest,
             website_client_id: clientId,
             company_id: companyId ?? null,
-            // A row that arrives with a status was clearly invited; without
-            // this its response-rate denominator is wrong on Analytics.
-            invited_at: rest.rsvp_status === 'not_responded' ? null : new Date(),
-            responded_at: rest.response_type === 'none' ? null : new Date(),
         }));
 
         // Chunked — 5000 individual inserts against production at ~374ms each
         // (§103) would take half an hour.
         const CHUNK = 500;
         for (let i = 0; i < payload.length; i += CHUNK) {
-            await EventGuest.bulkCreate(payload.slice(i, i + CHUNK), { transaction });
+            await Guest.bulkCreate(payload.slice(i, i + CHUNK), { transaction });
         }
 
         return { ...outcome, imported: payload.length, created_groups: createdGroups };

@@ -114,7 +114,7 @@ const schemaOf = async (conn, dbName) => {
     // Row counts for the tables that DO exist on both, so an empty-but-present
     // table is not mistaken for a migrated one that carried its data across.
     const interesting = [
-        'events', 'event_guests', 'event_guest_groups', 'event_messages',
+        'events', 'event_participants', 'guest_groups', 'event_messages',
         'event_message_campaigns', 'event_templates', 'website_clients',
     ];
     const counts = [];

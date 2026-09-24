@@ -2,7 +2,7 @@ const {
     Sequelize,
     sequelize,
     Event,
-    EventGuest,
+    EventParticipant,
     EventMessage,
     EventCategory,
 } = require('../models');
@@ -11,7 +11,7 @@ const { Op } = Sequelize;
 /**
  * The Analytics screen, in one response.
  *
- * Every figure the design shows is computed here from `events`, `event_guests`
+ * Every figure the design shows is computed here from `events`, `event_participants`
  * and `event_messages` — the guest and message tables were added specifically
  * so this screen could read real numbers instead of invented ones.
  *
@@ -88,7 +88,7 @@ const getAnalytics = async (clientId, query = {}) => {
             attributes: ['id', 'name', 'status', 'start_date', 'end_date', 'theme_id', 'created_at'],
             include: [{ model: EventCategory, as: 'category', attributes: ['id', 'name'], required: false }],
         }),
-        EventGuest.findAll({
+        EventParticipant.findAll({
             where: { website_client_id: clientId },
             attributes: [
                 'id', 'event_id', 'party_size', 'rsvp_status', 'response_type',

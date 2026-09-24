@@ -4,8 +4,8 @@ const {
     Event,
     WebsiteClient,
     SubscriptionPlan,
-    EventGuest,
-    EventGuestGroup,
+    EventParticipant,
+    GuestGroup,
     EventCategory,
     EventMenu,
     EventTemplate,
@@ -532,12 +532,12 @@ const getEventForViewer = async (clientId, eventId, opts = {}) => {
     */
     const [event, membership] = await Promise.all([
         Event.findOne({ where: { id: eventId }, include: EVENT_INCLUDE }),
-        EventGuest.findOne({
+        EventParticipant.findOne({
             where: { event_id: eventId, participant_client_id: clientId },
             // relationship / group: only to decide viewerIsFamily below — never
             // sent to the client. See `familyCategoryOf`.
             attributes: ['id', 'relationship'],
-            include: [{ model: EventGuestGroup, as: 'group', attributes: ['name'], required: false }],
+            include: [{ model: GuestGroup, as: 'group', attributes: ['name'], required: false }],
         }),
     ]);
 
@@ -607,7 +607,7 @@ const HOST_ONLY_MENU_SLUGS = new Set(['guests']);
 
 /**
  * The app's own three Family sub-tabs (Family / Relative / Close Friend),
- * mirrored EXACTLY from `EventGuest.familyCategory` in
+ * mirrored EXACTLY from `EventParticipant.familyCategory` in
  * `lib/data/repositories/guest_repository.dart` — same keyword lists, same
  * fallback order. Kept in lock step on purpose: this is what decides whether
  * a GUEST (not the host) gets the Family tile at all (see `presentOne`), and
@@ -743,7 +743,7 @@ const presentOne = async (event, { platform = 'website', isOwner = true, viewerI
  *                     app and joined by QR, not merely listed by the host
  *   invitations_sent  `event_messages` of kind `invite` that actually left
  *                     (`sent`/`delivered`). Counted from the send log, NOT from
- *                     `event_guests.invited_at`: the QR join stamps that too,
+ *                     `event_participants.invited_at`: the QR join stamps that too,
  *                     with nothing sent.
  *
  * ONE round trip of three sub-selects rather than three queries — production
@@ -756,9 +756,9 @@ const guestStatsFor = async (eventId) => {
     try {
         const [row] = await sequelize.query(
             `SELECT
-                (SELECT COUNT(*) FROM event_guests
+                (SELECT COUNT(*) FROM event_participants
                   WHERE event_id = :id AND deleted_at IS NULL) AS invited_guests,
-                (SELECT COUNT(*) FROM event_guests
+                (SELECT COUNT(*) FROM event_participants
                   WHERE event_id = :id AND deleted_at IS NULL
                     AND participant_client_id IS NOT NULL) AS guests_joined,
                 (SELECT COUNT(*) FROM event_messages
@@ -1343,12 +1343,12 @@ const getWishlist = async (clientId, { platform = 'website' } = {}) => {
     // a per-id loop here would take seconds on a list of twenty.
     const [events, memberships] = await Promise.all([
         Event.findAll({ where: { id: { [Op.in]: ids } }, include: EVENT_INCLUDE }),
-        EventGuest.findAll({
+        EventParticipant.findAll({
             where: { event_id: { [Op.in]: ids }, participant_client_id: clientId },
             // relationship / group: only to decide viewerIsFamily below, same
             // as getEventForViewer — see `familyCategoryOf`.
             attributes: ['event_id', 'relationship'],
-            include: [{ model: EventGuestGroup, as: 'group', attributes: ['name'], required: false }],
+            include: [{ model: GuestGroup, as: 'group', attributes: ['name'], required: false }],
         }),
     ]);
 
@@ -1399,7 +1399,7 @@ const setWishlisted = async (clientId, eventId, wishlisted) => {
     if (wishlisted) {
         const [event, membership] = await Promise.all([
             Event.findOne({ where: { id }, attributes: ['id', 'website_client_id'] }),
-            EventGuest.findOne({
+            EventParticipant.findOne({
                 where: { event_id: id, participant_client_id: clientId },
                 attributes: ['id'],
             }),

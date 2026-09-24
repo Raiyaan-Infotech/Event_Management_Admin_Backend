@@ -1,7 +1,7 @@
 const { Op } = require('sequelize');
 const {
     Event,
-    EventGuest,
+    EventParticipant,
     NotificationTemplate,
     EventNotificationTemplatePref,
     ClientDeviceToken,
@@ -118,7 +118,7 @@ const isTemplateEnabledForEvent = async (eventId, templateId) => {
  * @param {Object} params
  * @param {number} [params.eventId]
  * @param {Object} [params.event] - Optional loaded Event model instance
- * @param {Object} [params.guest] - Optional EventGuest instance
+ * @param {Object} [params.guest] - Optional EventParticipant instance
  * @param {Object} [params.client] - Optional WebsiteClient instance (participant or scanner)
  * @param {number} [params.companyId]
  * @returns {Promise<Object>} Outcome summary
@@ -213,10 +213,10 @@ const triggerWelcomeInvitation = async ({
 
         const effectiveCompanyId = companyId ?? event.company_id ?? template.company_id ?? 1;
 
-        // Verify guestId exists in event_guests table to respect foreign key constraint
+        // Verify guestId exists in event_participants table to respect foreign key constraint
         let validGuestId = null;
         if (guest?.id) {
-            const guestExists = await EventGuest.findByPk(guest.id, { attributes: ['id'] });
+            const guestExists = await EventParticipant.findByPk(guest.id, { attributes: ['id'] });
             if (guestExists) validGuestId = guest.id;
         }
 

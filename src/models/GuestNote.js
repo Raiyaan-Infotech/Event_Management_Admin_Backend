@@ -3,7 +3,7 @@ const { DataTypes } = require('sequelize');
 /**
  * A note the HOST wrote about a guest.
  *
- * ⚠ Not `EventGuest.notes`. That column stays and keeps its own meaning: what
+ * ⚠ Not `EventParticipant.notes`. That column stays and keeps its own meaning: what
  * the GUEST said with their response. These are the host's own observations —
  * "prefers email", "vegetarian", "Rohan's cousin". Two authors and two
  * lifetimes, and merging them would lose which of the two a sentence came from.
@@ -12,10 +12,14 @@ const { DataTypes } = require('sequelize');
  * use `dangerouslySetInnerHTML` — splitting it as plain text renders the tags.
  */
 module.exports = (sequelize) => {
-    const EventGuestNote = sequelize.define('EventGuestNote', {
+    const GuestNote = sequelize.define('GuestNote', {
         id: { type: DataTypes.INTEGER.UNSIGNED, primaryKey: true, autoIncrement: true },
         website_client_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
-        guest_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
+        // Host notes are about the PERSON, so they hang off the phone-book guest
+        // (§581). `participant_id` is the older link to an event_participants row, kept
+        // for rows written against a participant before the split.
+        participant_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+        guest_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
 
         title: { type: DataTypes.STRING(150), allowNull: false },
         body: { type: DataTypes.TEXT('medium'), allowNull: true },
@@ -42,7 +46,7 @@ module.exports = (sequelize) => {
         /** The actor, same reasoning as `EventMessage.sender`. */
         created_by_client_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
     }, {
-        tableName: 'event_guest_notes',
+        tableName: 'guest_notes',
         timestamps: true,
         paranoid: true,
         createdAt: 'created_at',
@@ -50,5 +54,5 @@ module.exports = (sequelize) => {
         deletedAt: 'deleted_at',
     });
 
-    return EventGuestNote;
+    return GuestNote;
 };

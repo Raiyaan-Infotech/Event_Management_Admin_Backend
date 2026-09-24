@@ -18,8 +18,8 @@ const TARGET = process.argv.includes('prod') ? 'PRODUCTION' : 'LOCAL';
 /** Every table the client portal owns, in dependency order. */
 const TABLES = [
     'events',
-    'event_guest_groups',
-    'event_guests',
+    'guest_groups',
+    'event_participants',
     'event_message_campaigns',
     'event_messages',
 ];
@@ -36,13 +36,13 @@ const EXPECTED = {
         ['status', 'the tab filter'],
         ['start_date', 'the default sort and the date buckets'],
     ],
-    event_guest_groups: [
+    guest_groups: [
         ['website_client_id', 'every list is scoped by owner'],
         // Never filtered alone — always beside the owner — so a composite
         // starting with both is what this needs, not an index on is_default.
         [['website_client_id', 'is_default'], 'the Add Guest default-group lookup'],
     ],
-    event_guests: [
+    event_participants: [
         ['website_client_id', 'every list is scoped by owner'],
         ['event_id', 'per-event guest list and counts'],
         ['rsvp_status', 'the five status tabs'],

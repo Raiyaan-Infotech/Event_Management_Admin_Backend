@@ -8,6 +8,7 @@ const billingController = require('../controllers/clientBilling.controller');
 const preferencesController = require('../controllers/clientPreferences.controller');
 const messageController = require('../controllers/clientMessage.controller');
 const rsvpController = require('../controllers/clientRsvp.controller');
+const participantController = require('../controllers/clientParticipant.controller');
 const guestProfileController = require('../controllers/clientGuestProfile.controller');
 const securityController = require('../controllers/clientSecurity.controller');
 const deviceController = require('../controllers/clientDevice.controller');
@@ -213,7 +214,7 @@ router.get('/events/joined', guestRegistrationController.myEvents);
 /**
  * The GUEST's own RSVP for one event (the app's RSVP screen) — one answer per
  * event. Distinct from `/rsvps/:id`, which is the HOST editing a guest's answer.
- * Both write the same `event_guests` columns, which is why an answer given here
+ * Both write the same `event_participants` columns, which is why an answer given here
  * shows on the portal's RSVPs screen with nothing to sync.
  */
 router.get('/events/:id/my-rsvp', guestRegistrationController.myRsvp);
@@ -282,6 +283,18 @@ router.post('/guests', guestController.create);
 router.get('/guests/:id', guestController.getById);
 router.put('/guests/:id', guestController.update);
 router.delete('/guests/:id', guestController.remove);
+
+/**
+ * Participants (§581) — the people attending one event. The phone book is
+ * `/guests` above. `capacity` is a literal path, so it sits above `/:id`.
+ */
+router.get('/participants/stats', participantController.stats);
+router.get('/participants/capacity', participantController.capacity);
+router.get('/participants', participantController.list);
+router.post('/participants', participantController.create);
+router.get('/participants/:id', participantController.getById);
+router.put('/participants/:id', participantController.update);
+router.delete('/participants/:id', participantController.remove);
 
 /**
  * Messages.

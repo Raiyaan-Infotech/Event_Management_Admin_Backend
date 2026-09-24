@@ -46,7 +46,7 @@ module.exports = (sequelize) => {
         body: { type: DataTypes.STRING(500), allowNull: true },
 
         event_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
-        guest_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+        participant_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
 
         /** The in-app path this row opens. NULL means there is nothing to open. */
         link: { type: DataTypes.STRING(255), allowNull: true },
@@ -78,7 +78,7 @@ module.exports = (sequelize) => {
             { fields: ['website_client_id', 'is_read', 'archived_at'] },
             { fields: ['website_client_id', 'category', 'archived_at'] },
             { fields: ['event_id'] },
-            { fields: ['guest_id'] },
+            { fields: ['participant_id'] },
         ],
     });
 

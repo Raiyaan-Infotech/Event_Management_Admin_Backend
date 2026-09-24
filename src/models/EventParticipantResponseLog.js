@@ -10,7 +10,7 @@ const { DataTypes } = require('sequelize');
  *
  * ⚠ APPEND ONLY. Nothing updates or deletes a row here — a history you can edit
  * is not a history, and `paranoid` is off for the same reason. The CURRENT
- * answer still lives on `event_guests`; this is how it got there. The two are
+ * answer still lives on `event_participants`; this is how it got there. The two are
  * never alternatives to each other, and code that needs "what did they say"
  * must read the guest, not the newest log row.
  *
@@ -19,10 +19,10 @@ const { DataTypes } = require('sequelize');
  * guest to reach the event is the query this table exists to avoid.
  */
 module.exports = (sequelize) => {
-    const EventGuestResponseLog = sequelize.define('EventGuestResponseLog', {
+    const EventParticipantResponseLog = sequelize.define('EventParticipantResponseLog', {
         id: { type: DataTypes.INTEGER.UNSIGNED, primaryKey: true, autoIncrement: true },
         website_client_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
-        guest_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
+        participant_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
         event_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
 
         /**
@@ -62,7 +62,7 @@ module.exports = (sequelize) => {
         changed_by_client_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
         changed_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
     }, {
-        tableName: 'event_guest_response_logs',
+        tableName: 'event_participant_response_logs',
         /* `updated_at` would be a column nothing may ever set. */
         timestamps: true,
         updatedAt: false,
@@ -70,5 +70,5 @@ module.exports = (sequelize) => {
         paranoid: false,
     });
 
-    return EventGuestResponseLog;
+    return EventParticipantResponseLog;
 };

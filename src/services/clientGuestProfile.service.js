@@ -1,13 +1,14 @@
 const {
     Sequelize,
     Event,
-    EventGuest,
-    EventGuestNote,
-    EventGuestTag,
-    EventGuestReminder,
-    EventGuestResponseLog,
+    EventParticipant,
+    GuestNote,
+    GuestTag,
+    GuestReminder,
+    EventParticipantResponseLog,
     EventMessage,
     WebsiteClient,
+    Guest,
 } = require('../models');
 const { Op } = Sequelize;
 const ApiError = require('../utils/apiError');
@@ -19,22 +20,15 @@ const ApiError = require('../utils/apiError');
  * `clientRsvp.service` answers "what did this guest say about THIS event". A
  * guest row is per-event, so that is one row.
  *
- * This module answers "who is this PERSON across every event", which means
- * every guest row sharing their email. The two are different questions and the
- * profile is the only place the second one is asked.
+ * This module answers "who is this PERSON across every event". Since §581 the
+ * person IS a row: the phone-book guest (`guests`). Their events are
+ * the participations linked to it by `guest_id` — set when their mobile joins
+ * an event by scanning its QR. The old stitch matched every guest row sharing
+ * an EMAIL, which a typo split in two and a shared family address merged into
+ * one; that guesswork is gone.
  *
- * ⚠ THE LINK IS THE EMAIL ADDRESS, AND THAT IS THE WEAK POINT OF THIS WHOLE
- * MODULE. It is the only link the schema has. A typo'd address silently splits
- * one person into two profiles, and two people sharing a family address merge
- * into one. Nothing here can detect either, so `identity.linked_by` says so out
- * loud and the screen prints it — a wrong profile that explains how it was
- * assembled is recoverable; a wrong one that looks authoritative is not.
- *
- * A guest with NO email cannot be linked at all. Their profile is exactly one
- * guest row, which is correct rather than degraded — see `siblingIds`.
- *
- * ── NOTES ARE NOT `event_guests`.`notes` ────────────────────────────────────
- * That column is what the GUEST said with their response. `event_guest_notes`
+ * ── NOTES ARE NOT `event_participants`.`notes` ────────────────────────────────────
+ * That column is what the GUEST said with their response. `guest_notes`
  * is what the HOST wrote about them. Both appear on the profile, in different
  * places, and must never be merged — the reader needs to know which of the two
  * a sentence came from.
@@ -43,7 +37,7 @@ const ApiError = require('../utils/apiError');
 /* ── Ownership ───────────────────────────────────────────────────────────── */
 
 /**
- * The guest row this profile is anchored to.
+ * The guest this profile is anchored to (§581).
  *
  * Scoped by client, so "not found" and "not yours" are the same answer —
  * distinguishing them would confirm a guest exists on somebody else's account.
@@ -52,34 +46,21 @@ const own = async (clientId, id) => {
     const numeric = Number(id);
     if (!Number.isInteger(numeric) || numeric <= 0) throw ApiError.notFound('Guest not found.');
 
-    const guest = await EventGuest.findOne({
+    const guest = await Guest.findOne({
         where: { id: numeric, website_client_id: clientId },
-        include: [
-            { association: 'event', attributes: ['id', 'name', 'start_date', 'start_time', 'venue_name', 'venue_address'], required: false },
-            { association: 'group', attributes: ['id', 'name', 'color'], required: false },
-        ],
+        include: [{ association: 'group', attributes: ['id', 'name', 'color'], required: false }],
     });
     if (!guest) throw ApiError.notFound('Guest not found.');
     return guest;
 };
 
-/**
- * Every guest row that is the same PERSON, this one included.
- *
- * ⚠ Returns `[guest.id]` alone when there is no email. That is not a fallback
- * or a degraded result — a guest with no address genuinely has no other row
- * this schema can prove is them, and inventing a match on name would merge two
- * different Priya Sharmas into one profile.
- */
-const siblingIds = async (clientId, guest) => {
-    if (!guest.email) return [guest.id];
-
-    const rows = await EventGuest.findAll({
-        where: { website_client_id: clientId, email: guest.email },
+/** The participant rows that ARE this guest — one per event they joined. */
+const participationIds = async (clientId, guest) => {
+    const rows = await EventParticipant.findAll({
+        where: { website_client_id: clientId, guest_id: guest.id },
         attributes: ['id'],
     });
-    const ids = rows.map((r) => r.id);
-    return ids.length ? ids : [guest.id];
+    return rows.map((r) => r.id);
 };
 
 /* ── Tags ────────────────────────────────────────────────────────────────── */
@@ -143,7 +124,7 @@ const shapeReminder = (r) => ({
       ⚠ Derived at READ time, never stored. "Upcoming" is a fact about `due_at`
       versus now, and a stored one becomes a lie the moment the date passes.
     */
-    state: EventGuestReminder.derive(r),
+    state: GuestReminder.derive(r),
 });
 
 /* ── The profile ─────────────────────────────────────────────────────────── */
@@ -158,11 +139,11 @@ const shapeReminder = (r) => ({
  */
 const getProfile = async (clientId, id) => {
     const guest = await own(clientId, id);
-    const ids = await siblingIds(clientId, guest);
+    const ids = await participationIds(clientId, guest);
 
     const [siblings, messages, history, notes, tags, reminders, account] = await Promise.all([
-        /* Linked Events — the same person's other invitations. */
-        EventGuest.findAll({
+        /* Linked Events — the events this person joined. */
+        EventParticipant.findAll({
             where: { website_client_id: clientId, id: { [Op.in]: ids } },
             attributes: [
                 'id', 'event_id', 'rsvp_status', 'response_type', 'responded_at',
@@ -181,9 +162,9 @@ const getProfile = async (clientId, id) => {
           by guest id — belt and braces, since `ids` is already client-scoped.
         */
         EventMessage.findAll({
-            where: { website_client_id: clientId, guest_id: { [Op.in]: ids } },
+            where: { website_client_id: clientId, participant_id: { [Op.in]: ids } },
             attributes: [
-                'id', 'guest_id', 'event_id', 'channel', 'kind', 'status',
+                'id', 'participant_id', 'event_id', 'channel', 'kind', 'status',
                 'sent_at', 'delivered_at', 'opened_at', 'clicked_at',
                 'sender', 'sender_client_id', 'created_at',
             ],
@@ -191,25 +172,25 @@ const getProfile = async (clientId, id) => {
             order: [['created_at', 'DESC']],
             limit: 100,
         }),
-        EventGuestResponseLog.findAll({
-            where: { website_client_id: clientId, guest_id: { [Op.in]: ids } },
+        EventParticipantResponseLog.findAll({
+            where: { website_client_id: clientId, participant_id: { [Op.in]: ids } },
             include: [{ association: 'event', attributes: ['id', 'name', 'start_date'], required: false }],
             order: [['changed_at', 'DESC'], ['id', 'DESC']],
             limit: 100,
         }),
         /* Pinned first, then newest — the index is exactly this ORDER BY. */
-        EventGuestNote.findAll({
-            where: { website_client_id: clientId, guest_id: { [Op.in]: ids } },
+        GuestNote.findAll({
+            where: { website_client_id: clientId, guest_id: guest.id },
             order: [['is_pinned', 'DESC'], ['created_at', 'DESC']],
             limit: 100,
         }),
-        EventGuestTag.findAll({
-            where: { website_client_id: clientId, guest_id: { [Op.in]: ids } },
+        GuestTag.findAll({
+            where: { website_client_id: clientId, guest_id: guest.id },
             order: [['created_at', 'ASC']],
             limit: 50,
         }),
-        EventGuestReminder.findAll({
-            where: { website_client_id: clientId, guest_id: { [Op.in]: ids } },
+        GuestReminder.findAll({
+            where: { website_client_id: clientId, guest_id: guest.id },
             order: [['due_at', 'ASC']],
             limit: 50,
         }),
@@ -219,9 +200,8 @@ const getProfile = async (clientId, id) => {
     const authorName = account ? account.name : null;
 
     /*
-      ⚠ Deduplicated by label. Tags live on the guest ROW, so a person invited
-      to three events can carry "Family" three times — once per row — and the
-      profile would print it three times. First occurrence wins.
+      Deduplicated by label — a safety net; tags now live on the guest, so
+      one person carries a label once.
     */
     const seenTags = new Set();
     const uniqueTags = [];
@@ -238,6 +218,9 @@ const getProfile = async (clientId, id) => {
         .sort((a, b) => new Date(b) - new Date(a))[0] || null;
 
     const g = guest.toJSON();
+    // Answers about ONE event belong to a participation; the header shows the
+    // most recent event's, or nothing when the person has joined none.
+    const latest = siblings[0] ? siblings[0].toJSON() : null;
 
     return {
         guest: {
@@ -251,28 +234,28 @@ const getProfile = async (clientId, id) => {
             mobile: g.mobile,
             whatsapp: g.whatsapp,
             company: g.company,
-            table_number: g.table_number,
+            table_number: latest?.table_number ?? null,
             photo: g.photo || null,
             relationship: g.relationship || null,
-            accommodation: g.accommodation || 'unknown',
+            accommodation: latest?.accommodation || 'unknown',
             location: [g.city, g.state, g.country].filter(Boolean).join(', ') || null,
             city: g.city,
             state: g.state,
             country: g.country,
             group: g.group ? { id: g.group.id, name: g.group.name, color: g.group.color } : null,
-            rsvp_status: g.rsvp_status,
-            response_type: g.response_type,
-            responded_at: g.responded_at,
-            invited_at: g.invited_at,
-            party_size: g.party_size,
+            rsvp_status: latest?.rsvp_status ?? null,
+            response_type: latest?.response_type ?? null,
+            responded_at: latest?.responded_at ?? null,
+            invited_at: latest?.invited_at ?? null,
+            party_size: latest?.party_size ?? null,
             dietary_preference: g.dietary_preference,
             special_requirements: g.special_requirements,
             /* The guest's OWN note, kept distinct from `notes[]` below. */
             response_note: g.notes || null,
-            custom_answers: g.custom_answers || null,
+            custom_answers: latest?.custom_answers || null,
             created_at: g.created_at,
         },
-        event: g.event || null,
+        event: latest?.event || null,
 
         /**
          * How this profile was assembled, said out loud.
@@ -283,15 +266,14 @@ const getProfile = async (clientId, id) => {
          * confident-looking page.
          */
         identity: {
-            linked_by: g.email ? 'email' : 'none',
+            linked_by: 'guest',
             email: g.email || null,
             guest_row_ids: ids,
             events_invited: siblings.length,
-            note: g.email
-                ? 'Events are matched on email address — the only link this system stores. '
-                    + 'A different address for the same person appears as a separate profile.'
-                : 'This guest has no email address, so no other events can be matched to them. '
-                    + 'This profile is a single invitation.',
+            note: siblings.length
+                ? 'Events this guest joined by scanning the invitation QR with their mobile number.'
+                : 'This guest has not joined any event yet. Share an invitation with them — '
+                + 'when they scan its QR with this mobile number, the event appears here.',
         },
 
         summary: {
@@ -312,7 +294,7 @@ const getProfile = async (clientId, id) => {
 
         linked_events: siblings.map((sg) => ({
             id: sg.id,
-            is_current: sg.id === guest.id,
+            is_current: false,
             rsvp_status: sg.rsvp_status,
             response_type: sg.response_type,
             responded_at: sg.responded_at,
@@ -329,7 +311,7 @@ const getProfile = async (clientId, id) => {
 
         messages: messages.map((m) => ({
             id: m.id,
-            guest_id: m.guest_id,
+            guest_id: m.participant_id,
             channel: m.channel,
             kind: m.kind,
             status: m.status,
@@ -396,7 +378,7 @@ const createNote = async (clientId, guestId, body = {}) => {
     const category = NOTE_CATEGORIES.includes(body.category) ? body.category : 'general';
     const visibility = NOTE_VISIBILITY.includes(body.visibility) ? body.visibility : 'internal';
 
-    const note = await EventGuestNote.create({
+    const note = await GuestNote.create({
         website_client_id: clientId,
         guest_id: guest.id,
         title,
@@ -413,7 +395,7 @@ const createNote = async (clientId, guestId, body = {}) => {
 const updateNote = async (clientId, guestId, noteId, body = {}) => {
     await own(clientId, guestId);
 
-    const note = await EventGuestNote.findOne({
+    const note = await GuestNote.findOne({
         where: { id: Number(noteId), website_client_id: clientId, guest_id: Number(guestId) },
     });
     if (!note) throw ApiError.notFound('Note not found.');
@@ -448,7 +430,7 @@ const updateNote = async (clientId, guestId, noteId, body = {}) => {
 
 const deleteNote = async (clientId, guestId, noteId) => {
     await own(clientId, guestId);
-    const note = await EventGuestNote.findOne({
+    const note = await GuestNote.findOne({
         where: { id: Number(noteId), website_client_id: clientId, guest_id: Number(guestId) },
     });
     if (!note) throw ApiError.notFound('Note not found.');
@@ -480,7 +462,7 @@ const addTag = async (clientId, guestId, body = {}) => {
       previously removed tag leaves a soft-deleted row behind; inserting a
       second one would give the guest the same label twice, both live.
     */
-    const existing = await EventGuestTag.findOne({
+    const existing = await GuestTag.findOne({
         where: { guest_id: guest.id, label },
         paranoid: false,
     });
@@ -490,7 +472,7 @@ const addTag = async (clientId, guestId, body = {}) => {
         return { id: existing.id };
     }
 
-    const tag = await EventGuestTag.create({
+    const tag = await GuestTag.create({
         website_client_id: clientId,
         guest_id: guest.id,
         label,
@@ -501,7 +483,7 @@ const addTag = async (clientId, guestId, body = {}) => {
 
 const removeTag = async (clientId, guestId, tagId) => {
     await own(clientId, guestId);
-    const tag = await EventGuestTag.findOne({
+    const tag = await GuestTag.findOne({
         where: { id: Number(tagId), website_client_id: clientId, guest_id: Number(guestId) },
     });
     if (!tag) throw ApiError.notFound('Tag not found.');
@@ -533,7 +515,7 @@ const createReminder = async (clientId, guestId, body = {}) => {
 
     let noteId = null;
     if (body.note_id) {
-        const note = await EventGuestNote.findOne({
+        const note = await GuestNote.findOne({
             where: { id: Number(body.note_id), website_client_id: clientId, guest_id: guest.id },
             attributes: ['id'],
         });
@@ -541,7 +523,7 @@ const createReminder = async (clientId, guestId, body = {}) => {
         noteId = note.id;
     }
 
-    const reminder = await EventGuestReminder.create({
+    const reminder = await GuestReminder.create({
         website_client_id: clientId,
         guest_id: guest.id,
         note_id: noteId,
@@ -554,7 +536,7 @@ const createReminder = async (clientId, guestId, body = {}) => {
 
 const updateReminder = async (clientId, guestId, reminderId, body = {}) => {
     await own(clientId, guestId);
-    const reminder = await EventGuestReminder.findOne({
+    const reminder = await GuestReminder.findOne({
         where: { id: Number(reminderId), website_client_id: clientId, guest_id: Number(guestId) },
     });
     if (!reminder) throw ApiError.notFound('Reminder not found.');
@@ -586,7 +568,7 @@ const updateReminder = async (clientId, guestId, reminderId, body = {}) => {
 
 const deleteReminder = async (clientId, guestId, reminderId) => {
     await own(clientId, guestId);
-    const reminder = await EventGuestReminder.findOne({
+    const reminder = await GuestReminder.findOne({
         where: { id: Number(reminderId), website_client_id: clientId, guest_id: Number(guestId) },
     });
     if (!reminder) throw ApiError.notFound('Reminder not found.');

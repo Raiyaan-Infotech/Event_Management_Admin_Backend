@@ -13693,3 +13693,61 @@ Jamal had built the mockup screen halfway (`participant_details_screen.dart`, Ed
 - **"⋯" menu** did nothing. Host-only now: *Edit participant* and *Remove from event* (confirm dialog → `DELETE /client/guests/:id` → back). Removing frees the place against Max RSVP (§578).
 
 Mockup followed without the floral decoration, as asked. `flutter analyze` on participants, repositories, network and auth: no issues. Not run on a device. The app repo has Jamal's own uncommitted work mixed in, so it is left uncommitted.
+
+### 581. Guests and participants are two tables — the phone book moved out of `event_guests`
+
+Jamal's model, settled: **guests are the phone book** — people the client knows, in groups, that an invitation is *shared* with (sharing writes nothing). **Participants are event-based** — whoever scans the event's QR, who may or may not be one of those guests. §570–§572 got there with one table and `event_id NULL` as the flag; three screens broke in a day because every query had to remember which half it wanted (§574, §577), and one person attending three events was four rows with four copies of their number and nothing linking them.
+
+**Why a table called `client_contacts` appeared, then `guests`.** It was my working name for the phone book while the two roles still shared `event_guests`; Jamal asked for it to be called `guests`, which matches what every screen already says. There is no table named contacts any more.
+
+**Schema (`apply-guests-split.js`, re-runnable, LOCAL applied, PRODUCTION NOT applied):**
+- `guests` — person fields only (no RSVP / party size / table), `source` manual|import, soft-delete, unique-ish by mobile.
+- `event_guests` — participants only. `event_id` is NOT NULL again; new `guest_id` links a participant to the guest they are (matched on the last 10 digits of the mobile). A stranger who scanned has none and is no less a participant. The table keeps its ids because `event_messages`, the RSVP response log, notifications and check-ins all point at them (§501).
+- `event_guest_notes/tags/reminders`: the old `guest_id` (→ event_guests) is renamed `participant_id` and KEPT; the new `guest_id` → `guests`. Nothing dropped, so no host note is lost. The script also converts my earlier `client_contacts`/`contact_id` local run in place, and on production creates `guests` directly (production has 50 phone-book rows, 2 participants, no notes/tags/reminders; the moved rows are backed up to `../_prod_backups` first).
+- `initial_setup.sql` regenerated; `guests.max_guests_per_event` = phone-book size, `max_rsvp_per_event` = participants per event (§578).
+
+**Backend.** New `Guest` model (+ associations `guest`, `participations`, `guestNotes` …). `guestFields.js` — ONE place for person-field validation (`normalisePerson`), attendance answers (`normaliseAttendance`) and plan limits (`planLimitFor`), so the two forms cannot drift (§504). `clientGuest.service` = phone book (mobile-keyed duplicate check, plan-limited, CSV in/out, groups, bulk delete/group; bulk RSVP status now refused — it is per event). New `clientParticipant.service` + `/client/participants` (list, stats, capacity, get, create, update, delete): host-only, Max RSVP checked at the door (§578), linked to the guest by mobile. Profile stitches a person by `guest_id`, not by email. QR join creates the participant and links the guest. Billing's "guests used" counts the phone book.
+
+**Endpoint map.** `/client/guests…` = phone book. `/client/participants…` = people at one event. `/client/rsvps…` = the participant's answer (already event rows). `/client/events/:id/participants` and `/family` = the directories a *participant* may read (no contact details).
+
+**Client portal (uncommitted).** Guests page: tabs All / Joined an event / Not joined / Imported; tiles Total / In a group / Ungrouped / Imported / Joined; no Status/Response columns, no bulk RSVP change; new "Events joined" column. Add Guest: no event, RSVP, party size, table, plus-one; phone required, email optional. Import: no event/RSVP columns. Event detail, push composer and Send Message now read `useParticipants`; the event page links to `/dashboard/rsvps?event=`. New `Participant` type, `useParticipants`, `useParticipantStats`. `tsc` clean.
+
+**Mobile app (uncommitted, mixed with Jamal's own work).** `ApiEndpoints.participants/participant(id)`; `forEvent`, `create`, `byId`, `update`, `remove` → `/client/participants`; new `phoneBook()`/`phoneBookProvider` and `createGuest()` → `/client/guests`. Guest List screen is the phone book (no status pills); Add Guest posts a guest; the shared form takes `showEventFields: false` for it. Phone required, email optional in the form. `flutter analyze`: no errors/warnings (10 pre-existing hints in gallery/upload screens).
+
+**Verified locally (rolled back / cleaned):** guests list/stats/create/duplicate-mobile/update; a participant created with a guest's mobile links to it; profile shows the joined event; tags and notes land on `guest_id` with `participant_id` NULL; the seed note survived the column flip; groups still count members and events; export; CSV preview skips the 50 existing; participant create/limit/duplicate/update/delete/capacity incl. another host's event refused.
+
+**Open / not done:** production migration (`node src/database/tools/apply-guests-split.js --prod --apply`) — the live backend and portal must not be deployed before it, and the app needs a rebuild. Nothing here is committed. The app's Add Participant / Add Family Member screens still use the person form for a participant but were not re-run on a device. The Share Invite screens still use a placeholder link and message (§580 note).
+
+### 582. Production migration applied — the guests split (§581) is live in the database
+
+`apply-guests-split.js --prod --apply`, run 2026-09-24 ~19:46 IST.
+
+- **Result:** `guests` created; the **50** phone-book rows (all client #27 Ismail, all from the CSV import, all with a mobile) moved out of `event_guests` into it; `event_guests` now holds the **2 participants** only, `event_id` is NOT NULL, `event_guests.guest_id` added (0 linked — none of the 2 participants share a mobile with a guest). Notes/tags/reminders had no rows, so nothing to re-point; their old `guest_id` is now `participant_id` and a new `guest_id` → `guests` exists. Schema audit: 0 missing tables, 0 missing columns. A re-run changes nothing.
+- **Backup:** `D:\Jamal\_prod_backups\prod-guests-split-1790259385328.json` (the 50 rows, outside the repo).
+- **Bug found by running it on production, fixed:** the script's FK lookup used `CONSTRAINT_TYPE = "FOREIGN KEY"` with double quotes. Aiven's MySQL reads double quotes as identifiers, so it failed with *Unknown column 'FOREIGN KEY'* right after creating the (empty) `guests` table. Local MySQL accepts it, which is why the local run passed. Now a template literal with single quotes; the script is re-runnable so it simply resumed. Note for any future migration script: never use double-quoted SQL string literals.
+- The first dry run also timed out connecting once (`ETIMEDOUT`) and succeeded on retry — a network blip, not the script.
+
+⚠ **Live is now out of step with its own database.** The DEPLOYED backend/portal still treat the phone book as `event_guests` rows with `event_id NULL`, so until the new code is deployed: Ismail's Guests page shows nothing, and Add Guest / CSV import on live fail. Nothing was lost — the rows are in `guests`. Deploy the backend, then the client portal, then rebuild the app. The code is NOT committed yet.
+
+### 583. `event_guests` renamed to `event_participants` (and the guest side renamed to match)
+
+Jamal asked for this at §582 ("why event_guest not changed into participant") and I had only done the split; he was right to call it out. Done now, on local AND production.
+
+**Tables** (`src/database/tools/apply-participants-rename.js`, re-runnable, RENAME TABLE/COLUMN so FKs travel with them, no data moved):
+
+| before | after | holds |
+|---|---|---|
+| `event_guests` | `event_participants` | people attending one event |
+| `event_guest_response_logs` | `event_participant_response_logs` | a participant's RSVP history |
+| `event_guest_groups` | `guest_groups` | groups organise GUESTS |
+| `event_guest_notes` / `_tags` / `_reminders` | `guest_notes` / `guest_tags` / `guest_reminders` | host notes about a GUEST |
+
+**Columns that pointed at a participant:** `event_messages.guest_id`, `event_participant_response_logs.guest_id`, `client_notifications.guest_id` → `participant_id`. Correct as they are and NOT renamed: `event_participants.guest_id` (the phone-book guest a participant is) and `guest_notes/tags/reminders.guest_id` (the guest a note is about). FK/index NAMES keep their old text (`fk_event_guests_client` …) — MySQL cannot rename a constraint in place and they are invisible to the app.
+
+**Models:** `EventGuest`→`EventParticipant`, `EventGuestGroup`→`GuestGroup`, `EventGuestNote/Tag/Reminder`→`GuestNote/Tag/Reminder`, `EventGuestResponseLog`→`EventParticipantResponseLog` (files `git mv`'d). Association alias on messages / response logs / notifications `guest`→`participant`. 35 files rewritten. The historical `apply-*` migration scripts keep the names that existed when they ran, on purpose.
+
+**The API did NOT change.** Routes stay `/client/guests`, `/client/participants`, `/client/rsvps`, and response keys the portal/app read (`guest_id`, `guest`, `guest_ids`) keep their names — only the database and model names moved. So no frontend change was needed except one app offline-cache key (`event_guests_<id>` → `event_register_<id>`).
+
+**Verified on local through the real services:** RSVP list/detail/update (a change wrote a response-log row via `participant_id`, and the log↔participant association resolves), notifications list (still returns `guest`), participant list/stats, guests list, guest profile (messages + history via `participant_id`), groups, analytics, QR resolve, event detail. `initial_setup.sql` regenerated for the 9 affected tables. Production: renamed, re-run is a no-op, schema audit 0 missing.
+
+⚠ Live code is still the OLD code against a doubly-changed database — deploy backend, then portal, then rebuild the app. Nothing committed.

@@ -1,5 +1,5 @@
 const {
-    Sequelize, EventGalleryItem, EventGalleryCategory, Event, EventGuest, WebsiteClient,
+    Sequelize, EventGalleryItem, EventGalleryCategory, Event, EventParticipant, WebsiteClient,
 } = require('../models');
 const { Op } = Sequelize;
 const ApiError = require('../utils/apiError');
@@ -71,7 +71,7 @@ const resolveEventForView = async (clientId, rawId) => {
     const isOwner = Number(event.website_client_id) === Number(clientId);
     if (isOwner) return { event, isOwner };
 
-    const membership = await EventGuest.findOne({
+    const membership = await EventParticipant.findOne({
         where: { event_id: event.id, participant_client_id: clientId },
         attributes: ['id'],
     });

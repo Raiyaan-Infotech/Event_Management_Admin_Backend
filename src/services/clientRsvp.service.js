@@ -1,9 +1,9 @@
 const {
     Sequelize,
     Event,
-    EventGuest,
-    EventGuestGroup,
-    EventGuestResponseLog,
+    EventParticipant,
+    GuestGroup,
+    EventParticipantResponseLog,
     EventMessage,
 } = require('../models');
 const { Op, fn, col, literal } = Sequelize;
@@ -17,7 +17,7 @@ const notifications = require('./clientNotification.service');
  * An RSVP is not a row. It is the response COLUMNS on a guest —
  * `rsvp_status`, `response_type`, `responded_at`, `party_size`,
  * `dietary_preference`, `notes`. This module is a different lens on
- * `event_guests`, not a different table.
+ * `event_participants`, not a different table.
  *
  * Three consequences that shape every function below:
  *
@@ -34,7 +34,7 @@ const notifications = require('./clientNotification.service');
  * 3. **There IS a response history now, and it is a different table.** A guest
  *    row still holds ONE current answer and changing it still overwrites —
  *    that has not changed and must not be read as having changed. What changed
- *    is that every change now APPENDS to `event_guest_response_logs` on its way
+ *    is that every change now APPENDS to `event_participant_response_logs` on its way
  *    through. So:
  *
  *      - "what did they say"  -> read the GUEST. Always.
@@ -221,7 +221,7 @@ function buildWhere(clientId, query = {}) {
 const getStats = async (clientId, query = {}) => {
     const where = buildWhere(clientId, { ...query, status: 'all' });
 
-    const rows = await EventGuest.findAll({
+    const rows = await EventParticipant.findAll({
         where,
         attributes: [
             'rsvp_status',
@@ -266,14 +266,14 @@ const list = async (clientId, query = {}) => {
     const page = Math.max(1, Number(query.page) || 1);
     const limit = Math.min(100, Math.max(1, Number(query.limit) || 10));
 
-    const { rows, count } = await EventGuest.findAndCountAll({
+    const { rows, count } = await EventParticipant.findAndCountAll({
         where: buildWhere(clientId, query),
         attributes: GUEST_ATTRS,
         include: INCLUDE,
         // Answered first and most recent at the top; unanswered rows fall to the
         // bottom rather than heading the list with an empty date column.
         order: [
-            [literal('`EventGuest`.`responded_at` IS NULL'), 'ASC'],
+            [literal('`EventParticipant`.`responded_at` IS NULL'), 'ASC'],
             ['responded_at', 'DESC'],
             ['id', 'DESC'],
         ],
@@ -294,7 +294,7 @@ const list = async (clientId, query = {}) => {
 async function own(clientId, id) {
     const numeric = Number(id);
     if (!Number.isInteger(numeric) || numeric <= 0) throw ApiError.notFound('RSVP not found.');
-    const row = await EventGuest.findOne({
+    const row = await EventParticipant.findOne({
         // A phone-book contact has no event, so it is not an RSVP (§577).
         where: { id: numeric, website_client_id: clientId, event_id: { [Op.ne]: null } },
         attributes: GUEST_ATTRS,
@@ -375,7 +375,7 @@ const getById = async (clientId, id) => {
     const guest = await own(clientId, id);
 
     const messages = await EventMessage.findAll({
-        where: { website_client_id: clientId, guest_id: guest.id },
+        where: { website_client_id: clientId, participant_id: guest.id },
         attributes: ['id', 'channel', 'kind', 'status', 'sent_at', 'delivered_at', 'opened_at', 'created_at'],
         order: [['created_at', 'ASC']],
         limit: 100,
@@ -387,7 +387,7 @@ const getById = async (clientId, id) => {
       nothing here can tell.
     */
     const linked = guest.email
-        ? await EventGuest.findAll({
+        ? await EventParticipant.findAll({
             where: {
                 website_client_id: clientId,
                 email: guest.email,
@@ -405,8 +405,8 @@ const getById = async (clientId, id) => {
       last few; an uncapped list would grow without bound on a guest whose
       answer keeps changing.
     */
-    const history = await EventGuestResponseLog.findAll({
-        where: { website_client_id: clientId, guest_id: guest.id },
+    const history = await EventParticipantResponseLog.findAll({
+        where: { website_client_id: clientId, participant_id: guest.id },
         include: [{ association: 'event', attributes: ['id', 'name', 'start_date'], required: false }],
         order: [['changed_at', 'DESC'], ['id', 'DESC']],
         limit: 50,
@@ -508,9 +508,9 @@ const logResponseChange = async (clientId, guest, before, data, opts = {}) => {
     const pick = (f) => (data[f] !== undefined ? data[f] : before[f]);
 
     try {
-        await EventGuestResponseLog.create({
+        await EventParticipantResponseLog.create({
             website_client_id: clientId,
-            guest_id: guest.id,
+            participant_id: guest.id,
             event_id: guest.event_id,
             /*
               NULL only when this guest has no history at all. 'none' would say
@@ -598,7 +598,7 @@ const update = async (clientId, id, body = {}) => {
         if (body.group_id === null || body.group_id === '') {
             data.group_id = null;
         } else {
-            const group = await EventGuestGroup.findOne({
+            const group = await GuestGroup.findOne({
                 where: { id: Number(body.group_id), website_client_id: clientId },
                 attributes: ['id'],
             });
@@ -641,7 +641,7 @@ const update = async (clientId, id, body = {}) => {
       the seed: a guest added after the migration has none, and their first
       answer is genuinely a first.
     */
-    const priorCount = await EventGuestResponseLog.count({ where: { guest_id: guest.id } });
+    const priorCount = await EventParticipantResponseLog.count({ where: { participant_id: guest.id } });
     await logResponseChange(clientId, guest, snapshot, data, { first: priorCount === 0 });
 
     // Fires on the TRANSITION only — see clientGuest.service. Editing a table
@@ -706,7 +706,7 @@ const resetResponse = async (clientId, id, reason = null) => {
       "they never replied" is a materially different sentence from "they
       accepted and the host cleared it".
     */
-    const priorCount = await EventGuestResponseLog.count({ where: { guest_id: guest.id } });
+    const priorCount = await EventParticipantResponseLog.count({ where: { participant_id: guest.id } });
     await logResponseChange(
         clientId, guest, snapshot,
         { response_type: 'none', notes: reason ? String(reason).slice(0, 500) : null },
@@ -729,7 +729,7 @@ const getGroup = async (clientId, groupId, query = {}) => {
     const numeric = Number(groupId);
     if (!Number.isInteger(numeric) || numeric <= 0) throw ApiError.notFound('Group not found.');
 
-    const group = await EventGuestGroup.findOne({
+    const group = await GuestGroup.findOne({
         where: { id: numeric, website_client_id: clientId },
     });
     if (!group) throw ApiError.notFound('Group not found.');
@@ -745,12 +745,12 @@ const getGroup = async (clientId, groupId, query = {}) => {
         });
     }
 
-    const members = await EventGuest.findAll({
+    const members = await EventParticipant.findAll({
         where,
         attributes: GUEST_ATTRS,
         include: INCLUDE,
         order: [
-            [literal('`EventGuest`.`responded_at` IS NULL'), 'ASC'],
+            [literal('`EventParticipant`.`responded_at` IS NULL'), 'ASC'],
             ['responded_at', 'DESC'],
             ['name', 'ASC'],
         ],
@@ -821,7 +821,7 @@ const moveToGroup = async (clientId, guestId, targetGroupId) => {
         return getById(clientId, guestId);
     }
 
-    const group = await EventGuestGroup.findOne({
+    const group = await GuestGroup.findOne({
         where: { id: Number(targetGroupId), website_client_id: clientId },
         attributes: ['id', 'name'],
     });
@@ -842,12 +842,12 @@ const moveToGroup = async (clientId, guestId, targetGroupId) => {
  * we will email you a link" describes three things that do not exist.
  */
 const exportRows = async (clientId, query = {}) => {
-    const rows = await EventGuest.findAll({
+    const rows = await EventParticipant.findAll({
         where: buildWhere(clientId, query),
         attributes: GUEST_ATTRS,
         include: INCLUDE,
         order: [
-            [literal('`EventGuest`.`responded_at` IS NULL'), 'ASC'],
+            [literal('`EventParticipant`.`responded_at` IS NULL'), 'ASC'],
             ['responded_at', 'DESC'],
         ],
         // A cap, stated rather than silent — a truncated export that looks

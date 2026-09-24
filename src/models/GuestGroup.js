@@ -12,7 +12,7 @@ const { DataTypes } = require('sequelize');
  * "Family" is shared across the whole account rather than recreated per event.
  */
 module.exports = (sequelize) => {
-    const EventGuestGroup = sequelize.define('EventGuestGroup', {
+    const GuestGroup = sequelize.define('GuestGroup', {
         id: { type: DataTypes.INTEGER.UNSIGNED, primaryKey: true, autoIncrement: true },
         website_client_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
         company_id: { type: DataTypes.INTEGER, allowNull: true },
@@ -35,7 +35,7 @@ module.exports = (sequelize) => {
          */
         is_default: { type: DataTypes.TINYINT, allowNull: false, defaultValue: 0 },
     }, {
-        tableName: 'event_guest_groups',
+        tableName: 'guest_groups',
         timestamps: true,
         paranoid: true,
         createdAt: 'created_at',
@@ -43,5 +43,5 @@ module.exports = (sequelize) => {
         deletedAt: 'deleted_at',
     });
 
-    return EventGuestGroup;
+    return GuestGroup;
 };

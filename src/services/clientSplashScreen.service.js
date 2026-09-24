@@ -1,4 +1,4 @@
-const { Sequelize, SplashScreen, Event, EventGuest } = require('../models');
+const { Sequelize, SplashScreen, Event, EventParticipant } = require('../models');
 const { Op } = Sequelize;
 const mediaService = require('./media.service');
 const ApiError = require('../utils/apiError');
@@ -240,7 +240,7 @@ const HOST_ONLY_FIELDS = ['website_client_id', 'company_id', 'name', 'deleted_at
  * the people invited, so an owner-only read answered null for exactly the
  * audience the feature exists for.
  *
- * Membership is `event_guests.participant_client_id`, set only by the QR join
+ * Membership is `event_participants.participant_client_id`, set only by the QR join
  * flow. NOT `website_client_id` on the guest row — that names the host, and
  * reading it here would let every guest read every splash of their own host.
  *
@@ -259,7 +259,7 @@ const getActiveSplashForEvent = async (clientId, rawEventId) => {
 
     const isOwner = Number(event.website_client_id) === Number(clientId);
     if (!isOwner) {
-        const membership = await EventGuest.findOne({
+        const membership = await EventParticipant.findOne({
             where: { event_id: event.id, participant_client_id: clientId },
             attributes: ['id'],
         });

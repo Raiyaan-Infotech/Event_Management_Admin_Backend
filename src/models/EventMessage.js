@@ -3,7 +3,7 @@ const { DataTypes } = require('sequelize');
 /**
  * One delivery attempt, down one channel, for one event.
  *
- * Separate from `EventGuest` because a guest can be messaged repeatedly — a
+ * Separate from `EventParticipant` because a guest can be messaged repeatedly — a
  * reminder, a re-send after a bounce — so delivery counts cannot be columns on
  * the guest row without either losing the history or double-counting the person.
  *
@@ -23,8 +23,8 @@ module.exports = (sequelize) => {
          * Messages list that nobody ever composed.
          */
         campaign_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
-        /** Nullable: a broadcast to a list never saved as guest rows still counts. */
-        guest_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+        /** The participant this went to. Nullable: a broadcast to a list never saved as rows still counts. */
+        participant_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
         website_client_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
 
         channel: { type: DataTypes.ENUM('whatsapp', 'email', 'sms'), allowNull: false },

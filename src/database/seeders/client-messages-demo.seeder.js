@@ -45,7 +45,7 @@ if (PROD) {
 
 const db = require('../../models');
 const {
-    sequelize, WebsiteClient, Event, EventGuest, EventGuestGroup,
+    sequelize, WebsiteClient, Event, EventParticipant, GuestGroup,
     EventMessage, EventMessageCampaign, ClientNotification,
 } = db;
 
@@ -144,7 +144,7 @@ async function clear(client) {
     });
     const campaignIds = campaigns.map((c) => c.id);
 
-    const guests = await EventGuest.findAll({
+    const guests = await EventParticipant.findAll({
         where: { website_client_id: client.id, notes: GUEST_MARK },
         attributes: ['id'],
         paranoid: false,
@@ -156,13 +156,13 @@ async function clear(client) {
         msgs += await EventMessage.destroy({ where: { campaign_id: campaignIds }, force: true });
     }
     if (guestIds.length) {
-        msgs += await EventMessage.destroy({ where: { guest_id: guestIds }, force: true });
+        msgs += await EventMessage.destroy({ where: { participant_id: guestIds }, force: true });
     }
     const camps = campaignIds.length
         ? await EventMessageCampaign.destroy({ where: { id: campaignIds }, force: true })
         : 0;
     const gone = guestIds.length
-        ? await EventGuest.destroy({ where: { id: guestIds }, force: true })
+        ? await EventParticipant.destroy({ where: { id: guestIds }, force: true })
         : 0;
 
     /*
@@ -176,7 +176,7 @@ async function clear(client) {
         { replacements: { id: client.id } },
     );
 
-    const groups = await EventGuestGroup.destroy({
+    const groups = await GuestGroup.destroy({
         where: {
             website_client_id: client.id,
             description: `${GUEST_MARK} group`,
@@ -223,7 +223,7 @@ async function seedFor(client) {
     // Groups, only the ones missing.
     const groupRows = [];
     for (const g of GROUPS) {
-        const [row] = await EventGuestGroup.findOrCreate({
+        const [row] = await GuestGroup.findOrCreate({
             where: { website_client_id: client.id, name: g.name },
             defaults: {
                 website_client_id: client.id,
@@ -276,7 +276,7 @@ async function seedFor(client) {
             notes: GUEST_MARK,
         });
     }
-    const created = await EventGuest.bulkCreate(guests);
+    const created = await EventParticipant.bulkCreate(guests);
     console.log(`  + ${created.length} guests`);
 
     // Campaigns and their deliveries.
@@ -308,7 +308,7 @@ async function seedFor(client) {
         await EventMessage.bulkCreate(reachable.map((g) => ({
             event_id: event.id,
             campaign_id: campaign.id,
-            guest_id: g.id,
+            participant_id: g.id,
             website_client_id: client.id,
             channel: c.channel,
             kind: c.kind === 'custom' ? 'update' : c.kind,
@@ -359,7 +359,7 @@ async function seedFor(client) {
             title: 'New RSVP received',
             body: `${g.name} ${yes ? 'accepted' : 'declined'} your invitation.`,
             event_id: event.id,
-            guest_id: g.id,
+            participant_id: g.id,
             link: `/dashboard/guests/${g.id}`,
             meta: { demo: true, response: yes ? 'yes' : 'no' },
             is_read: i > 3,
@@ -421,7 +421,7 @@ async function seedFor(client) {
         }
 
         // Idempotent: a second run without --clear would double everything.
-        const existing = await EventGuest.count({
+        const existing = await EventParticipant.count({
             where: { website_client_id: client.id, notes: GUEST_MARK },
         });
         if (existing > 0) {

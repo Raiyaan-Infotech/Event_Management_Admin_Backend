@@ -1,4 +1,4 @@
-const { Sequelize, sequelize, EventGuestGroup, EventGuest } = require('../models');
+const { Sequelize, sequelize, GuestGroup, EventParticipant, Guest } = require('../models');
 const { Op } = Sequelize;
 const ApiError = require('../utils/apiError');
 
@@ -36,29 +36,38 @@ const withCounts = async (clientId, groups) => {
     if (groups.length === 0) return [];
     const ids = groups.map((g) => g.id);
 
-    const rows = await EventGuest.findAll({
+    // Members = the phone-book guests in the group (§581).
+    const members = await Guest.findAll({
         where: { website_client_id: clientId, group_id: { [Op.in]: ids } },
-        attributes: [
-            'group_id',
-            [Sequelize.fn('COUNT', Sequelize.col('id')), 'members'],
-            // How many DISTINCT events this group appears in — the "Events"
-            // column. COUNT(DISTINCT) not COUNT, or a group with 400 guests at
-            // one wedding would report 400 events.
-            [Sequelize.fn('COUNT', Sequelize.fn('DISTINCT', Sequelize.col('event_id'))), 'events'],
-        ],
+        attributes: ['group_id', [Sequelize.fn('COUNT', Sequelize.col('id')), 'members']],
         group: ['group_id'],
         raw: true,
     });
 
-    const byGroup = new Map(rows.map((r) => [r.group_id, r]));
+    // Events = DISTINCT events a member of the group has joined — through their
+    // guest, or as a participant filed in the group directly (Add Family
+    // Member). COUNT(DISTINCT), or 400 people at one wedding read as 400 events.
+    const events = await sequelize.query(
+        `SELECT grp.group_id, COUNT(DISTINCT grp.event_id) AS events FROM (
+             SELECT g.group_id, g.event_id FROM event_participants g
+              WHERE g.website_client_id = :clientId AND g.deleted_at IS NULL AND g.group_id IN (:ids)
+             UNION
+             SELECT c.group_id, g.event_id FROM event_participants g
+               JOIN guests c ON c.id = g.guest_id AND c.deleted_at IS NULL
+              WHERE g.website_client_id = :clientId AND g.deleted_at IS NULL AND c.group_id IN (:ids)
+         ) grp GROUP BY grp.group_id`,
+        { replacements: { clientId, ids }, type: Sequelize.QueryTypes.SELECT },
+    );
+
+    const memberCount = new Map(members.map((r) => [Number(r.group_id), Number(r.members)]));
+    const eventCount = new Map(events.map((r) => [Number(r.group_id), Number(r.events)]));
 
     return groups.map((group) => {
         const plain = group.toJSON ? group.toJSON() : group;
-        const counts = byGroup.get(plain.id);
         return {
             ...plain,
-            members_count: Number(counts?.members ?? 0),
-            events_count: Number(counts?.events ?? 0),
+            members_count: memberCount.get(plain.id) ?? 0,
+            events_count: eventCount.get(plain.id) ?? 0,
         };
     });
 };
@@ -102,7 +111,7 @@ const normalise = (body, { partial = false } = {}) => {
  * resolve arbitrarily.
  */
 const clearOtherDefaults = async (clientId, keepId, transaction) => {
-    await EventGuestGroup.update(
+    await GuestGroup.update(
         { is_default: 0 },
         {
             where: {
@@ -130,7 +139,7 @@ const listGroups = async (clientId, query = {}) => {
         ];
     }
 
-    const { rows, count } = await EventGuestGroup.findAndCountAll({
+    const { rows, count } = await GuestGroup.findAndCountAll({
         where,
         order: [['is_default', 'DESC'], ['name', 'ASC']],
         limit,
@@ -150,7 +159,7 @@ const listGroups = async (clientId, query = {}) => {
 
 /** Every group, unpaginated — for the pickers on Add Guest and Send Message. */
 const listAllGroups = async (clientId) => {
-    const rows = await EventGuestGroup.findAll({
+    const rows = await GuestGroup.findAll({
         where: { website_client_id: clientId },
         order: [['is_default', 'DESC'], ['name', 'ASC']],
     });
@@ -158,7 +167,7 @@ const listAllGroups = async (clientId) => {
 };
 
 const getGroupById = async (clientId, groupId) => {
-    const group = await EventGuestGroup.findOne({
+    const group = await GuestGroup.findOne({
         where: { id: groupId, website_client_id: clientId },
     });
     if (!group) return null;
@@ -168,7 +177,7 @@ const getGroupById = async (clientId, groupId) => {
 
 /** The four tiles on Manage Groups. */
 const getGroupStats = async (clientId) => {
-    const groups = await EventGuestGroup.findAll({
+    const groups = await GuestGroup.findAll({
         where: { website_client_id: clientId },
         attributes: ['id', 'visibility'],
     });
@@ -188,7 +197,7 @@ const createGroup = async (clientId, companyId, body) => {
 
     // Case-insensitive, because "family" and "Family" are the same group to the
     // person typing them, and two of them makes the picker unusable.
-    const clash = await EventGuestGroup.findOne({
+    const clash = await GuestGroup.findOne({
         where: {
             website_client_id: clientId,
             name: { [Op.like]: data.name },
@@ -197,7 +206,7 @@ const createGroup = async (clientId, companyId, body) => {
     if (clash) throw ApiError.conflict(`You already have a group called "${clash.name}".`);
 
     return sequelize.transaction(async (transaction) => {
-        const group = await EventGuestGroup.create(
+        const group = await GuestGroup.create(
             { ...data, website_client_id: clientId, company_id: companyId ?? null },
             { transaction }
         );
@@ -207,7 +216,7 @@ const createGroup = async (clientId, companyId, body) => {
 };
 
 const updateGroup = async (clientId, groupId, body) => {
-    const group = await EventGuestGroup.findOne({
+    const group = await GuestGroup.findOne({
         where: { id: groupId, website_client_id: clientId },
     });
     if (!group) return null;
@@ -215,7 +224,7 @@ const updateGroup = async (clientId, groupId, body) => {
     const data = normalise(body, { partial: true });
 
     if (data.name) {
-        const clash = await EventGuestGroup.findOne({
+        const clash = await GuestGroup.findOne({
             where: {
                 website_client_id: clientId,
                 name: { [Op.like]: data.name },
@@ -241,19 +250,24 @@ const updateGroup = async (clientId, groupId, body) => {
  * instead of the deletion being silent.
  */
 const deleteGroup = async (clientId, groupId) => {
-    const group = await EventGuestGroup.findOne({
+    const group = await GuestGroup.findOne({
         where: { id: groupId, website_client_id: clientId },
     });
     if (!group) return null;
 
-    const members = await EventGuest.count({
+    const members = await Guest.count({
         where: { website_client_id: clientId, group_id: group.id },
     });
 
     await sequelize.transaction(async (transaction) => {
         // Explicit, not relying on the FK: these rows are soft-deleted, and
         // ON DELETE SET NULL only fires on a HARD delete.
-        await EventGuest.update(
+        // Guests AND participants filed in the group (§581).
+        await Guest.update(
+            { group_id: null },
+            { where: { website_client_id: clientId, group_id: group.id }, transaction }
+        );
+        await EventParticipant.update(
             { group_id: null },
             { where: { website_client_id: clientId, group_id: group.id }, transaction }
         );

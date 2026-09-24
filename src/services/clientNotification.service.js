@@ -98,7 +98,7 @@ async function notify(clientId, {
             title: String(title).slice(0, 200),
             body: body ? String(body).slice(0, 500) : null,
             event_id: eventId,
-            guest_id: guestId,
+            participant_id: guestId,
             link,
             meta,
         });
@@ -128,7 +128,7 @@ async function notifyMany(rows = []) {
                 title: String(r.title).slice(0, 200),
                 body: r.body ? String(r.body).slice(0, 500) : null,
                 event_id: r.eventId ?? null,
-                guest_id: r.guestId ?? null,
+                participant_id: r.guestId ?? null,
                 link: r.link ?? null,
                 meta: r.meta ?? null,
             }));
@@ -152,15 +152,16 @@ const shape = (row) => {
         title: j.title,
         body: j.body,
         event_id: j.event_id,
-        guest_id: j.guest_id,
+        // API key stays `guest_id` — the portal reads it; the column is participant_id.
+        guest_id: j.participant_id,
         link: j.link,
         meta: j.meta ?? null,
         is_read: Boolean(j.is_read),
         read_at: j.read_at,
         created_at: j.created_at,
         event: j.event ? { id: j.event.id, name: j.event.name } : null,
-        guest: j.guest
-            ? { id: j.guest.id, name: j.guest.name, email: j.guest.email, mobile: j.guest.mobile }
+        guest: j.participant
+            ? { id: j.participant.id, name: j.participant.name, email: j.participant.email, mobile: j.participant.mobile }
             : null,
     };
 };
@@ -192,7 +193,7 @@ const list = async (clientId, {
         include: [
             { association: 'event', attributes: ['id', 'name'], required: false },
             {
-                association: 'guest',
+                association: 'participant',
                 attributes: ['id', 'name', 'email', 'mobile'],
                 required: false,
                 // The guest table is paranoid; a notification about somebody

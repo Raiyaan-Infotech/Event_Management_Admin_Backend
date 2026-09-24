@@ -69,7 +69,7 @@ db.PushNotificationConfig = require('./PushNotificationConfig')(sequelize, Seque
 // Vendor
 db.Vendor = require('./Vendor')(sequelize, Sequelize);
 db.VendorClient = require('./VendorClient')(sequelize, Sequelize);
-db.VendorStaff      = require('./VendorStaff')(sequelize, Sequelize);
+db.VendorStaff = require('./VendorStaff')(sequelize, Sequelize);
 db.VendorDepartment = require('./VendorDepartment')(sequelize, Sequelize);
 
 // Website builder color palettes
@@ -153,12 +153,14 @@ db.SplashScreen = require('./SplashScreen')(sequelize, Sequelize);
 db.Event = require('./Event')(sequelize, Sequelize);
 db.EventGalleryCategory = require('./EventGalleryCategory')(sequelize, Sequelize);
 db.EventGalleryItem = require('./EventGalleryItem')(sequelize, Sequelize);
-db.EventGuest = require('./EventGuest')(sequelize, Sequelize);
-db.EventGuestGroup = require('./EventGuestGroup')(sequelize, Sequelize);
-db.EventGuestNote = require('./EventGuestNote')(sequelize, Sequelize);
-db.EventGuestTag = require('./EventGuestTag')(sequelize, Sequelize);
-db.EventGuestReminder = require('./EventGuestReminder')(sequelize, Sequelize);
-db.EventGuestResponseLog = require('./EventGuestResponseLog')(sequelize, Sequelize);
+db.EventParticipant = require('./EventParticipant')(sequelize, Sequelize);
+// The client's phone book (§581). Participants are EventParticipant.
+db.Guest = require('./Guest')(sequelize, Sequelize);
+db.GuestGroup = require('./GuestGroup')(sequelize, Sequelize);
+db.GuestNote = require('./GuestNote')(sequelize, Sequelize);
+db.GuestTag = require('./GuestTag')(sequelize, Sequelize);
+db.GuestReminder = require('./GuestReminder')(sequelize, Sequelize);
+db.EventParticipantResponseLog = require('./EventParticipantResponseLog')(sequelize, Sequelize);
 db.EventMessage = require('./EventMessage')(sequelize, Sequelize);
 db.EventMessageCampaign = require('./EventMessageCampaign')(sequelize, Sequelize);
 db.ClientNotification = require('./ClientNotification')(sequelize, Sequelize);
@@ -260,25 +262,25 @@ db.District.hasMany(db.City, { foreignKey: 'city_id', as: 'cities' });
 db.City.belongsTo(db.District, { foreignKey: 'city_id', as: 'district' });
 
 // User ↔ Location (required for getById includes)
-db.User.belongsTo(db.Country,  { foreignKey: 'country_id', as: 'country' });
-db.User.belongsTo(db.State,    { foreignKey: 'state_id',   as: 'state' });
-db.User.belongsTo(db.District, { foreignKey: 'city_id',    as: 'city' });
+db.User.belongsTo(db.Country, { foreignKey: 'country_id', as: 'country' });
+db.User.belongsTo(db.State, { foreignKey: 'state_id', as: 'state' });
+db.User.belongsTo(db.District, { foreignKey: 'city_id', as: 'city' });
 
 // Translation Relationships
 // Translation Relationships
-db.TranslationKey.hasMany(db.Translation, { 
-  foreignKey: 'translation_key_id', 
+db.TranslationKey.hasMany(db.Translation, {
+  foreignKey: 'translation_key_id',
   as: 'translations'   // ✅ lowercase alias
 });
-db.Translation.belongsTo(db.TranslationKey, { 
+db.Translation.belongsTo(db.TranslationKey, {
   foreignKey: 'translation_key_id',
   as: 'translation_key'  // ✅ for reverse include in service
 });
-db.Language.hasMany(db.Translation, { 
+db.Language.hasMany(db.Translation, {
   foreignKey: 'language_id',
   as: 'translations'   // ✅ lowercase alias
 });
-db.Translation.belongsTo(db.Language, { 
+db.Translation.belongsTo(db.Language, {
   foreignKey: 'language_id',
   as: 'language'       // ✅ for reverse include in service
 });
@@ -290,10 +292,10 @@ db.Faq.belongsTo(db.FaqCategory, { foreignKey: 'faq_category_id', as: 'category'
 // Vendor Location Relationships
 // city_id → districts.id (the "district" level)
 // pincode_id → cities.id (locality row which has pincode column)
-db.Vendor.belongsTo(db.Country,  { foreignKey: 'country_id',  as: 'country'  });
-db.Vendor.belongsTo(db.State,    { foreignKey: 'state_id',    as: 'state'    });
-db.Vendor.belongsTo(db.District, { foreignKey: 'city_id',     as: 'district' });
-db.Vendor.belongsTo(db.City,     { foreignKey: 'pincode_id',  as: 'locality' });
+db.Vendor.belongsTo(db.Country, { foreignKey: 'country_id', as: 'country' });
+db.Vendor.belongsTo(db.State, { foreignKey: 'state_id', as: 'state' });
+db.Vendor.belongsTo(db.District, { foreignKey: 'city_id', as: 'district' });
+db.Vendor.belongsTo(db.City, { foreignKey: 'pincode_id', as: 'locality' });
 
 // Vendor Client & Staff Relationships
 db.Vendor.hasMany(db.VendorClient, { foreignKey: 'vendor_id', as: 'clients' });
@@ -306,14 +308,14 @@ db.ClientRefreshToken.belongsTo(db.VendorClient, { foreignKey: 'client_id', as: 
 db.Vendor.hasMany(db.VendorSubscriber, { foreignKey: 'vendor_id', as: 'subscribers' });
 db.VendorSubscriber.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
 
-db.Vendor.hasMany(db.VendorStaff,      { foreignKey: 'vendor_id', as: 'staff' });
-db.VendorStaff.belongsTo(db.Vendor,    { foreignKey: 'vendor_id', as: 'vendor' });
+db.Vendor.hasMany(db.VendorStaff, { foreignKey: 'vendor_id', as: 'staff' });
+db.VendorStaff.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
 
-db.Vendor.hasMany(db.VendorDepartment,           { foreignKey: 'vendor_id', as: 'departments' });
-db.VendorDepartment.belongsTo(db.Vendor,         { foreignKey: 'vendor_id', as: 'vendor' });
+db.Vendor.hasMany(db.VendorDepartment, { foreignKey: 'vendor_id', as: 'departments' });
+db.VendorDepartment.belongsTo(db.Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
 
-db.VendorDepartment.hasMany(db.VendorStaff,      { foreignKey: 'department_id', as: 'staff' });
-db.VendorStaff.belongsTo(db.VendorDepartment,    { foreignKey: 'department_id', as: 'department' });
+db.VendorDepartment.hasMany(db.VendorStaff, { foreignKey: 'department_id', as: 'staff' });
+db.VendorStaff.belongsTo(db.VendorDepartment, { foreignKey: 'department_id', as: 'department' });
 
 // Staff RBAC
 db.VendorStaff.belongsTo(db.Role, { foreignKey: 'role_id', as: 'role' });
@@ -466,17 +468,17 @@ db.Event.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'cat
 // Guests and messages. Both CASCADE from the event at the DB level: a guest of
 // a deleted event is not a guest of anything, and a message about one has
 // nothing left to be about.
-db.Event.hasMany(db.EventGuest, { foreignKey: 'event_id', as: 'guests' });
-db.EventGuest.belongsTo(db.Event, { foreignKey: 'event_id', as: 'event' });
+db.Event.hasMany(db.EventParticipant, { foreignKey: 'event_id', as: 'guests' });
+db.EventParticipant.belongsTo(db.Event, { foreignKey: 'event_id', as: 'event' });
 db.Event.hasMany(db.EventMessage, { foreignKey: 'event_id', as: 'messages' });
 db.EventMessage.belongsTo(db.Event, { foreignKey: 'event_id', as: 'event' });
-db.EventGuest.hasMany(db.EventMessage, { foreignKey: 'guest_id', as: 'messages' });
-db.EventMessage.belongsTo(db.EventGuest, { foreignKey: 'guest_id', as: 'guest' });
+db.EventParticipant.hasMany(db.EventMessage, { foreignKey: 'participant_id', as: 'messages' });
+db.EventMessage.belongsTo(db.EventParticipant, { foreignKey: 'participant_id', as: 'participant' });
 
 // Groups. SET NULL at the DB level, unlike the CASCADEs above — deleting a
 // group must UNGROUP its guests, never delete them.
-db.EventGuestGroup.hasMany(db.EventGuest, { foreignKey: 'group_id', as: 'guests' });
-db.EventGuest.belongsTo(db.EventGuestGroup, { foreignKey: 'group_id', as: 'group' });
+db.GuestGroup.hasMany(db.EventParticipant, { foreignKey: 'group_id', as: 'guests' });
+db.EventParticipant.belongsTo(db.GuestGroup, { foreignKey: 'group_id', as: 'group' });
 
 // The guest profile: notes, tags, reminders and response history.
 //
@@ -486,22 +488,39 @@ db.EventGuest.belongsTo(db.EventGuestGroup, { foreignKey: 'group_id', as: 'group
 // the same reasoning as the message join above, and deliberately NOT the SET
 // NULL used for groups — a group outlives its members, a guest's own notes
 // cannot outlive them.
-db.EventGuest.hasMany(db.EventGuestNote, { foreignKey: 'guest_id', as: 'guestNotes' });
-db.EventGuestNote.belongsTo(db.EventGuest, { foreignKey: 'guest_id', as: 'guest' });
-db.EventGuest.hasMany(db.EventGuestTag, { foreignKey: 'guest_id', as: 'tags' });
-db.EventGuestTag.belongsTo(db.EventGuest, { foreignKey: 'guest_id', as: 'guest' });
-db.EventGuest.hasMany(db.EventGuestReminder, { foreignKey: 'guest_id', as: 'reminders' });
-db.EventGuestReminder.belongsTo(db.EventGuest, { foreignKey: 'guest_id', as: 'guest' });
+db.EventParticipant.hasMany(db.GuestNote, { foreignKey: 'participant_id', as: 'participantNotes' });
+db.GuestNote.belongsTo(db.EventParticipant, { foreignKey: 'participant_id', as: 'participant' });
+db.EventParticipant.hasMany(db.GuestTag, { foreignKey: 'participant_id', as: 'participantTags' });
+db.GuestTag.belongsTo(db.EventParticipant, { foreignKey: 'participant_id', as: 'participant' });
+db.EventParticipant.hasMany(db.GuestReminder, { foreignKey: 'participant_id', as: 'participantReminders' });
+db.GuestReminder.belongsTo(db.EventParticipant, { foreignKey: 'participant_id', as: 'participant' });
+
+// ── The phone book (§581) ─────────────────────────────────────────────────
+// A guest is a person the client knows; a participant (EventParticipant) is that
+// person — or a stranger — attending one event. guest_id links the two.
+db.WebsiteClient.hasMany(db.Guest, { foreignKey: 'website_client_id', as: 'guests' });
+db.Guest.belongsTo(db.WebsiteClient, { foreignKey: 'website_client_id', as: 'client' });
+db.GuestGroup.hasMany(db.Guest, { foreignKey: 'group_id', as: 'members' });
+db.Guest.belongsTo(db.GuestGroup, { foreignKey: 'group_id', as: 'group' });
+db.Guest.hasMany(db.EventParticipant, { foreignKey: 'guest_id', as: 'participations' });
+db.EventParticipant.belongsTo(db.Guest, { foreignKey: 'guest_id', as: 'guest' });
+// Host notes / tags / reminders are about the person.
+db.Guest.hasMany(db.GuestNote, { foreignKey: 'guest_id', as: 'guestNotes' });
+db.GuestNote.belongsTo(db.Guest, { foreignKey: 'guest_id', as: 'guest' });
+db.Guest.hasMany(db.GuestTag, { foreignKey: 'guest_id', as: 'guestTags' });
+db.GuestTag.belongsTo(db.Guest, { foreignKey: 'guest_id', as: 'guest' });
+db.Guest.hasMany(db.GuestReminder, { foreignKey: 'guest_id', as: 'guestReminders' });
+db.GuestReminder.belongsTo(db.Guest, { foreignKey: 'guest_id', as: 'guest' });
 
 // A reminder can outlive the note it came from — SET NULL in the schema. It
 // still names a real task on a real date, and deleting a note should not
 // silently cancel it.
-db.EventGuestNote.hasMany(db.EventGuestReminder, { foreignKey: 'note_id', as: 'reminders' });
-db.EventGuestReminder.belongsTo(db.EventGuestNote, { foreignKey: 'note_id', as: 'note' });
+db.GuestNote.hasMany(db.GuestReminder, { foreignKey: 'note_id', as: 'reminders' });
+db.GuestReminder.belongsTo(db.GuestNote, { foreignKey: 'note_id', as: 'note' });
 
-db.EventGuest.hasMany(db.EventGuestResponseLog, { foreignKey: 'guest_id', as: 'responseLogs' });
-db.EventGuestResponseLog.belongsTo(db.EventGuest, { foreignKey: 'guest_id', as: 'guest' });
-db.EventGuestResponseLog.belongsTo(db.Event, { foreignKey: 'event_id', as: 'event' });
+db.EventParticipant.hasMany(db.EventParticipantResponseLog, { foreignKey: 'participant_id', as: 'responseLogs' });
+db.EventParticipantResponseLog.belongsTo(db.EventParticipant, { foreignKey: 'participant_id', as: 'participant' });
+db.EventParticipantResponseLog.belongsTo(db.Event, { foreignKey: 'event_id', as: 'event' });
 
 // Campaigns: one composed message, many per-recipient delivery rows.
 db.EventMessageCampaign.hasMany(db.EventMessage, { foreignKey: 'campaign_id', as: 'deliveries' });
@@ -513,7 +532,7 @@ db.EventMessageCampaign.belongsTo(db.Event, { foreignKey: 'event_id', as: 'event
 // schema, so a row survives the event or guest it describes being deleted.
 db.ClientNotification.belongsTo(db.WebsiteClient, { foreignKey: 'website_client_id', as: 'client' });
 db.ClientNotification.belongsTo(db.Event, { foreignKey: 'event_id', as: 'event' });
-db.ClientNotification.belongsTo(db.EventGuest, { foreignKey: 'guest_id', as: 'guest' });
+db.ClientNotification.belongsTo(db.EventParticipant, { foreignKey: 'participant_id', as: 'participant' });
 
 // Subscription Plans
 db.SubscriptionPlan.belongsTo(db.PlanType, { foreignKey: 'plan_type_id', as: 'planType' });

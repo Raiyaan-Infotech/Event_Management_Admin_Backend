@@ -14,7 +14,7 @@ const { DataTypes } = require('sequelize');
  * without them a guest opens the form and finds an empty dropdown.
  *
  * ── THE GUEST'S ANSWER IS NOT THIS ROW ──────────────────────────────────────
- * `event_guests.relationship` stores the chosen LABEL as text, alongside an
+ * `event_participants.relationship` stores the chosen LABEL as text, alongside an
  * optional FK to this row. What a guest said is a historical fact: renaming or
  * deleting an option here must not retroactively change what somebody answered
  * six months ago.

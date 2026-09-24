@@ -14,10 +14,14 @@ const { DataTypes } = require('sequelize');
  * states a PERSON sets are stored; the badge is derived — see `derive()`.
  */
 module.exports = (sequelize) => {
-    const EventGuestReminder = sequelize.define('EventGuestReminder', {
+    const GuestReminder = sequelize.define('GuestReminder', {
         id: { type: DataTypes.INTEGER.UNSIGNED, primaryKey: true, autoIncrement: true },
         website_client_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
-        guest_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
+        // Host notes are about the PERSON, so they hang off the phone-book guest
+        // (§581). `participant_id` is the older link to an event_participants row, kept
+        // for rows written against a participant before the split.
+        participant_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+        guest_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
         /** Optional: Add Reminder sits on the guest, not inside a note. */
         note_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
 
@@ -32,7 +36,7 @@ module.exports = (sequelize) => {
         completed_at: { type: DataTypes.DATE, allowNull: true },
         created_by_client_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
     }, {
-        tableName: 'event_guest_reminders',
+        tableName: 'guest_reminders',
         timestamps: true,
         paranoid: true,
         createdAt: 'created_at',
@@ -47,11 +51,11 @@ module.exports = (sequelize) => {
      * cannot go stale between them. `done` and `dismissed` outrank the clock —
      * a finished task is not overdue.
      */
-    EventGuestReminder.derive = (row, now = new Date()) => {
+    GuestReminder.derive = (row, now = new Date()) => {
         if (row.status === 'done') return 'done';
         if (row.status === 'dismissed') return 'dismissed';
         return new Date(row.due_at) < now ? 'overdue' : 'upcoming';
     };
 
-    return EventGuestReminder;
+    return GuestReminder;
 };

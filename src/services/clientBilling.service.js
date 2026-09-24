@@ -8,7 +8,8 @@ const {
     ClientSubscription,
     ClientSubscriptionEvent,
     Event,
-    EventGuest,
+    EventParticipant,
+    Guest,
 } = require('../models');
 const { Op } = Sequelize;
 const ApiError = require('../utils/apiError');
@@ -451,7 +452,7 @@ const getUsage = async (clientId, subscription) => {
     // and what the guest module's own Total Guests tile reports. Scoped to the
     // client's events in this period, via a subquery rather than a per-event
     // loop — production is ~374ms a round trip.
-    const guestRow = await EventGuest.findOne({
+    const guestRow = await EventParticipant.findOne({
         attributes: [[Sequelize.fn('COALESCE', Sequelize.fn('SUM', Sequelize.col('party_size')), 0), 'heads']],
         where: {
             event_id: {
@@ -463,7 +464,8 @@ const getUsage = async (clientId, subscription) => {
         raw: true,
     });
 
-    const guestRows = await EventGuest.count({ where: { website_client_id: clientId } });
+    // Max Guests counts the PHONE BOOK (§569, §581) — the same rows Add Guest refuses at.
+    const guestRows = await Guest.count({ where: { website_client_id: clientId } });
     const limits = await resolvePlanLimits(subscription?.subscription_plan_id);
 
     return {

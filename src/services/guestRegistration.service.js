@@ -4,9 +4,9 @@ const {
     Sequelize,
     sequelize,
     Event,
-    EventGuest,
-    EventGuestGroup,
-    EventGuestResponseLog,
+    EventParticipant,
+    GuestGroup,
+    EventParticipantResponseLog,
     EventMenu,
     WebsiteClient,
     EventCategory,
@@ -25,7 +25,9 @@ const msg91Sms = require('./msg91Sms.service');
 // the host's would then disagree about the same event on the same day.
 const { deriveStatus, isFamilyCategory } = require('./clientEvent.service');
 const notificationTrigger = require('./notificationTrigger.service');
-const clientGuestService = require('./clientGuest.service');
+// Participants (event_participants) and the host's phone book (guests) — §581.
+const participantService = require('./clientParticipant.service');
+const guestService = require('./clientGuest.service');
 const rsvpService = require('./clientRsvp.service');
 const notifications = require('./clientNotification.service');
 const clientPortalService = require('./clientPortal.service');
@@ -77,7 +79,7 @@ const rsvpEnabledFor = async (event) => {
  * ── PARTICIPANTS ARE GUESTS ─────────────────────────────────────────────────
  * There is no separate membership table. The mobile app's own model says the
  * "Participants module (also reused by the Guests module)" — they are one
- * concept under two names, and `event_guests` already holds every field the
+ * concept under two names, and `event_participants` already holds every field the
  * form collects. `participant_client_id` is what makes a guest row also an
  * account.
  *
@@ -184,7 +186,7 @@ const resolveInvite = async (token) => {
         relationshipOptions.listForCategory(categoryId, DEFAULT_COMPANY_ID),
         foodOptions.listForCategory(categoryId, DEFAULT_COMPANY_ID),
         rsvpEnabledFor(event),
-        clientGuestService.getParticipantStatus(event.id),
+        participantService.getParticipantStatus(event.id),
     ]);
 
     return {
@@ -244,11 +246,11 @@ const requestOtp = async ({ token, mobile, dial_code, name } = {}) => {
       must never be refused for a place they already hold.
     */
     {
-        const status = await clientGuestService.getParticipantStatus(event.id);
+        const status = await participantService.getParticipantStatus(event.id);
         if (status.full) {
             const d = digitsOnly(mobile);
             const already = d.length >= 7
-                ? await EventGuest.count({ where: { event_id: event.id, mobile: { [Op.in]: [...new Set([d, d.slice(-10)])] } } })
+                ? await EventParticipant.count({ where: { event_id: event.id, mobile: { [Op.in]: [...new Set([d, d.slice(-10)])] } } })
                 : 0;
             if (!already) throw ApiError.badRequest('Sorry, this event is full and cannot take more participants. Please contact the host.');
         }
@@ -477,7 +479,7 @@ const join = async (client, payload = {}) => {
     const candidates = [...new Set([clientDigits, clientDigits.slice(-10)])].filter(Boolean);
 
     const existing = candidates.length
-        ? await EventGuest.findOne({
+        ? await EventParticipant.findOne({
             where: { event_id: event.id, mobile: { [Op.in]: candidates } },
         })
         : null;
@@ -549,20 +551,23 @@ const join = async (client, payload = {}) => {
         await existing.update(fields); // invite_source untouched — see the header
         guest = existing;
     } else {
-        // A scanner is a PARTICIPANT, not a phone-book contact (§572), so Max
+        // A scanner is a PARTICIPANT, not a phone-book guest (§572), so Max
         // Guests does not apply. Max RSVP per event = max participants (§578) —
         // checked with the event row locked so two people scanning at once
         // cannot both take the last place.
         guest = await sequelize.transaction(async (transaction) => {
-            await clientGuestService.assertParticipantCapacity(event.id, 1, {
+            await participantService.assertParticipantCapacity(event.id, 1, {
                 transaction,
                 message: 'Sorry, this event is full and cannot take more participants. Please contact the host.',
             });
-            return EventGuest.create({
+            return EventParticipant.create({
                 ...fields,
                 event_id: event.id,
                 // The HOST, denormalised from the event — not the participant.
                 website_client_id: event.website_client_id,
+                // The host's phone-book guest with this mobile, if any — so
+                // the host sees this person's events on their profile (§581).
+                guest_id: (await guestService.guestForMobile(event.website_client_id, clientDigits, transaction))?.id ?? null,
                 company_id: event.company_id ?? DEFAULT_COMPANY_ID,
                 dial_code: client.dial_code || '+91',
                 mobile: clientDigits.length > 10 ? clientDigits.slice(-10) : clientDigits,
@@ -603,7 +608,7 @@ const join = async (client, payload = {}) => {
  * host who also scanned somebody else's invitation legitimately appears in both.
  */
 const myEvents = async (clientId) => {
-    const rows = await EventGuest.findAll({
+    const rows = await EventParticipant.findAll({
         where: { participant_client_id: clientId },
         attributes: ['id', 'event_id', 'response_type', 'rsvp_status', 'party_size'],
         include: [{
@@ -653,7 +658,7 @@ const RESPONSE_WORD = { yes: 'accepted', no: 'declined', maybe: 'replied maybe t
  */
 async function recordGuestAnswer(guest, before, data, participantClientId) {
     try {
-        const prior = await EventGuestResponseLog.count({ where: { guest_id: guest.id } });
+        const prior = await EventParticipantResponseLog.count({ where: { participant_id: guest.id } });
         await rsvpService.logResponseChange(guest.website_client_id, guest, before, data, {
             first: prior === 0,
             source: 'guest',
@@ -711,7 +716,7 @@ const eventIdOf = (raw) => {
 const getMyRsvp = async (clientId, rawEventId) => {
     const eventId = eventIdOf(rawEventId);
 
-    const guest = await EventGuest.findOne({
+    const guest = await EventParticipant.findOne({
         where: { event_id: eventId, participant_client_id: clientId },
     });
     if (!guest) {
@@ -758,10 +763,10 @@ const familyDirectory = async (clientId, rawEventId) => {
 
     const [event, membership] = await Promise.all([
         Event.findOne({ where: { id: eventId }, attributes: ['id', 'website_client_id'] }),
-        EventGuest.findOne({
+        EventParticipant.findOne({
             where: { event_id: eventId, participant_client_id: clientId },
             attributes: ['id', 'relationship'],
-            include: [{ model: EventGuestGroup, as: 'group', attributes: ['name'], required: false }],
+            include: [{ model: GuestGroup, as: 'group', attributes: ['name'], required: false }],
         }),
     ]);
     if (!event) throw ApiError.notFound('Event not found.');
@@ -774,10 +779,10 @@ const familyDirectory = async (clientId, rawEventId) => {
         }
     }
 
-    const guests = await EventGuest.findAll({
+    const guests = await EventParticipant.findAll({
         where: { event_id: eventId },
         attributes: ['id', 'name', 'photo', 'relationship'],
-        include: [{ model: EventGuestGroup, as: 'group', attributes: ['name', 'color'], required: false }],
+        include: [{ model: GuestGroup, as: 'group', attributes: ['name', 'color'], required: false }],
         order: [['name', 'ASC']],
     });
 
@@ -820,7 +825,7 @@ const participantsDirectory = async (clientId, rawEventId) => {
 
     const [event, membership] = await Promise.all([
         Event.findOne({ where: { id: eventId }, attributes: ['id', 'website_client_id'] }),
-        EventGuest.findOne({
+        EventParticipant.findOne({
             where: { event_id: eventId, participant_client_id: clientId },
             attributes: ['id'],
         }),
@@ -832,10 +837,10 @@ const participantsDirectory = async (clientId, rawEventId) => {
         throw ApiError.notFound('You are not a guest of this event.');
     }
 
-    const guests = await EventGuest.findAll({
+    const guests = await EventParticipant.findAll({
         where: { event_id: eventId, participant_client_id: { [Op.ne]: null } },
         attributes: ['id', 'name', 'photo', 'relationship', 'rsvp_status'],
-        include: [{ model: EventGuestGroup, as: 'group', attributes: ['name', 'color'], required: false }],
+        include: [{ model: GuestGroup, as: 'group', attributes: ['name', 'color'], required: false }],
         order: [['name', 'ASC']],
     });
 
@@ -853,7 +858,7 @@ const participantsDirectory = async (clientId, rawEventId) => {
 /**
  * Submit the RSVP — ONCE per event.
  *
- * Writes the same `event_guests` columns the portal's RSVPs, Guests and
+ * Writes the same `event_participants` columns the portal's RSVPs, Guests and
  * analytics read, so the host sees it the moment their screen refetches; there
  * is no separate RSVP table to sync.
  *
@@ -868,7 +873,7 @@ const participantsDirectory = async (clientId, rawEventId) => {
 const submitMyRsvp = async (clientId, rawEventId, body = {}) => {
     const eventId = eventIdOf(rawEventId);
 
-    const guest = await EventGuest.findOne({
+    const guest = await EventParticipant.findOne({
         where: { event_id: eventId, participant_client_id: clientId },
     });
     if (!guest) {
@@ -916,7 +921,7 @@ const submitMyRsvp = async (clientId, rawEventId, body = {}) => {
         data.notes = body.notes ? String(body.notes).slice(0, 500) : null;
     }
 
-    const [affected] = await EventGuest.update(data, {
+    const [affected] = await EventParticipant.update(data, {
         where: { id: guest.id, response_type: 'none' },
     });
     if (!affected) {

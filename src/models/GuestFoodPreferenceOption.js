@@ -10,7 +10,7 @@ const { DataTypes } = require('sequelize');
  *
  * Same shape and the same reasoning as [GuestRelationshipOption] — including
  * the nullable `event_category_id` fallback list, and the rule that
- * `event_guests.dietary_preference` keeps the chosen LABEL as text so a later
+ * `event_participants.dietary_preference` keeps the chosen LABEL as text so a later
  * rename here cannot rewrite what a guest already answered.
  *
  * Kept as its own model rather than one table with a `kind` column: these two

@@ -31,7 +31,7 @@ const ApiError = require('../utils/apiError');
  *
  *   Team Member Activity  — there are no team members (§323 refused the same
  *                           row on the pricing matrix)
- *   Guest Check-in        — `event_guests` has no check-in column; nothing
+ *   Guest Check-in        — `event_participants` has no check-in column; nothing
  *                           records one
  *   New Message / Reply   — messaging is paused (§222) and unbuilt
  *   Surveys & Feedback    — no survey feature exists anywhere
