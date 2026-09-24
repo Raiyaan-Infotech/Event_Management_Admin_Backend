@@ -521,9 +521,11 @@ const assertRsvpCapacity = async (eventId, changes, { transaction, message } = {
     if (adding <= (Number(yesChanged) || 0)) return; // not raising the total
     if (used + adding > max) {
         const left = Math.max(0, max - used);
+        const people = (n) => `${n} ${n === 1 ? 'attendee' : 'attendees'}`;
         throw ApiError.badRequest(
-            message ?? `This event's RSVP limit is ${max} ${max === 1 ? 'person' : 'people'} and ${used} already said yes, `
-                + `so only ${left} more can attend. Please upgrade your plan to allow more.`
+            message ?? (left === 0
+                ? `This event has reached its RSVP limit of ${people(max)}. Please upgrade your plan to accept more RSVPs.`
+                : `This event can accept only ${people(left)} more (limit ${max}). Please reduce the party size or upgrade your plan.`)
         );
     }
 };

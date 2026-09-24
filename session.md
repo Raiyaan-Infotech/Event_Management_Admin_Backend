@@ -13463,6 +13463,18 @@ Checked live (read-only). Client #26 (Jamal), event #27 "Jamal & Ayesha — Nika
 
 Fix: `guestLimitFor` reads the entitlement pointer (`website_clients`) first, then the subscription row, then the event's plan, and SKIPS any plan that no longer exists instead of treating it as unlimited. Verified against live data read-only: client 26 → limit 5, event 27 full, 7th guest refused.
 
-Not explained: the pre-§563 server read the event's plan (12 → 5) and should have refused #6 at 18:57 IST on 09-23. Either that deploy was not live on Render at the time, or something else — unverified.
+Explained later (DB clock vs local clock compared): guest #6 was created ~00:27 IST 09-24 — AFTER §563 went live (00:01) and BEFORE this fix was pushed (00:32). So the 6th guest was let in by §563's subscription-first read of deleted plan 8. Jamal then deleted #6 (00:34).
 
 Open: `client_subscriptions` #3 still points at deleted plan 8, so Billing shows the wrong plan for client #26. Needs a one-row production fix (→ 12). Clients #27/#28 already hold more guests than their plan allows (15/10, 16/15) — seeded before limits; the gate now blocks new ones, existing rows kept.
+
+### 567. Session close: where the guest/RSVP limit fix actually stands
+
+Backend (`Event_Management_Admin_Backend`): §563–566 all **pushed to `origin/main`** as of 2026-09-24 00:32 IST (commits `1469914`, `ecaa41b`, `6999518`, `1595146`). Render redeploys on push — not confirmed live from here; Jamal to check the Render dashboard.
+
+Client portal (`event_client_single`): §564's files are **still uncommitted, local-only** — `guest-limit-gate.tsx` (new), `guest-form.tsx`, `guests/add/page.tsx`, `guests/import/page.tsx`, `hooks/use-guests.ts`. Until this is committed and deployed, the live Add Guest form still reads the old Billing-based limit and does not show "Guest limit reached."
+
+**Still open, waiting on Jamal:**
+1. Commit + push the client portal changes above.
+2. Repair production: `client_subscriptions` id 3 (client #26) still points at deleted plan 8 — one-row update to plan 12. Not done; asked, not yet confirmed.
+3. Client #26's leftover 6th guest (id 364) was deleted by Jamal directly; no other cleanup needed for that account.
+4. Clients #27/#28 sit over their new plan's limit from data seeded before limits existed (15/10, 16/15) — left as is, new guests blocked, nothing retroactively removed.
