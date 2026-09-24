@@ -13679,3 +13679,17 @@ Jamal: after scanning the QR, check whether RSVP/participants are full and say s
 - `registration_screen.dart` — step title and Review section "Guest Details" → "Participant Details"; `_guestDetails` → `_participantDetails`.
 
 Three layers now refuse a new person on a full event: this dialog (before the form), `requestOtp` (before an account/OTP exists), `join` (locked transaction). `flutter analyze` on the three files: no issues. Not run on a device. `rsvp_screen.dart` still says "Guest Details" on its own step — asked, not changed.
+
+### 580. Participant Details screen — the broken endpoint, fake note, and who sees what
+
+Jamal had built the mockup screen halfway (`participant_details_screen.dart`, Edit via `add_participant_screen.dart`) and said an endpoint was wrongly mapped.
+
+**The broken mapping:** `GuestRepository.update()` called `ApiEndpoints.guest(id)`, which did not exist — a compile error (`undefined_method`), so the app could not build and Edit → Save could never run. Added `ApiEndpoints.guest(id) => '/client/guests/$id'` (GET/PUT/DELETE, host-scoped on the server) and removed the duplicated doc line above `guests`.
+
+**Other problems found and fixed:**
+- **Stale data.** The screen showed only the row the list handed over, so after an RSVP change or an Edit it kept the old values until reopened. The host now loads it fresh via `GuestRepository.byId` / `participantDetailProvider(id)` (`GET /client/guests/:id`), drawing the handed-over row instantly and swapping in the fresh one. An RSVP tap shows immediately through a status override that clears once the server agrees.
+- **Fake note.** An empty Notes card fell back to the mockup's *"Arriving with family. Looking forward to the celebration!"*, which read as something the participant wrote. The card is now drawn only when there is a note.
+- **Privacy.** Jamal had removed the `isOwner` guard on the participants list tap, so any participant can open another's details. A non-owner's rows come from the participants directory (name, photo, relationship, status, group only) and the host-scoped GET 404s for them — so the Mobile/Email/Added On row, the Mobile/Email/City rows, the notes, and WhatsApp/Call/Message are now **host-only**; a non-owner sees name, status, relationship and Share Invite. The header subtitle no longer falls back to the phone number for a non-owner.
+- **"⋯" menu** did nothing. Host-only now: *Edit participant* and *Remove from event* (confirm dialog → `DELETE /client/guests/:id` → back). Removing frees the place against Max RSVP (§578).
+
+Mockup followed without the floral decoration, as asked. `flutter analyze` on participants, repositories, network and auth: no issues. Not run on a device. The app repo has Jamal's own uncommitted work mixed in, so it is left uncommitted.
