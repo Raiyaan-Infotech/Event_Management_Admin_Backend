@@ -13668,3 +13668,14 @@ Jamal (screenshot): Basic plan with Max RSVP 1, yet the RSVP list for Ismail's W
 **Verified locally with Max RSVP 1:** empty event → `participants_full` false; participant 1 joins; next scan → `participants_full` true; a new mobile asking for OTP refused with the message above; the API join refused ("reached its limit of 1 participant"); participant 1 answered Yes ×2, then changed to Maybe — both saved; participant 1 re-scanning let through; removing them freed the place. The OTP step created a throwaway local account (#114) — removed.
 
 ⚠ Ismail's event on production already holds 2 participants against a limit of 1 — joined under the old rule. They are kept; new people are refused until one is removed. The app should show a "this event is full" screen on `participants_full` — not built (Flutter repo).
+
+### 579. App: a full event is refused right after the scan, before the form
+
+Jamal: after scanning the QR, check whether RSVP/participants are full and say so — don't let a new person fill in the form. Also: the post-scan form said "Guest Details"; a scanner is a participant.
+
+**Mobile app (`Event_Invite_Mobile_App`, uncommitted):**
+- `invite_repository.dart` — `InviteDetails.participantsFull`, read from the `participants_full` flag §578 added to `resolveInvite`. Defaults to false on an older backend (the server still refuses the join).
+- `scan_qr_screen.dart` — after the returning-participant branch (someone already on the event goes straight in, as before) and BEFORE `/register` is pushed: if full, an `AppConfirmDialog` "This event is full — {event} has reached its limit of participants, so new people cannot join right now. Please contact the host." Signed-out users also get "Already joined this event? Sign in as an existing participant." with a **Sign in** button → `/login-mobile`, because the app cannot tell an anonymous re-scanner from a stranger. The scan latch stays set while the dialog is up — re-arming it first would let the live camera re-read the same QR behind the dialog.
+- `registration_screen.dart` — step title and Review section "Guest Details" → "Participant Details"; `_guestDetails` → `_participantDetails`.
+
+Three layers now refuse a new person on a full event: this dialog (before the form), `requestOtp` (before an account/OTP exists), `join` (locked transaction). `flutter analyze` on the three files: no issues. Not run on a device. `rsvp_screen.dart` still says "Guest Details" on its own step — asked, not changed.
