@@ -13640,3 +13640,13 @@ Jamal pasted 50 rows of *"No event given, and no event was chosen for this impor
 **Verified locally (plan limit raised then restored, rows deleted):** preview 50 valid / 0 errors / 0 skipped; import 50 imported, 4 groups created, **10 rows stored with email NULL**; manual add with no email saved; with no mobile refused; a second guest on the same mobile refused as a duplicate; an invalid email still refused when one is given.
 
 ⚠ Existing rows may have no mobile (the column was never required), so the duplicate check treats them all as one NULL bucket. Nothing was backfilled; production guests are empty anyway (§573).
+
+### 577. The RSVP screen listed the phone book
+
+Jamal: "RSVP in client portal — why does it show the 50-guest list?"
+
+**Cause:** `clientRsvp.buildWhere` filtered only on `website_client_id`, so it returned every `event_guests` row the client has. After the 50-row import (§575/§576) those phone-book contacts — `event_id` NULL — all appeared on the RSVP screen as "No response". Under §572 an RSVP belongs to an EVENT; a contact has been invited to nothing and cannot have answered.
+
+**Fix:** `buildWhere` now starts from `event_id IS NOT NULL`. It is shared by the list, the tiles and the export, so all three drop contacts together. `own()` (the single-RSVP lookup behind view/edit/reset) applies the same rule, so a contact's id cannot be opened as an RSVP either.
+
+**Verified locally:** importing the 50 contacts left the RSVP total at 121 before and after; tiles `total_invitations` 121 (same rows); opening a contact's id as an RSVP → "RSVP not found." Imported rows removed afterwards.

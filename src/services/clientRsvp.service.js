@@ -164,7 +164,13 @@ const shape = (row) => {
  * disagree about which rows they are describing.
  */
 function buildWhere(clientId, query = {}) {
-    const where = { website_client_id: clientId };
+    /*
+      An RSVP belongs to an EVENT (§577). A row with no event is a phone-book
+      contact (§572) — it has not been invited to anything and cannot have
+      answered, so it has no place on this screen. Without this the RSVP list
+      showed the whole imported guest list as "no response".
+    */
+    const where = { website_client_id: clientId, event_id: { [Op.ne]: null } };
 
     if (query.event_id && query.event_id !== 'all') where.event_id = Number(query.event_id);
     if (query.group_id && query.group_id !== 'all') where.group_id = Number(query.group_id);
@@ -290,7 +296,8 @@ async function own(clientId, id) {
     const numeric = Number(id);
     if (!Number.isInteger(numeric) || numeric <= 0) throw ApiError.notFound('RSVP not found.');
     const row = await EventGuest.findOne({
-        where: { id: numeric, website_client_id: clientId },
+        // A phone-book contact has no event, so it is not an RSVP (§577).
+        where: { id: numeric, website_client_id: clientId, event_id: { [Op.ne]: null } },
         attributes: GUEST_ATTRS,
         include: INCLUDE,
     });
