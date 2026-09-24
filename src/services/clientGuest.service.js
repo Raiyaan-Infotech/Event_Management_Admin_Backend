@@ -341,6 +341,18 @@ const listGuests = async (clientId, query = {}) => {
 
     const where = { website_client_id: clientId };
 
+    /*
+      Default = the PHONE BOOK (see PHONE_BOOK above). Without this the Guests
+      screen listed participants too, so a stranger who scanned the QR appeared
+      among the client's own contacts.
+
+      `scope=participants` (with or without an event) asks for the other half;
+      `scope=all` keeps the old behaviour for anything that genuinely wants both.
+    */
+    const scope = String(query.scope || (eventId ? 'participants' : 'guests')).toLowerCase();
+    if (scope === 'guests') where.event_id = null;
+    else if (scope === 'participants') where.event_id = { [Op.ne]: null };
+
     if (tab === 'imported') where.invite_source = 'import';
     else if (tab === 'not_responded') where.rsvp_status = { [Op.in]: ['not_responded', 'invited'] };
     else if (RSVP_STATUSES.includes(tab)) where.rsvp_status = tab;
@@ -382,7 +394,13 @@ const listGuests = async (clientId, query = {}) => {
 const getGuestStats = async (clientId, query = {}) => {
     const where = { website_client_id: clientId };
     const eventId = Number(query.event_id) || null;
+    // Same split as listGuests (§572): the tiles must count the same rows the
+    // list below them shows, or the Guests screen reports participants it is
+    // not displaying.
+    const scope = String(query.scope || (eventId ? 'participants' : 'guests')).toLowerCase();
     if (eventId) where.event_id = eventId;
+    else if (scope === 'guests') where.event_id = null;
+    else if (scope === 'participants') where.event_id = { [Op.ne]: null };
 
     const guests = await EventGuest.findAll({
         where,
@@ -430,7 +448,7 @@ const getGuestById = async (clientId, guestId) => {
 };
 
 /**
- * The guest cap for an event, read from the HOST's CURRENT plan.
+ * One plan limit for a host, read from the HOST's CURRENT plan.
  *
  * It used to read the plan the EVENT was created under, so an event made on a
  * bigger plan kept that plan's cap after the client moved to Free (§558).
@@ -443,7 +461,7 @@ const getGuestById = async (clientId, guestId) => {
  * event both said plan 12 (Free, 5). A plan that no longer exists is skipped,
  * never treated as unlimited.
  */
-const guestLimitFor = async (event, transaction) => {
+const planLimitFor = async (event, key, transaction) => {
     const [host, sub] = await Promise.all([
         WebsiteClient.findByPk(event.website_client_id, { attributes: ['id', 'subscription_plan_id'], transaction }),
         ClientSubscription.findOne({
@@ -454,12 +472,19 @@ const guestLimitFor = async (event, transaction) => {
         }),
     ]);
 
+    if (!subscriptionPlanService.LIMIT_KEYS.includes(key)) return null;
+
     const candidates = [host?.subscription_plan_id, sub?.subscription_plan_id, event.subscription_plan_id]
         .map(Number).filter(Boolean);
     for (const planId of candidates) {
         // Paranoid model: a soft-deleted plan comes back null and is skipped.
-        const plan = await SubscriptionPlan.findByPk(planId, { attributes: ['id', 'max_guests_per_event'], transaction });
-        if (plan) return subscriptionPlanService.getPlanLimit(plan.id, 'max_guests_per_event');
+        const plan = await SubscriptionPlan.findByPk(planId, { attributes: ['id', key], transaction });
+        if (!plan) continue;
+        // Read from THIS row, not a second lookup: re-querying outside the
+        // transaction returned the committed value and ignored a limit changed
+        // in the same transaction.
+        const n = Number(plan[key]);
+        return Number.isInteger(n) && n > 0 ? n : null;
     }
     return null;
 };
@@ -468,8 +493,30 @@ const guestLimitFor = async (event, transaction) => {
  * Guests currently on the HOST's account. Soft-deleted rows are excluded by the
  * paranoid model, so removing a guest gives the place back (§569).
  */
+const guestLimitFor = (event, transaction) => planLimitFor(event, 'max_guests_per_event', transaction);
+
+/**
+ * ── GUESTS vs PARTICIPANTS ───────────────────────────────────────────────────
+ * One table, two roles, told apart by `event_id` (§572):
+ *
+ *   event_id NULL  GUEST        a contact in the client's phone book. Belongs
+ *                               to the account, never to an event.
+ *   event_id SET   PARTICIPANT  somebody attending that event — they scanned
+ *                               its QR. May or may not also be in the phone
+ *                               book; a stranger who scanned is neither less
+ *                               nor more valid.
+ *
+ * An invitation is SHARED (a QR, a WhatsApp message) — it writes nothing, so a
+ * guest is never linked to an event by being invited. Only scanning does that.
+ *
+ * `max_guests_per_event` counts the phone book; `max_rsvp_per_event` counts
+ * participants of one event. Two questions, two numbers.
+ */
+const PHONE_BOOK = { event_id: null };
+
+/** Phone-book contacts on the account. Participants are NOT counted here. */
 const countHostGuests = (hostId, transaction) =>
-    EventGuest.count({ where: { website_client_id: hostId }, transaction });
+    EventGuest.count({ where: { website_client_id: hostId, ...PHONE_BOOK }, transaction });
 
 /**
  * Refuse when adding `adding` guests would take the ACCOUNT past its plan's
@@ -502,9 +549,13 @@ const assertGuestCapacity = async (hostId, adding = 1, { transaction, message } 
 };
 
 /**
- * RSVP cap: the PEOPLE answering Yes on an event (sum of `party_size`) may not
- * exceed the same per-event number as the guest limit. Without it, 5 guest rows
- * on Free could each bring up to 50 people.
+ * RSVP cap: the PEOPLE attending one event (sum of `party_size` where the
+ * answer is yes) may not exceed the plan's `max_rsvp_per_event`.
+ *
+ * Its OWN plan field, not the guest limit (§571). A guest is a phone-book
+ * contact on the account; an RSVP is one person attending one event, and
+ * somebody who scanned the QR on the day was never a contact at all. The two
+ * numbers answer different questions, so they are set separately.
  *
  * `changes` = [{ guestId|null, heads }] — the guests this save will leave on
  * Yes, with their new party size (null guestId = a new row). Their current Yes
@@ -523,7 +574,7 @@ const assertRsvpCapacity = async (eventId, changes, { transaction, message } = {
         transaction,
     });
     if (!event) return;
-    const max = await guestLimitFor(event, transaction);
+    const max = await planLimitFor(event, 'max_rsvp_per_event', transaction);
     if (max === null) return;
 
     const ids = list.map((c) => c.guestId).filter(Boolean);
@@ -545,7 +596,7 @@ const assertRsvpCapacity = async (eventId, changes, { transaction, message } = {
         throw ApiError.badRequest(
             message ?? (left === 0
                 ? `This event has reached its RSVP limit of ${people(max)}. Please upgrade your plan to accept more RSVPs.`
-                : `This event can accept only ${people(left)} more (limit ${max}). Please reduce the party size or upgrade your plan.`)
+                : `This event's RSVP limit is ${people(max)} and ${used} already said yes, so only ${left} more can be accepted. Please reduce the party size or upgrade your plan.`)
         );
     }
 };
@@ -567,6 +618,7 @@ const getGuestCapacity = async (clientId) => {
     const limit = await guestLimitFor({ website_client_id: clientId, subscription_plan_id: null });
     const used = await countHostGuests(clientId);
 
+    // Participants per event — information for the screens, not a limit.
     const counts = events.length
         ? await EventGuest.findAll({
             where: { event_id: { [Op.in]: events.map((e) => e.id) } },
@@ -853,3 +905,4 @@ module.exports = {
     getGuestCapacity,
     assertRsvpCapacity,
 };
+

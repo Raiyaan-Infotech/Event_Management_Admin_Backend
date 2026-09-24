@@ -130,7 +130,7 @@ const ENDING_STATUSES = new Set(['cancelled', 'cancelling']);
  * plan sets it; absent = unlimited. Storage comes back as `storage_limit` +
  * `storage_unit` ('MB' / 'GB'), exactly as the admin entered it.
  */
-const PLAN_COUNT_KEYS = ['max_events', 'max_guests_per_event', 'max_photos', 'max_videos'];
+const PLAN_COUNT_KEYS = ['max_events', 'max_guests_per_event', 'max_rsvp_per_event', 'max_photos', 'max_videos'];
 
 const resolvePlanLimits = async (planId) => {
     if (!planId) return {};
@@ -500,10 +500,10 @@ const getUsage = async (clientId, subscription) => {
             available: false,
             reason: 'Storage usage is not measured yet.',
         },
-        // RSVPs are capped by the same number, counted per event in PEOPLE
-        // saying Yes (clientGuest.assertRsvpCapacity).
+        // Its own plan field (§571): attendance for one event, counted in
+        // people saying yes — a QR scanner never in the guest list included.
         rsvps: {
-            limit: limits.max_guests_per_event ?? null,
+            limit: limits.max_rsvp_per_event ?? null,
         },
     };
 };

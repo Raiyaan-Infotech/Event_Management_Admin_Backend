@@ -13532,3 +13532,68 @@ Jamal: "guest form remove that event input, and the backend integration". Phase 
 **Verified locally (temp guest, removed after):** created with no event → `event_id` null; form options with no event → 7 relationships / 7 foods; assigned to event 22 → 22; cleared → null; capacity unchanged.
 
 **Still NOT done:** there is no UI to attach a guest to an event, so new guests stay general — invitations, RSVP and the app all key on `event_id`. That is the "invited to event" link (phase 3), still unbuilt and undecided. Existing guests keep their `event_id`, so nothing that works today stops working.
+
+### 571. Guests are a phone book; RSVP gets its own plan limit
+
+Jamal, settling the model: *"guest like phone book — which user I have to send event invitation, that's it. And maybe without guest, on the day anyone scans the QR and participates, then responds as RSVP — that is what counts."*
+
+So the two numbers answer different questions and stop sharing a column:
+- **Max Guests** — contacts on the ACCOUNT (§569/§570). No event.
+- **Max RSVP (Per Event)** — people attending ONE event, counted in `party_size` where the answer is yes, **including a QR scanner who was never in the guest list**.
+
+This also closes §570's open question: `event_guests.event_id` must NOT be dropped. NULL = a phone-book contact; set = somebody attending that event (invitee or QR participant). Both shapes are needed, which is exactly what the nullable column gives.
+
+**Schema.** `subscription_plans.max_rsvp_per_event` (INT UNSIGNED NULL). `src/database/tools/apply-plan-rsvp-limit.js` is re-runnable and seeds existing plans from `max_guests_per_event`, so behaviour is unchanged on the day it is applied. **LOCAL applied (9 plans seeded). PRODUCTION NOT applied.** `initial_setup.sql` updated, and `max_guests_per_event`'s comment no longer claims it caps RSVPs.
+
+**Backend.** `guestLimitFor` generalised to `planLimitFor(event, key, transaction)`; `assertRsvpCapacity` reads `max_rsvp_per_event`. `LIMIT_FIELDS` / `clientPortal` / `clientBilling` `PLAN_COUNT_KEYS` carry the new key; Billing's `rsvps.limit` reads it.
+
+⚠ **Bug found and fixed while testing:** `planLimitFor` looked the plan up a second time through `subscriptionPlanService.getPlanLimit`, which runs its own query WITHOUT the transaction — so a limit changed in the same transaction was ignored and the old committed value was enforced. It now reads the row it already fetched. (The first test run silently passed because of this.)
+
+**Admin.** Step 4 gains "Max RSVP (Per Event)"; plan detail shows it; the Review card picks it up from `LIMIT_FIELDS`. "Max Guests" helper reworded to "Contacts in the guest list, in total."
+
+**Max Gallery Storage layout.** The amount and its unit sat on two rows in the 3-column grid — `flex-wrap` plus a fixed `w-24` input. Now `flex-nowrap` with `min-w-0 flex-1` on the input and a `w-[96px]` select, so the pair stays on one row inside the narrow cell.
+
+**Verified locally (rolled back, no rows changed):** with RSVP 8 / guests 500 on one plan — a 9th attendee refused while a new GUEST was still allowed (the two limits are independent); on an event with no answers, 8 allowed and 9 refused. Messages reworded: *"This event has reached its RSVP limit of 8 attendees…"* and *"…8 attendees and 0 already said yes, so only 8 more can be accepted."* Admin `tsc` clean (only pre-existing stale `.next` errors).
+
+**Open:** production needs BOTH migrations (`apply-guest-event-optional.js` already applied; `apply-plan-rsvp-limit.js` not). Nothing is committed or deployed. The portal still has no screen to invite a phone-book contact to an event.
+
+### 572. The hierarchy, settled — and why no migration is needed after all
+
+Jamal spelled out the flow, and it removes the whole §570/§571 "separate RSVP table" question:
+
+```
+GUEST        client adds contacts, organises them in GROUPS ("people they know")
+                 ↓                    account-wide · never attached to an event
+EVENT        client creates it, gets its QR
+                 ↓
+INVITATION   the QR / event details are SHARED to those contacts (WhatsApp, later)
+                 ↓                    a share writes NOTHING to the database
+PARTICIPANT  whoever scans that QR joins the event — maybe a guest, maybe a stranger
+                 ↓
+RSVP         what each participant answers
+```
+
+**The consequence: a guest is never linked to an event.** Inviting is a share, not a row. Only scanning creates the link. So there is no `event_guest_invites` table to build, no 14-service rewrite, and `event_guests.event_id` stays exactly as §570 left it:
+
+| `event_id` | role |
+|---|---|
+| NULL | GUEST — a phone-book contact |
+| set | PARTICIPANT — attending that event |
+
+`max_guests_per_event` counts the phone book; `max_rsvp_per_event` counts one event's participants (§571). Two questions, two numbers, and a QR scanner never eats a phone-book slot.
+
+**The gap this exposed:** `listGuests` and `getGuestStats` returned EVERY row for the client, so the Guests screen mixed contacts with participants — a stranger who scanned the QR appeared among the client's own contacts. Both now default to the phone book (`event_id IS NULL`), take `scope=participants` (implied when `event_id` is given) for the other half, and `scope=all` for anything wanting both. The controller passes `req.query` through, so no controller change. `countHostGuests` counts the phone book only, so Max Guests usage matches what the screen lists.
+
+**Verified locally (temp contact, removed after):** created with no event → phone book 1 / participants 121 / all 122; tiles agree with the list; Max Guests usage read 1 of 250, not 122.
+
+⚠ **Production data does not fit the new split.** All 51 live guest rows carry an `event_id` (they were created the old way), so under this rule every one of them is a PARTICIPANT and all four clients show an empty phone book. Nothing is lost and nothing is deleted — but Jamal must decide whether those rows should be re-classified as contacts (clear `event_id`), left as participants, or removed. Not touched.
+
+**Open:** portal still needs a Participants view to see the other half, `apply-plan-rsvp-limit.js` is not applied to production, and nothing in §569–572 is committed or deployed.
+
+### 573. Production guests deleted, on request
+
+Jamal: "DLT ALL GUEST NOW". All 67 `event_guests` rows on production removed (the 51 live ones plus 16 already soft-deleted), so every client starts from an empty phone book under §572's split.
+
+Backed up first — `prod-guests-purge-1790234456545.json` in the repo root: 67 guests, 51 event_messages, 2 response logs, 14 notifications carrying a guest_id.
+
+Cascades checked BEFORE deleting, not discovered after: `event_messages`, `event_guest_response_logs`, `event_guest_notes`, `event_guest_reminders`, `event_guest_tags` are ON DELETE CASCADE; `client_notifications.guest_id` is SET NULL. After: guests 0, messages 0, response logs 0, no notification still pointing at a guest. Events, clients and plans untouched.

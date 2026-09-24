@@ -56,7 +56,7 @@ const PLAN_ATTRS = [
     // The limits travel with the plan the wizard already asks for, so a screen
     // that needs to say "you have used 5 of 1" does not depend on the billing
     // endpoint answering as well.
-    'max_events', 'max_guests_per_event', 'max_photos', 'max_videos',
+    'max_events', 'max_guests_per_event', 'max_rsvp_per_event', 'max_photos', 'max_videos',
     'storage_limit', 'storage_unit',
 ];
 

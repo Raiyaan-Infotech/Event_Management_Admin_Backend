@@ -27,7 +27,7 @@ const WRITABLE_FIELDS = [
     'currency_code', 'price', 'trial_days',
     'is_visible', 'is_active', 'sort_order',
     'plan_badge_id',
-    'max_events', 'max_guests_per_event', 'max_photos', 'max_videos',
+    'max_events', 'max_guests_per_event', 'max_rsvp_per_event', 'max_photos', 'max_videos',
     'storage_limit', 'storage_unit',
 ];
 
@@ -50,6 +50,7 @@ const WRITABLE_FIELDS = [
 const LIMIT_FIELDS = [
     { key: 'max_events', label: 'Max Events' },
     { key: 'max_guests_per_event', label: 'Max Guests' },
+    { key: 'max_rsvp_per_event', label: 'Max RSVP per Event' },
     { key: 'max_photos', label: 'Max Images' },
     { key: 'max_videos', label: 'Max Videos' },
 ];
@@ -600,6 +601,7 @@ module.exports = {
     REASONS,
     getPlanLimit,
     LIMIT_FIELDS,
+    LIMIT_KEYS,
     // Alias used by approval.service.js executeApprovedAction
     remove: deleteById,
 };

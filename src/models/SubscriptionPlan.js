@@ -44,6 +44,10 @@ module.exports = (sequelize) => {
         // subscriptionPlan.service.js for which of these are enforced.
         max_events: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
         max_guests_per_event: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+        // Attendance for ONE event, counted in people saying yes — including a
+        // QR scanner who was never in the guest list (§571). Separate from
+        // max_guests, which counts phone-book contacts on the account.
+        max_rsvp_per_event: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
         max_photos: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
         max_videos: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
         // A pair: 1–100 + MB / GB, both NULL = unlimited.
