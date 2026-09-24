@@ -13751,3 +13751,23 @@ Jamal asked for this at §582 ("why event_guest not changed into participant") a
 **Verified on local through the real services:** RSVP list/detail/update (a change wrote a response-log row via `participant_id`, and the log↔participant association resolves), notifications list (still returns `guest`), participant list/stats, guests list, guest profile (messages + history via `participant_id`), groups, analytics, QR resolve, event detail. `initial_setup.sql` regenerated for the 9 affected tables. Production: renamed, re-run is a no-op, schema audit 0 missing.
 
 ⚠ Live code is still the OLD code against a doubly-changed database — deploy backend, then portal, then rebuild the app. Nothing committed.
+
+### 584. QR join verified end to end; the guest-vs-participant audit found broken profile links
+
+Jamal: "did you wire the participant form correctly — a new participant scans the QR and that payload is saved in participants?" and "many places use participant — check guest places use guest".
+
+**QR join — verified, correct.** Ran the real flow on local (`OTP_ACCEPT_ANY` in the test process only): `resolveInvite` → `requestOtp` → `verifyOtp` → `join`. Every key the app sends (`name, gender, relationship, relationship_option_id, email, guest_count, food_preference, food_preference_option_id, special_request, response_type, message`) matches what `join` reads, and the saved `event_participants` row had them all in the right columns: `party_size` 3 for `guest_count` 2 (the scanner plus two), `dietary_preference`, `special_requirements`, `notes`, `invite_source 'qr'`, `response_type yes / rsvp_status accepted`. The scanner's mobile matched a phone-book guest, so `guest_id` was set; the `guests` table was NOT written to. All test rows removed afterwards.
+
+A foreign-key warning on the welcome notification during the first run was my test deleting the participant before that fire-and-forget write finished; re-run with a 4s pause, the notifications (`rsvp_accepted`, `welcome_invitation`) saved against `participant_id` correctly. Not a bug.
+
+**Portal hook audit — correct.** Guests pages (list, form, import, groups, profile, limit gate) use the guest hooks → `/client/guests`. Event detail, push composer and Send Message use `useParticipants` → `/client/participants`. RSVP pages use `/client/rsvps` (participants). Profile page's "Guests Added" tile reads the phone-book count.
+
+**⚠ BUG FOUND, NOT FIXED YET — RSVP screens link participants to GUEST pages.** Before §581 guests and participants shared one table, so one id worked for both. Now guest #66 and participant #66 are different people, so these links open the wrong person or a 404:
+- `rsvps/page.tsx` lines 499, 565 — "View profile" → `/dashboard/guests/${r.id}/profile`
+- `rsvps/[id]/rsvp-detail.tsx:104` — same
+- `rsvps/[id]/edit/rsvp-edit.tsx:239` — → `/dashboard/guests/${g.id}`
+- `rsvps/groups/[id]/group-detail.tsx` 254, 310, 603, 695 — same pattern
+
+Planned fix: the RSVP API returns the participant's own phone-book link (`event_participants.guest_id`) — it does not today; `shape()` in `clientRsvp.service` sends `guest.id = participant id` — and the portal links to `/dashboard/guests/<that guest_id>/profile`, showing no profile link for a stranger who has no phone-book entry. Name it so it cannot be confused with `guest_id` in the group-detail activity feed, which already means the PARTICIPANT id.
+
+The app still needs the same link audit. Nothing from §581–§584 is committed; production DB is already migrated (§582, §583), so live needs the new backend + portal deployed.
