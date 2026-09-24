@@ -606,6 +606,15 @@ const getEventForViewer = async (clientId, eventId, opts = {}) => {
 const HOST_ONLY_MENU_SLUGS = new Set(['guests']);
 
 /**
+ * Portal sections that are never an Explore tile in the app. The plan still
+ * grants them: Messages is a portal sidebar section with no app screen, and
+ * Splash Screens is not a menu at all. The event's own splash plays when the
+ * event opens (`/splash-screens/for-event`). As tiles they opened "coming soon"
+ * for the host, and a PARTICIPANT was shown the host's tools.
+ */
+const NOT_APP_TILE_SLUGS = new Set(['messages', 'splash-screens']);
+
+/**
  * The app's own three Family sub-tabs (Family / Relative / Close Friend),
  * mirrored EXACTLY from `EventParticipant.familyCategory` in
  * `lib/data/repositories/guest_repository.dart` — same keyword lists, same
@@ -712,6 +721,7 @@ const presentOne = async (event, { platform = 'website', isOwner = true, viewerI
         // inside each is still the query's (sort_order, id).
         if (isAppFeature(row.slug) || isPortalSection(row.slug)) {
             if (!wantsApp) continue;
+            if (NOT_APP_TILE_SLUGS.has(row.slug)) continue;
             if (isAppFeature(row.slug) && switchedOff.has(Number(row.id))) continue;
             if (!isOwner) {
                 // See HOST_ONLY_MENU_SLUGS: this opens the host's guest
