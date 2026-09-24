@@ -1405,7 +1405,7 @@ CREATE TABLE IF NOT EXISTS `event_gallery_items` (
 -- Table structure for `event_guests`
 CREATE TABLE IF NOT EXISTS `event_guests` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
-  `event_id` int unsigned NOT NULL,
+  `event_id` int unsigned DEFAULT NULL COMMENT 'NULL = a general guest on the client list, not tied to an event',
   `website_client_id` int unsigned NOT NULL,
   `company_id` int DEFAULT NULL,
   `group_id` int unsigned DEFAULT NULL,

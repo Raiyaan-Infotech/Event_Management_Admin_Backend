@@ -463,6 +463,7 @@ const getUsage = async (clientId, subscription) => {
         raw: true,
     });
 
+    const guestRows = await EventGuest.count({ where: { website_client_id: clientId } });
     const limits = await resolvePlanLimits(subscription?.subscription_plan_id);
 
     return {
@@ -474,11 +475,14 @@ const getUsage = async (clientId, subscription) => {
             available: true,
         },
         guests: {
-            used: Number(guestRow?.heads || 0),
-            // max_guests_per_event is a PER-EVENT ceiling, so it is not a
-            // denominator for a total. Reported separately rather than misused.
-            limit: null,
-            per_event_limit: limits.max_guests_per_event ?? null,
+            // The plan's guest limit is ONE TOTAL for the account (§569), counted in
+            // guests on the list — the same rows the Add Guest save counts — so
+            // the tile and the refusal cannot disagree. `heads` is the party-size
+            // total, kept for anything that wants attendance rather than list size.
+            used: guestRows,
+            heads: Number(guestRow?.heads || 0),
+            limit: limits.max_guests_per_event ?? null,
+            per_event_limit: null,
             available: true,
         },
         messages: {
@@ -496,8 +500,8 @@ const getUsage = async (clientId, subscription) => {
             available: false,
             reason: 'Storage usage is not measured yet.',
         },
-        // One answer per guest, so RSVPs are capped by the guest limit — a
-        // PER-EVENT figure, like guests.per_event_limit.
+        // RSVPs are capped by the same number, counted per event in PEOPLE
+        // saying Yes (clientGuest.assertRsvpCapacity).
         rsvps: {
             limit: limits.max_guests_per_event ?? null,
         },

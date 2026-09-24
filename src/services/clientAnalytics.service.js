@@ -146,6 +146,7 @@ const getAnalytics = async (clientId, query = {}) => {
         if (inPeriod(guest.responded_at, periodStart)) respondedThis += 1;
         else if (inPeriod(guest.responded_at, previousStart)) respondedPrev += 1;
 
+        if (!guest.event_id) continue; // general guests have no event to report against
         const bucket = perEvent.get(guest.event_id) || { guests: 0, invited: 0, attending: 0, responded: 0 };
         bucket.guests += heads;
         if (guest.invited_at || guest.rsvp_status !== 'not_responded') bucket.invited += 1;

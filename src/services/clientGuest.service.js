@@ -148,18 +148,24 @@ const normalise = async (clientId, body, { partial = false, existing = null } = 
     const has = (f) => Object.prototype.hasOwnProperty.call(picked, f);
     const required = (f) => !partial || has(f);
 
-    // ── Event: must be one of the client's own ─────────────────────────────
-    if (required('event_id')) {
-        const eventId = Number(picked.event_id);
-        if (!eventId) throw ApiError.badRequest('Please select an event.');
-        const event = await Event.findOne({
-            where: { id: eventId, website_client_id: clientId },
-            attributes: ['id'],
-        });
-        // Scoped lookup, not a plain findByPk — otherwise a guest could be
-        // filed against another client's event by id.
-        if (!event) throw ApiError.badRequest('That event is not on your account.');
-        data.event_id = eventId;
+    // ── Event: optional (§570) — a guest is a person on the client's general
+    // list. When one IS named it must be the client's own.
+    if (has('event_id')) {
+        const raw = picked.event_id;
+        if (raw === '' || raw === null || raw === undefined) {
+            data.event_id = null;
+        } else {
+            const eventId = Number(raw);
+            if (!eventId) throw ApiError.badRequest('Please select a valid event.');
+            const event = await Event.findOne({
+                where: { id: eventId, website_client_id: clientId },
+                attributes: ['id'],
+            });
+            // Scoped lookup, not a plain findByPk — otherwise a guest could be
+            // filed against another client's event by id.
+            if (!event) throw ApiError.badRequest('That event is not on your account.');
+            data.event_id = eventId;
+        }
     }
 
     // ── Group: optional, must be the client's own ──────────────────────────
@@ -459,25 +465,38 @@ const guestLimitFor = async (event, transaction) => {
 };
 
 /**
- * Refuse when adding `adding` guest rows would take the event past its cap.
- * Counts ROWS, not heads (§558). Pass a transaction to lock the event row:
- * without it two quick saves both read "4 of 5" and both insert.
+ * Guests currently on the HOST's account. Soft-deleted rows are excluded by the
+ * paranoid model, so removing a guest gives the place back (§569).
  */
-const assertGuestCapacity = async (eventId, adding = 1, { transaction, message } = {}) => {
-    const event = await Event.findByPk(eventId, {
-        attributes: ['id', 'website_client_id', 'subscription_plan_id'],
-        transaction,
-        lock: transaction ? transaction.LOCK.UPDATE : undefined,
-    });
-    if (!event) return;
+const countHostGuests = (hostId, transaction) =>
+    EventGuest.count({ where: { website_client_id: hostId }, transaction });
 
-    const maxGuests = await guestLimitFor(event, transaction);
+/**
+ * Refuse when adding `adding` guests would take the ACCOUNT past its plan's
+ * guest limit. The limit is one total across every event, not a number per
+ * event (§569) — a guest is a person on the client's list, not a row that
+ * belongs to one event. Counts ROWS, not heads (§558).
+ *
+ * `eventId` only says whose account this is. Pass a transaction to lock the
+ * host row: without it two quick saves both read "9 of 10" and both insert.
+ */
+const assertGuestCapacity = async (hostId, adding = 1, { transaction, message } = {}) => {
+    if (transaction) {
+        await WebsiteClient.findByPk(hostId, {
+            attributes: ['id'], transaction, lock: transaction.LOCK.UPDATE,
+        });
+    }
+
+    const maxGuests = await guestLimitFor({ website_client_id: hostId, subscription_plan_id: null }, transaction);
     if (maxGuests === null) return;
 
-    const guestCount = await EventGuest.count({ where: { event_id: eventId }, transaction });
-    if (guestCount + adding > maxGuests) {
+    const used = await countHostGuests(hostId, transaction);
+    if (used + adding > maxGuests) {
+        const left = Math.max(0, maxGuests - used);
         throw ApiError.badRequest(
-            message ?? `This event has reached its guest limit of ${maxGuests}. Please upgrade your plan to add more guests.`
+            message ?? (left === 0
+                ? `Your plan allows ${maxGuests} guest${maxGuests === 1 ? '' : 's'} in total and you have reached that limit. Please upgrade your plan to add more guests.`
+                : `Your plan allows ${maxGuests} guests in total and you can add only ${left} more. Please add fewer guests or upgrade your plan.`)
         );
     }
 };
@@ -495,6 +514,7 @@ const assertGuestCapacity = async (eventId, adding = 1, { transaction, message }
  * Only 'yes' counts: 'maybe' is not a booking.
  */
 const assertRsvpCapacity = async (eventId, changes, { transaction, message } = {}) => {
+    if (!eventId) return; // a general guest has no event to cap
     const list = (changes || []).filter((c) => c && Number(c.heads) > 0);
     if (!list.length) return;
 
@@ -531,9 +551,11 @@ const assertRsvpCapacity = async (eventId, changes, { transaction, message } = {
 };
 
 /**
- * Guest capacity per event, for the Add Guest gate — the guest twin of
- * `events_used` on /client/event-options. Uses guestLimitFor, so the portal
- * blocks at exactly the number createGuest refuses at. Counts ROWS.
+ * Guest capacity for the Add Guest gate — the guest twin of `events_used` on
+ * /client/event-options. One TOTAL for the account (§569), counted exactly as
+ * assertGuestCapacity counts it, so the portal blocks at the number the save
+ * would be refused at. `events` is per-event information only; it no longer
+ * decides anything.
  */
 const getGuestCapacity = async (clientId) => {
     const events = await Event.findAll({
@@ -541,25 +563,26 @@ const getGuestCapacity = async (clientId) => {
         attributes: ['id', 'name', 'website_client_id', 'subscription_plan_id'],
         order: [['start_date', 'ASC']],
     });
-    if (events.length === 0) return { limit: null, events: [] };
 
-    // Every event of one host shares the host's current plan, so one lookup.
-    const limit = await guestLimitFor(events[0]);
+    const limit = await guestLimitFor({ website_client_id: clientId, subscription_plan_id: null });
+    const used = await countHostGuests(clientId);
 
-    const counts = await EventGuest.findAll({
-        where: { event_id: { [Op.in]: events.map((e) => e.id) } },
-        attributes: ['event_id', [Sequelize.fn('COUNT', Sequelize.col('id')), 'used']],
-        group: ['event_id'],
-        raw: true,
-    });
+    const counts = events.length
+        ? await EventGuest.findAll({
+            where: { event_id: { [Op.in]: events.map((e) => e.id) } },
+            attributes: ['event_id', [Sequelize.fn('COUNT', Sequelize.col('id')), 'used']],
+            group: ['event_id'],
+            raw: true,
+        })
+        : [];
     const usedBy = new Map(counts.map((c) => [Number(c.event_id), Number(c.used)]));
 
     return {
         limit,
-        events: events.map((e) => {
-            const used = usedBy.get(e.id) || 0;
-            return { event_id: e.id, name: e.name, used, full: limit !== null && used >= limit };
-        }),
+        used,
+        full: limit !== null && used >= limit,
+        remaining: limit === null ? null : Math.max(0, limit - used),
+        events: events.map((e) => ({ event_id: e.id, name: e.name, used: usedBy.get(e.id) || 0 })),
     };
 };
 
@@ -572,12 +595,14 @@ const getGuestCapacity = async (clientId) => {
 const createGuest = async (clientId, companyId, body) => {
     const data = await normalise(clientId, body, { partial: false });
 
+    // Same email twice on the same event — or twice on the general list — is a
+    // duplicate. The same person on two different events is normal.
     const clash = await EventGuest.findOne({
-        where: { website_client_id: clientId, event_id: data.event_id, email: data.email },
+        where: { website_client_id: clientId, event_id: data.event_id ?? null, email: data.email },
         attributes: ['id', 'name'],
     });
     if (clash) {
-        throw ApiError.conflict(`${clash.name} is already on the guest list for this event.`);
+        throw ApiError.conflict(`${clash.name} is already on your guest list${data.event_id ? ' for this event' : ''}.`);
     }
 
     // Fall back to the default group when the form left it blank — that is what
@@ -593,8 +618,8 @@ const createGuest = async (clientId, companyId, body) => {
     // Plan limit (see assertGuestCapacity) — checked and inserted under one
     // lock on the event row, so a double-click cannot slip a 6th guest past 5.
     const guest = await sequelize.transaction(async (transaction) => {
-        await assertGuestCapacity(data.event_id, 1, { transaction });
-        if (data.response_type === 'yes') {
+        await assertGuestCapacity(clientId, 1, { transaction });
+        if (data.response_type === 'yes' && data.event_id) {
             await assertRsvpCapacity(data.event_id, [{ guestId: null, heads: Number(data.party_size) || 1 }], { transaction });
         }
         return EventGuest.create({
@@ -635,11 +660,11 @@ const updateGuest = async (clientId, guestId, body) => {
 
     const data = await normalise(clientId, body, { partial: true, existing: guest.toJSON() });
 
-    if (data.email || data.event_id) {
+    if (data.email || data.event_id !== undefined) {
         const clash = await EventGuest.findOne({
             where: {
                 website_client_id: clientId,
-                event_id: data.event_id ?? guest.event_id,
+                event_id: (data.event_id !== undefined ? data.event_id : guest.event_id) ?? null,
                 email: data.email ?? guest.email,
                 id: { [Op.ne]: guest.id },
             },
@@ -657,19 +682,18 @@ const updateGuest = async (clientId, guestId, body) => {
       without it the feed fills with duplicates every time a guest row is
       touched.
     */
-    // Moving a guest to another event adds a row there — same cap as a create.
-    const moving = data.event_id && Number(data.event_id) !== Number(guest.event_id);
+    // Moving a guest to another event changes no guest count (§569) — only the RSVP cap can bite.
+    const moving = data.event_id !== undefined && Number(data.event_id || 0) !== Number(guest.event_id || 0);
 
     // RSVP cap — only when this save leaves the guest on Yes with a new answer,
     // a new party size, or on a different event.
-    const finalEventId = moving ? Number(data.event_id) : guest.event_id;
+    const finalEventId = moving ? (data.event_id ? Number(data.event_id) : null) : guest.event_id;
     const finalResponse = data.response_type ?? guest.response_type;
     const finalHeads = Number(data.party_size ?? guest.party_size) || 1;
     const rsvpTouched = moving || data.response_type !== undefined || data.party_size !== undefined;
 
     const before = guest.response_type;
     await sequelize.transaction(async (transaction) => {
-        if (moving) await assertGuestCapacity(data.event_id, 1, { transaction });
         if (rsvpTouched && finalResponse === 'yes') {
             // A moved guest's old Yes is on the OTHER event, so nothing to exclude here.
             await assertRsvpCapacity(finalEventId, [{ guestId: moving ? null : guest.id, heads: finalHeads }], { transaction });
@@ -786,18 +810,20 @@ const bulkUpdate = async (clientId, guestIds, action, value) => {
  * through `website_client_id`, so a host can only ask about their own.
  */
 const getGuestFormOptions = async (clientId, rawEventId) => {
-    const eventId = Number(rawEventId);
-    if (!eventId) throw ApiError.badRequest('Please select an event.');
-
-    const event = await Event.findOne({
-        where: { id: eventId, website_client_id: clientId },
-        attributes: ['id', 'event_category_id'],
-    });
-    if (!event) throw ApiError.notFound('Event not found.');
+    // Event optional (§570): with none, the category-less default lists apply.
+    const eventId = Number(rawEventId) || null;
+    const event = eventId
+        ? await Event.findOne({
+            where: { id: eventId, website_client_id: clientId },
+            attributes: ['id', 'event_category_id'],
+        })
+        : null;
+    if (eventId && !event) throw ApiError.notFound('Event not found.');
+    const categoryId = event?.event_category_id ?? null;
 
     const [relationships, foods] = await Promise.all([
-        relationshipOptions.listForCategory(event.event_category_id, 1),
-        foodOptions.listForCategory(event.event_category_id, 1),
+        relationshipOptions.listForCategory(categoryId, 1),
+        foodOptions.listForCategory(categoryId, 1),
     ]);
 
     return {

@@ -13478,3 +13478,57 @@ Client portal (`event_client_single`): §564's files are **still uncommitted, lo
 2. Repair production: `client_subscriptions` id 3 (client #26) still points at deleted plan 8 — one-row update to plan 12. Not done; asked, not yet confirmed.
 3. Client #26's leftover 6th guest (id 364) was deleted by Jamal directly; no other cleanup needed for that account.
 4. Clients #27/#28 sit over their new plan's limit from data seeded before limits existed (15/10, 16/15) — left as is, new guests blocked, nothing retroactively removed.
+
+### 568. Download Invitation: no loader, and a QR too fine to scan
+
+Jamal: on live, the downloaded invitation does not carry a working event QR, and there is no loader while it prepares.
+
+**Checked before changing anything.** The wiring is right: production events #20/#27/#28 all hold a real `qr_token` (291–296 chars, `qr_version` 1), `EVENT_QR_SECRET` is set in `.env.production`, `GET /client/media/proxy` and `/client/events/qr/decode` exist live (401 without a session), and both `InvitationDownload` (detail page) and the wizard's step 6 pass the saved token into the card. So the card is bound to the real token — it was not drawing the "PREVIEW ONLY" placeholder.
+
+**Cause found: density.** ~300 characters at QR level M is a ~85-module grid (with quiet zone), drawn in a 56px box inside the card and exported at 3x — about 2px per module. Readable on a screen, unreliable to scan off a print. The standalone "Download QR Code" (900px) was never affected.
+**Not reproduced in a browser** — this is the measured cause, not a confirmed one for Jamal's exact file.
+
+**Fix (client portal, uncommitted):**
+- `invitation-card.tsx`: QR level M → L (smaller grid, bigger modules).
+- `export-invitation.ts`: card PNG export 3x → 5x.
+- `invitation-download.tsx`: new `DownloadingOverlay` — full-screen spinner "Preparing your invitation…" while a download builds (buttons only changed their label before). Wired into `InvitationDownload` and the wizard's step 6 buttons.
+- `tsc` clean.
+
+**Open:** scan a downloaded PNG with a phone on a real event to confirm; if it still fails, the next step is a larger QR block in the template, not more resolution.
+
+### 569. Guest limit is ONE TOTAL for the account (was per event); removing a guest frees the place
+
+Jamal: guests do not belong to one event any more; the limit is the overall guest count; removal gives the place back ("Option B"). RSVP limit left per event (asked, not answered — default kept).
+
+**Done (phase 1 — the count):**
+- `clientGuest.assertGuestCapacity(eventId, adding)` now counts `event_guests` by `website_client_id` (the host), not by event. `eventId` only identifies the account. Paranoid model → soft-deleted guests are not counted → removal frees a place. Locks the host row so two quick saves cannot both slip in.
+- `getGuestCapacity` → `{ limit, used, full, remaining, events[] }` (events are info only). CSV import checks the whole file against the account total, all-or-nothing. QR join uses the same helper. Moving a guest to another event changes no count, so no check.
+- Billing: `guests.used` = guests on the list, `guests.limit` = plan limit, `per_event_limit` null → Billing tile shows a real progress bar. Profile "Guests Added" shows used/limit.
+- Wording: admin plan wizard/detail "Max Guest (Per Event)" → "Max Guests"; portal gate/form messages say "in total". `subscriptionPlan` LIMIT label renamed. Column `max_guests_per_event` NOT renamed.
+- Portal (uncommitted): gate blocks Add/Import when the account is full; the event picker no longer greys full events. `tsc` clean.
+- Verified locally (rolled back): limit 5 on a 43-guest account → adding on ANY event refused; after removing guests, 2 allowed / 3 refused with "you can add only 2 more".
+
+**Consequence to know:** Ismail (Basic, 10) has 10 guests on event #20 → the account is full, so Mehendi Night (#28) can take none until guests are removed or the plan is upgraded.
+
+**NOT done (phases 2–3): guests are still stored with an `event_id` and the Add Guest form still asks for an event.** Making guests truly event-less needs an "invited to event" link table (RSVP, party size, table, QR join, analytics, CSV import all key on the guest's event today). Waiting on Jamal's go-ahead for that design. Also open: RSVP cap stays per event in people.
+Existing accounts already over the total (client #27 is at 10/10; #28 16/15; local data far over) are left as they are — the limit only blocks NEW guests.
+
+### 570. Add Guest drops the event picker — a guest is a person, not a row owned by an event
+
+Jamal: "guest form remove that event input, and the backend integration". Phase 2 of §569.
+
+**Schema.** `event_guests.event_id` is now NULLABLE — NULL means a general guest on the client's list. The FK stays (a non-NULL id must name a real event, and ON DELETE CASCADE still applies to those rows). `initial_setup.sql` updated; `src/database/tools/apply-guest-event-optional.js` is re-runnable (checks IS_NULLABLE, no-ops when applied) and takes `--prod`. **LOCAL applied. PRODUCTION NOT applied.**
+
+**Backend.**
+- `normalise`: `event_id` optional — absent leaves it alone, `''`/null clears it, a value is still ownership-checked against the client's events.
+- `assertGuestCapacity(hostId, …)` now takes the ACCOUNT, not an event (the count was already account-wide in §569; the event argument was misleading). QR join and CSV import pass the host.
+- `assertRsvpCapacity` returns immediately for a guest with no event — nothing to cap.
+- Duplicate check is per (event, email), with NULL as its own bucket, so the same email can sit on the general list and on an event. Message drops "for this event" when there is no event.
+- `getGuestFormOptions(clientId, null)` no longer throws: with no event it serves the category-less default relationship/food lists.
+- `clientRsvp.update` and `clientAnalytics` skip guests with no event rather than dereferencing `guest.event`.
+
+**Portal (uncommitted).** The "Select Event" dropdown, its invitation preview and the Event/Date/Venue summary rows are gone; the card is now "RSVP Settings". `event_id` left the form state, the validation and the payload. Types: `Guest.event_id` nullable, `GuestPayload.event_id` optional. `tsc` clean.
+
+**Verified locally (temp guest, removed after):** created with no event → `event_id` null; form options with no event → 7 relationships / 7 foods; assigned to event 22 → 22; cleared → null; capacity unchanged.
+
+**Still NOT done:** there is no UI to attach a guest to an event, so new guests stay general — invitations, RSVP and the app all key on `event_id`. That is the "invited to event" link (phase 3), still unbuilt and undecided. Existing guests keep their `event_id`, so nothing that works today stops working.

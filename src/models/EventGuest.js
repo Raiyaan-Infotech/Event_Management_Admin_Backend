@@ -14,7 +14,8 @@ const { DataTypes } = require('sequelize');
 module.exports = (sequelize) => {
     const EventGuest = sequelize.define('EventGuest', {
         id: { type: DataTypes.INTEGER.UNSIGNED, primaryKey: true, autoIncrement: true },
-        event_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
+        // NULL = a general guest on the client's list, not (yet) tied to an event (§570).
+        event_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
         // Denormalised from the event so guest queries scope by owner without a
         // join. The event stays the source of truth.
         website_client_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },

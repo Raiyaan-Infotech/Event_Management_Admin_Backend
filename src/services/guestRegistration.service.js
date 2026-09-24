@@ -536,7 +536,7 @@ const join = async (client, payload = {}) => {
         // refused for a limit that guest already counts toward. It also caps
         // RSVPs — one answer per guest.
         // Same source as the host's own Add Guest (the host's current plan).
-        await clientGuestService.assertGuestCapacity(event.id, 1, {
+        await clientGuestService.assertGuestCapacity(event.website_client_id, 1, {
             message: 'This event has reached its guest limit. Please contact the host.',
         });
 

@@ -49,7 +49,7 @@ const WRITABLE_FIELDS = [
  */
 const LIMIT_FIELDS = [
     { key: 'max_events', label: 'Max Events' },
-    { key: 'max_guests_per_event', label: 'Max Guests per Event' },
+    { key: 'max_guests_per_event', label: 'Max Guests' },
     { key: 'max_photos', label: 'Max Images' },
     { key: 'max_videos', label: 'Max Videos' },
 ];

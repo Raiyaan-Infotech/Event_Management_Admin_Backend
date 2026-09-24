@@ -629,7 +629,7 @@ const update = async (clientId, id, body = {}) => {
 
     // RSVP cap — the same per-event number as the guest limit, counted in people.
     const finalResponse = data.response_type ?? guest.response_type;
-    if (finalResponse === 'yes' && (data.response_type !== undefined || data.party_size !== undefined)) {
+    if (guest.event_id && finalResponse === 'yes' && (data.response_type !== undefined || data.party_size !== undefined)) {
         await assertRsvpCapacity(guest.event_id, [
             { guestId: guest.id, heads: Number(data.party_size ?? guest.party_size) || 1 },
         ]);

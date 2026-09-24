@@ -471,36 +471,29 @@ const commitImport = async (clientId, companyId, { content, defaultEventId = nul
     if (rows.length === 0) return outcome;
 
     return sequelize.transaction(async (transaction) => {
-        // Plan limit, per event, all-or-nothing: an import that would take any
-        // event past its cap is refused whole rather than silently cut short.
-        // Before this, a CSV was the way round the guest limit entirely.
-        const perEvent = new Map();
-        for (const r of rows) perEvent.set(r.event_id, (perEvent.get(r.event_id) || 0) + 1);
-        for (const [eventId, adding] of perEvent) {
-            const event = await Event.findByPk(eventId, {
-                attributes: ['id', 'title', 'website_client_id', 'subscription_plan_id'],
-                transaction,
-                lock: transaction.LOCK.UPDATE,
-            });
-            if (!event) continue;
-            const maxGuests = await guestService.guestLimitFor(event, transaction);
-            if (maxGuests === null) continue;
-            const used = await EventGuest.count({ where: { event_id: eventId }, transaction });
-            if (used + adding > maxGuests) {
+        // Plan limit, all-or-nothing: the account's TOTAL guest count (§569). An
+        // import that would take it over the cap is refused whole rather than
+        // silently cut short. Before this, a CSV was the way round the limit.
+        const maxGuests = await guestService.guestLimitFor({ website_client_id: clientId, subscription_plan_id: null }, transaction);
+        if (maxGuests !== null) {
+            const used = await EventGuest.count({ where: { website_client_id: clientId }, transaction });
+            if (used + rows.length > maxGuests) {
                 const left = Math.max(0, maxGuests - used);
                 throw ApiError.badRequest(
-                    `"${event.title}" has a guest limit of ${maxGuests} and already has ${used}. `
-                    + `This file adds ${adding}, but only ${left} more can be added. Please upgrade your plan or import fewer guests.`
+                    `Your plan allows ${maxGuests} guests in total and you already have ${used}. `
+                    + `This file adds ${rows.length}, but only ${left} more can be added. Please upgrade your plan or import fewer guests.`
                 );
             }
+        }
 
-            // Rows that arrive already answering Yes book their party — RSVP cap.
-            const yesRows = rows.filter((r) => r.event_id === eventId && r.response_type === 'yes');
-            await guestService.assertRsvpCapacity(
-                eventId,
-                yesRows.map((r) => ({ guestId: null, heads: Number(r.party_size) || 1 })),
-                { transaction },
-            );
+        // RSVP cap (still per event): rows that arrive already answering Yes.
+        const perEvent = new Map();
+        for (const r of rows) if (r.response_type === 'yes') {
+            if (!perEvent.has(r.event_id)) perEvent.set(r.event_id, []);
+            perEvent.get(r.event_id).push({ guestId: null, heads: Number(r.party_size) || 1 });
+        }
+        for (const [eventId, changes] of perEvent) {
+            await guestService.assertRsvpCapacity(eventId, changes, { transaction });
         }
 
         const createdGroups = [];
