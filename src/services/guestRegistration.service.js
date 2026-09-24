@@ -2,6 +2,7 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const {
     Sequelize,
+    sequelize,
     Event,
     EventGuest,
     EventGuestGroup,
@@ -179,10 +180,11 @@ const resolveInvite = async (token) => {
     const event = await eventFromToken(token);
     const categoryId = event.event_category_id;
 
-    const [relationships, foods, rsvpEnabled] = await Promise.all([
+    const [relationships, foods, rsvpEnabled, capacity] = await Promise.all([
         relationshipOptions.listForCategory(categoryId, DEFAULT_COMPANY_ID),
         foodOptions.listForCategory(categoryId, DEFAULT_COMPANY_ID),
         rsvpEnabledFor(event),
+        clientGuestService.getParticipantStatus(event.id),
     ]);
 
     return {
@@ -191,6 +193,12 @@ const resolveInvite = async (token) => {
         food_preference_options: foods.map((r) => ({ id: r.id, name: r.name })),
         /** Whether the form should ask "Will you be attending?" — see rsvpEnabledFor. */
         rsvp_enabled: rsvpEnabled,
+        /*
+          Whether the event has reached its participant limit (§578). A flag,
+          not a refusal: the scanner is anonymous here, and somebody who already
+          joined must still be able to re-scan. requestOtp refuses a NEW person.
+        */
+        participants_full: capacity.full,
     };
 };
 
@@ -227,7 +235,24 @@ const findClientByMobile = async (mobile) => {
  * else's phone number must not become a way to edit their profile.
  */
 const requestOtp = async ({ token, mobile, dial_code, name } = {}) => {
-    await eventFromToken(token); // capability check — throws if not a real invite
+    const event = await eventFromToken(token); // capability check — throws if not a real invite
+
+    /*
+      Participant limit (§578), checked HERE — the first step that knows who is
+      scanning — so a person who cannot join is told before an account is made
+      or an OTP is sent. Someone already on the event is let through: a re-scan
+      must never be refused for a place they already hold.
+    */
+    {
+        const status = await clientGuestService.getParticipantStatus(event.id);
+        if (status.full) {
+            const d = digitsOnly(mobile);
+            const already = d.length >= 7
+                ? await EventGuest.count({ where: { event_id: event.id, mobile: { [Op.in]: [...new Set([d, d.slice(-10)])] } } })
+                : 0;
+            if (!already) throw ApiError.badRequest('Sorry, this event is full and cannot take more participants. Please contact the host.');
+        }
+    }
 
     const digits = digitsOnly(mobile);
     let client = await findClientByMobile(mobile);
@@ -519,33 +544,31 @@ const join = async (client, payload = {}) => {
         });
     }
 
-    // RSVP cap — people saying Yes, against the plan's Max RSVP (per event).
-    if (writeAnswer && response === 'yes') {
-        await clientGuestService.assertRsvpCapacity(event.id, [{ guestId: existing?.id ?? null, heads: extra + 1 }], {
-            message: 'Sorry, this event is full and cannot take more RSVPs. Please contact the host.',
-        });
-    }
-
     let guest;
     if (existing) {
         await existing.update(fields); // invite_source untouched — see the header
         guest = existing;
     } else {
-        // NO guest-limit check here (§572). Somebody who scans the QR is a
-        // PARTICIPANT of this event, not a phone-book contact, so they must not
-        // spend — or be refused by — the host's Max Guests. What limits them is
-        // the RSVP cap, checked above when they answer yes.
-
-        guest = await EventGuest.create({
-            ...fields,
-            event_id: event.id,
-            // The HOST, denormalised from the event — not the participant.
-            website_client_id: event.website_client_id,
-            company_id: event.company_id ?? DEFAULT_COMPANY_ID,
-            dial_code: client.dial_code || '+91',
-            mobile: clientDigits.length > 10 ? clientDigits.slice(-10) : clientDigits,
-            invite_source: 'qr',
-            invited_at: new Date(),
+        // A scanner is a PARTICIPANT, not a phone-book contact (§572), so Max
+        // Guests does not apply. Max RSVP per event = max participants (§578) —
+        // checked with the event row locked so two people scanning at once
+        // cannot both take the last place.
+        guest = await sequelize.transaction(async (transaction) => {
+            await clientGuestService.assertParticipantCapacity(event.id, 1, {
+                transaction,
+                message: 'Sorry, this event is full and cannot take more participants. Please contact the host.',
+            });
+            return EventGuest.create({
+                ...fields,
+                event_id: event.id,
+                // The HOST, denormalised from the event — not the participant.
+                website_client_id: event.website_client_id,
+                company_id: event.company_id ?? DEFAULT_COMPANY_ID,
+                dial_code: client.dial_code || '+91',
+                mobile: clientDigits.length > 10 ? clientDigits.slice(-10) : clientDigits,
+                invite_source: 'qr',
+                invited_at: new Date(),
+            }, { transaction });
         });
     }
 
@@ -875,11 +898,6 @@ const submitMyRsvp = async (clientId, rawEventId, body = {}) => {
         }
     }
 
-    if (response === 'yes') {
-        await clientGuestService.assertRsvpCapacity(eventId, [{ guestId: guest.id, heads: partySize }], {
-            message: 'Sorry, this event is full and cannot take more RSVPs. Please contact the host.',
-        });
-    }
 
     const before = snapshotAnswer(guest);
     const data = {

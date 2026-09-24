@@ -9,7 +9,6 @@ const {
 const { Op, fn, col, literal } = Sequelize;
 const ApiError = require('../utils/apiError');
 const notifications = require('./clientNotification.service');
-const { assertRsvpCapacity } = require('./clientGuest.service');
 
 /**
  * RSVPs.
@@ -633,14 +632,6 @@ const update = async (clientId, id, body = {}) => {
     }
 
     if (!Object.keys(data).length) throw ApiError.badRequest('Nothing to update.');
-
-    // RSVP cap — the same per-event number as the guest limit, counted in people.
-    const finalResponse = data.response_type ?? guest.response_type;
-    if (guest.event_id && finalResponse === 'yes' && (data.response_type !== undefined || data.party_size !== undefined)) {
-        await assertRsvpCapacity(guest.event_id, [
-            { guestId: guest.id, heads: Number(data.party_size ?? guest.party_size) || 1 },
-        ]);
-    }
 
     await guest.update(data);
 

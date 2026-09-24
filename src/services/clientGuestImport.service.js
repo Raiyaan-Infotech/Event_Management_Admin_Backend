@@ -493,14 +493,12 @@ const commitImport = async (clientId, companyId, { content, defaultEventId = nul
             }
         }
 
-        // RSVP cap (still per event): rows that arrive already answering Yes.
+        // Rows that name an event are participants of it (§578): Max RSVP
+        // per event caps them, all-or-nothing like the guest limit.
         const perEvent = new Map();
-        for (const r of rows) if (r.response_type === 'yes') {
-            if (!perEvent.has(r.event_id)) perEvent.set(r.event_id, []);
-            perEvent.get(r.event_id).push({ guestId: null, heads: Number(r.party_size) || 1 });
-        }
-        for (const [eventId, changes] of perEvent) {
-            await guestService.assertRsvpCapacity(eventId, changes, { transaction });
+        for (const r of rows) if (r.event_id) perEvent.set(r.event_id, (perEvent.get(r.event_id) || 0) + 1);
+        for (const [eventId, adding] of perEvent) {
+            await guestService.assertParticipantCapacity(eventId, adding, { transaction });
         }
 
         const createdGroups = [];

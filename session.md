@@ -13650,3 +13650,21 @@ Jamal: "RSVP in client portal — why does it show the 50-guest list?"
 **Fix:** `buildWhere` now starts from `event_id IS NOT NULL`. It is shared by the list, the tiles and the export, so all three drop contacts together. `own()` (the single-RSVP lookup behind view/edit/reset) applies the same rule, so a contact's id cannot be opened as an RSVP either.
 
 **Verified locally:** importing the 50 contacts left the RSVP total at 121 before and after; tiles `total_invitations` 121 (same rows); opening a contact's id as an RSVP → "RSVP not found." Imported rows removed afterwards.
+
+### 578. Max RSVP per event = max participants, enforced at the door
+
+Jamal (screenshot): Basic plan with Max RSVP 1, yet the RSVP list for Ismail's Wedding Reception showed TWO participants (Jamal — Accepted ×2, Jamal2 — Maybe), and Jamal2 could not submit a response. His rule: check the limit right after the QR scan, and if it is reached the person cannot join at all; the RSVP helper text should say it is the same as max participants.
+
+**Why it went wrong:** the §565 cap counted only people answering YES. So everybody could JOIN, and the limit then fired at the answer — Jamal2 was let in, then refused when answering. The list showed more people than the plan allows because nothing counted participants.
+
+**New rule:** `max_rsvp_per_event` is the maximum number of PARTICIPANTS (rows on the event), checked when somebody would become one. Once in, answering is never limited.
+- `clientGuest.assertParticipantCapacity(eventId, adding, { transaction })` — counts participant rows (soft-deleted excluded, so removing one frees the place), locks the event row when given a transaction. `getParticipantStatus(eventId)` → `{ limit, used, full }`.
+- `assertRsvpCapacity` **deleted**, with every call: host RSVP edit, bulk Accepted, the participant's own RSVP, the Yes path in QR join. Answering / changing party size is free.
+- **QR flow, three layers:** `resolveInvite` returns `participants_full` (a flag, not a refusal — the scanner is anonymous there and an existing participant must be able to re-scan); `requestOtp` refuses a NEW mobile when full, before any account is created or OTP sent; `join` re-checks inside a transaction with the event row locked. Message: *"Sorry, this event is full and cannot take more participants. Please contact the host."*
+- Anything else that files a row against an event also counts: Add Guest with an `event_id` (participant cap; event-less → guest cap), moving a guest onto an event, CSV rows naming an event (all-or-nothing per event).
+- Admin helper: *"Same as max participants: people who can join one event by scanning its QR."*
+- Counts ROWS (people who joined), not party size.
+
+**Verified locally with Max RSVP 1:** empty event → `participants_full` false; participant 1 joins; next scan → `participants_full` true; a new mobile asking for OTP refused with the message above; the API join refused ("reached its limit of 1 participant"); participant 1 answered Yes ×2, then changed to Maybe — both saved; participant 1 re-scanning let through; removing them freed the place. The OTP step created a throwaway local account (#114) — removed.
+
+⚠ Ismail's event on production already holds 2 participants against a limit of 1 — joined under the old rule. They are kept; new people are refused until one is removed. The app should show a "this event is full" screen on `participants_full` — not built (Flutter repo).

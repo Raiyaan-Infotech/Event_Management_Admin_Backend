@@ -551,54 +551,54 @@ const assertGuestCapacity = async (hostId, adding = 1, { transaction, message } 
 };
 
 /**
- * RSVP cap: the PEOPLE attending one event (sum of `party_size` where the
- * answer is yes) may not exceed the plan's `max_rsvp_per_event`.
+ * PARTICIPANT cap (§578): how many people may JOIN one event, against the
+ * plan's `max_rsvp_per_event` — "Max RSVP per event" and "max participants"
+ * are the same number.
  *
- * Its OWN plan field, not the guest limit (§571). A guest is a phone-book
- * contact on the account; an RSVP is one person attending one event, and
- * somebody who scanned the QR on the day was never a contact at all. The two
- * numbers answer different questions, so they are set separately.
+ * Checked at the DOOR, when somebody would become a participant (a QR join, or
+ * a row filed against an event), not when they answer. The earlier rule counted
+ * only YES answers (§565), which let anyone in and then refused their answer —
+ * a participant who had joined could not submit an RSVP, and the list showed
+ * more people than the plan allows. Once someone is in, their answer is theirs
+ * to give.
  *
- * `changes` = [{ guestId|null, heads }] — the guests this save will leave on
- * Yes, with their new party size (null guestId = a new row). Their current Yes
- * heads are left out of `used` so re-saving an answer never counts it twice. A
- * save that does not raise the event's Yes total is always allowed, so an event
- * already over (data from before this rule) can still be edited down.
- * Only 'yes' counts: 'maybe' is not a booking.
+ * Counts participant ROWS (people who joined), not party size. Soft-deleted
+ * rows are excluded, so removing a participant frees the place. Pass a
+ * transaction to lock the event row: two scans at once must not both take the
+ * last place.
  */
-const assertRsvpCapacity = async (eventId, changes, { transaction, message } = {}) => {
-    if (!eventId) return; // a general guest has no event to cap
-    const list = (changes || []).filter((c) => c && Number(c.heads) > 0);
-    if (!list.length) return;
+const countParticipants = (eventId, transaction) =>
+    EventGuest.count({ where: { event_id: eventId }, transaction });
 
+const participantLimitFor = async (eventId, transaction) => {
     const event = await Event.findByPk(eventId, {
         attributes: ['id', 'website_client_id', 'subscription_plan_id'],
         transaction,
+        lock: transaction ? transaction.LOCK.UPDATE : undefined,
     });
-    if (!event) return;
-    const max = await planLimitFor(event, 'max_rsvp_per_event', transaction);
+    if (!event) return null;
+    return planLimitFor(event, 'max_rsvp_per_event', transaction);
+};
+
+/** { limit, used, full } for one event — for the QR screens to warn early. */
+const getParticipantStatus = async (eventId) => {
+    const limit = await participantLimitFor(eventId);
+    const used = await countParticipants(eventId);
+    return { limit, used, full: limit !== null && used >= limit };
+};
+
+const assertParticipantCapacity = async (eventId, adding = 1, { transaction, message } = {}) => {
+    if (!eventId || adding <= 0) return;
+    const max = await participantLimitFor(eventId, transaction);
     if (max === null) return;
 
-    const ids = list.map((c) => c.guestId).filter(Boolean);
-    const [yesTotal, yesChanged] = await Promise.all([
-        EventGuest.sum('party_size', { where: { event_id: eventId, response_type: 'yes' }, transaction }),
-        ids.length
-            ? EventGuest.sum('party_size', {
-                where: { event_id: eventId, response_type: 'yes', id: { [Op.in]: ids } }, transaction,
-            })
-            : 0,
-    ]);
-    const used = (Number(yesTotal) || 0) - (Number(yesChanged) || 0);
-    const adding = list.reduce((n, c) => n + Number(c.heads), 0);
-
-    if (adding <= (Number(yesChanged) || 0)) return; // not raising the total
+    const used = await countParticipants(eventId, transaction);
     if (used + adding > max) {
         const left = Math.max(0, max - used);
-        const people = (n) => `${n} ${n === 1 ? 'attendee' : 'attendees'}`;
         throw ApiError.badRequest(
             message ?? (left === 0
-                ? `This event has reached its RSVP limit of ${people(max)}. Please upgrade your plan to accept more RSVPs.`
-                : `This event's RSVP limit is ${people(max)} and ${used} already said yes, so only ${left} more can be accepted. Please reduce the party size or upgrade your plan.`)
+                ? `This event has reached its limit of ${max} participant${max === 1 ? '' : 's'}. Please upgrade your plan to allow more.`
+                : `This event can take only ${left} more participant${left === 1 ? '' : 's'} (limit ${max}). Please add fewer or upgrade your plan.`)
         );
     }
 };
@@ -672,9 +672,12 @@ const createGuest = async (clientId, companyId, body) => {
     // Plan limit (see assertGuestCapacity) — checked and inserted under one
     // lock on the event row, so a double-click cannot slip a 6th guest past 5.
     const guest = await sequelize.transaction(async (transaction) => {
-        await assertGuestCapacity(clientId, 1, { transaction });
-        if (data.response_type === 'yes' && data.event_id) {
-            await assertRsvpCapacity(data.event_id, [{ guestId: null, heads: Number(data.party_size) || 1 }], { transaction });
+        if (data.event_id) {
+            // Filed against an event → a participant, limited by Max RSVP.
+            await assertParticipantCapacity(data.event_id, 1, { transaction });
+        } else {
+            // A phone-book contact → limited by Max Guests.
+            await assertGuestCapacity(clientId, 1, { transaction });
         }
         return EventGuest.create({
             ...data,
@@ -736,21 +739,15 @@ const updateGuest = async (clientId, guestId, body) => {
       without it the feed fills with duplicates every time a guest row is
       touched.
     */
-    // Moving a guest to another event changes no guest count (§569) — only the RSVP cap can bite.
+    // Moving onto an event makes this row a participant there — the participant
+    // cap applies (§578). Answering, or changing party size, is never limited:
+    // the check happened when they joined.
     const moving = data.event_id !== undefined && Number(data.event_id || 0) !== Number(guest.event_id || 0);
-
-    // RSVP cap — only when this save leaves the guest on Yes with a new answer,
-    // a new party size, or on a different event.
-    const finalEventId = moving ? (data.event_id ? Number(data.event_id) : null) : guest.event_id;
-    const finalResponse = data.response_type ?? guest.response_type;
-    const finalHeads = Number(data.party_size ?? guest.party_size) || 1;
-    const rsvpTouched = moving || data.response_type !== undefined || data.party_size !== undefined;
 
     const before = guest.response_type;
     await sequelize.transaction(async (transaction) => {
-        if (rsvpTouched && finalResponse === 'yes') {
-            // A moved guest's old Yes is on the OTHER event, so nothing to exclude here.
-            await assertRsvpCapacity(finalEventId, [{ guestId: moving ? null : guest.id, heads: finalHeads }], { transaction });
+        if (moving && data.event_id) {
+            await assertParticipantCapacity(Number(data.event_id), 1, { transaction });
         }
         await guest.update(data, { transaction });
     });
@@ -822,16 +819,6 @@ const bulkUpdate = async (clientId, guestIds, action, value) => {
             : status === 'declined' ? 'no'
                 : status === 'pending' ? 'maybe' : 'none';
 
-        // Marking guests Accepted books their party — RSVP cap per event.
-        if (response === 'yes') {
-            const picked = await EventGuest.findAll({ where: scope, attributes: ['id', 'event_id', 'party_size'] });
-            const byEvent = new Map();
-            for (const g of picked) {
-                if (!byEvent.has(g.event_id)) byEvent.set(g.event_id, []);
-                byEvent.get(g.event_id).push({ guestId: g.id, heads: Number(g.party_size) || 1 });
-            }
-            for (const [eventId, changes] of byEvent) await assertRsvpCapacity(eventId, changes);
-        }
         const [affected] = await EventGuest.update(
             {
                 rsvp_status: status,
@@ -905,6 +892,7 @@ module.exports = {
     assertGuestCapacity,
     guestLimitFor,
     getGuestCapacity,
-    assertRsvpCapacity,
+    assertParticipantCapacity,
+    getParticipantStatus,
 };
 
