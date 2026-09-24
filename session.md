@@ -13771,3 +13771,27 @@ A foreign-key warning on the welcome notification during the first run was my te
 Planned fix: the RSVP API returns the participant's own phone-book link (`event_participants.guest_id`) — it does not today; `shape()` in `clientRsvp.service` sends `guest.id = participant id` — and the portal links to `/dashboard/guests/<that guest_id>/profile`, showing no profile link for a stranger who has no phone-book entry. Name it so it cannot be confused with `guest_id` in the group-detail activity feed, which already means the PARTICIPANT id.
 
 The app still needs the same link audit. Nothing from §581–§584 is committed; production DB is already migrated (§582, §583), so live needs the new backend + portal deployed.
+
+### 585. RSVP screens link to the right guest — `phone_book_guest_id`
+
+Fixes the ⚠ bug §584 found. `shape()` in `clientRsvp.service` now also returns **`phone_book_guest_id`** (`event_participants.guest_id`, or null), and the group-detail activity feed carries it beside its existing `guest_id` (which is, and stays, the PARTICIPANT id). The new name keeps it from being mistaken for either of those.
+
+**Portal (`event_client_single`)**: `Rsvp.phone_book_guest_id` added to `use-rsvps.ts`. Every guest link on the RSVP screens now uses it: RSVP list name + "View guest profile" menu item, RSVP detail "Guest profile" button, RSVP edit "Edit them on the guest", and the four in group-detail (name, menu item, member dialog "Full guest profile", edit dialog). **A stranger** (scanned the QR, not in the phone book) gets **no** link: the name shows as plain text, the menu item/button is hidden, and the edit screens say "Contact details are the ones this person entered when they joined — they are not in your guest list." `tsc` shows no errors in the RSVP files. The Guests pages' own links were already right (they use real guest ids).
+
+**Verified locally:** participant #145 → guest #1: the API returns `id 145, guest.id 145, phone_book_guest_id 1` (the old link opened guest #145, someone else). Unlinked participants return `null`.
+
+**Mobile app audit: nothing to fix.** The app never opens a guest page from a participant. Participant list → details → edit/delete/RSVP-update all use participant ids against `/client/participants/:id` and `/client/rsvps/:id`. `ApiEndpoints.guest(id)` has no callers. One naming wart, left as it is: `presentMyRsvp` in `guestRegistration.service` sends `guest_id` = the participant's id, and the app's `MyRsvp.guestId` reads it, but nothing uses it (only the offline cache round-trips it). Renaming it would break cached copies for no gain.
+
+Still not committed (§581–§585). Live DB is already migrated, so the new backend and portal still need deploying.
+
+### 586. App Add Guest / Add Participant: checked against their tables; Edit Participant never updated
+
+Jamal asked whether the app's two forms save to the right tables. **Yes:** Add Guest → `POST /client/guests` → `guests`, and Add Participant → `POST /client/participants` → `event_participants` (linked to the guest by mobile). Every key the app sends is on the `guestFields` whitelist, and both models and both local tables have every column. Tested through the services: the guest row and the participant row were correct, and `guest_id` was linked. Test rows and their 3 notifications were removed.
+
+**Bug 1, fixed: Edit Participant always called `create()`.** The Edit screen was pre-filled, but Save posted a new participant, so it failed with "already a participant of this event" (same mobile) or saved a duplicate (mobile changed). `add_participant_screen.dart` now calls `update(id: …)` when editing. It does not send `status`, so the host's edit never overwrites the participant's RSVP. Verified: the edit changed name, party size and table, and the row count stayed the same (12 → 12).
+
+**Bug 2, fixed: Relationship was dropped by both forms.** The shared form collects it, but neither screen passed it on, and `createGuest()` had no parameter for it. Both screens now send `relationship_option_id` + `relationship`. Also removed an unused import in `add_guest_screen.dart`. `flutter analyze` shows no issues in the changed files. There is one old unused-import warning in `guest_list_screen.dart`, which I did not touch.
+
+⚠ **The backend repo's git is broken (found 2026-09-25):** `.git/refs/heads/main` is 41 zero bytes (written 2026-09-24 20:25, probably an interrupted write). Git therefore sees no commits, and every file shows as newly added (`A`). The objects are intact: the reflog's last commit is `cc98f68` (§584), and `git log cc98f68` works. There is also a stale `.git/refs/remotes/origin/main.lock` (20:26). Repair: write `cc98f68e5f1ba4680dc09f66473f93ead4c7eacf` into `refs/heads/main` and delete the lock.
+
+**Git repaired (2026-09-25):** `refs/heads/main` → `cc98f68`, stale `origin/main.lock` removed (broken copies backed up in the session scratchpad). `git fsck` clean; `main` is 1 ahead of `origin/main` (the §584 commit never reached GitHub — the push was interrupted).

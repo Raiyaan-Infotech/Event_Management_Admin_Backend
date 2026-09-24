@@ -90,6 +90,7 @@ const GUEST_ATTRS = [
     'special_requirements', 'plus_one', 'plus_one_count', 'custom_answers',
     'city', 'state', 'country', 'created_at', 'updated_at',
     'accommodation', 'relationship', 'photo', 'added_by_client_id',
+    'guest_id',
 ];
 
 const INCLUDE = [
@@ -121,6 +122,13 @@ const shape = (row) => {
                header shows both, and one is not the other's label. */
             relationship: j.relationship || null,
         },
+        /*
+          The phone-book guest this participant IS, or null for a stranger who
+          scanned the QR without being in the phone book (§581). `id` and
+          `guest.id` above are the PARTICIPANT — a guest profile link must use
+          this, never those; guest #66 and participant #66 are different people.
+        */
+        phone_book_guest_id: j.guest_id || null,
         accommodation: j.accommodation || 'unknown',
         added_by_client_id: j.added_by_client_id || null,
         event: j.event
@@ -775,7 +783,8 @@ const getGroup = async (clientId, groupId, query = {}) => {
         .sort((a, b) => new Date(b.responded_at) - new Date(a.responded_at))
         .slice(0, 10)
         .map((m) => ({
-            guest_id: m.id,
+            guest_id: m.id, // the PARTICIPANT id — kept for the portal's existing reads
+            phone_book_guest_id: m.guest_id || null,
             name: m.name,
             bucket: BUCKET[m.rsvp_status] || 'no_response',
             at: m.responded_at,
