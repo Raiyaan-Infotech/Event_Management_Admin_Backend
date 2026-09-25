@@ -132,6 +132,14 @@ const uploadCover = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, result, 'Image uploaded');
 });
 
+/** Store the invitation PNG the portal rendered after saving the event. */
+const uploadInvitationImage = asyncHandler(async (req, res) => {
+    const result = await clientEventService.uploadInvitationImage(
+        req.websiteClient.id, req.websiteClient.company_id, req.params.id, req.file,
+    );
+    return ApiResponse.success(res, result, 'Invitation image saved');
+});
+
 
 /**
  * The client's hearted events.
@@ -167,5 +175,5 @@ const removeFromWishlist = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, data, 'Removed from wishlist');
 });
 
-module.exports = { list, stats, analytics, getById, create, update, remove, decodeQr, uploadCover,
+module.exports = { list, stats, analytics, getById, create, update, remove, decodeQr, uploadCover, uploadInvitationImage,
     wishlist, addToWishlist, removeFromWishlist };

@@ -109,6 +109,16 @@ module.exports = (sequelize) => {
             cover_image: { type: DataTypes.STRING(500), allowNull: true },
 
             /**
+             * The finished invitation as an IMAGE — the portal's own card
+             * rendered to PNG and uploaded when the wizard saves (step 6).
+             * The app's View Invitation shows exactly this, so the phone and
+             * the portal cannot disagree about what the invitation looks like.
+             * NULL until the event is saved once by a portal that uploads it.
+             * Added by add-event-invitation-image.js.
+             */
+            invitation_image: { type: DataTypes.STRING(500), allowNull: true },
+
+            /**
              * The client's per-event OVERRIDE of the template's component set
              * and order. NULL on both means "inherit from the template".
              *

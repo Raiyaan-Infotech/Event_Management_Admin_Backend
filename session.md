@@ -13844,3 +13844,14 @@ Jamal: "which menu I tick in the plan must show in the client portal, not hardco
 **Admin** — `lib/locked-menus.ts` `isLockedMenu(menu)` reads `is_default`. Plan wizard: Default section = locked. Menu form: the Default switch is no longer disabled for 7 slugs.
 
 ⚠ Every local menu is tagged category 1 (Wedding). Menus are category-scoped, so an event in another category gets none of them — before, app features and portal sections ignored category. Untag or retag the menus in Menu Management if other categories need them.
+
+### 591. Seven Default menus, Social Wall off, and the real invitation image in the app
+
+**Menus (data only, tool `set-default-menus.js`):** Default = splash-screens, event-invitation, participants, venue, rsvp, agenda, guests (and `menu_group` = core); every other menu Add-on (`addon`). Social Wall set **Inactive** — gone from every menu, row kept for a possible return; the app's Social Wall code untouched. The tool also grants each Default menu to every live plan that lacks it. **LOCAL applied** (10 menus changed, backup `local-default-menus-1790311918743.json`). Production: Jamal runs `--prod`, then `--prod --apply`.
+
+**Why View Invitation still showed a drawn card:** the image was never stored — only proposed. Now built:
+- `events.invitation_image` VARCHAR(500) NULL (model, `initial_setup.sql`, tool `add-event-invitation-image.js`; **LOCAL applied**). ⚠ Production must get the column BEFORE the backend deploys — the model selects it.
+- `POST /client/events/:id/invitation-image` (multer, PNG/JPG/WEBP, 10MB) → `clientEvent.uploadInvitationImage`, owner-scoped, folder `event-invitations`. Old file left in storage (deleteFile needs a path, not a URL).
+- Portal wizard: when step 6 shows the saved event, the real card (`[data-invitation-card]`, live QR) is rendered with `nodeToPngBlob` (3x) and uploaded **silently** — no toast, logged on failure; once per `id:updated_at`. Create AND edit.
+- App: `ClientEventDetail.invitationImage`; View Invitation shows it (fitWidth), falling back to the drawn `_InvitationCard` when null or on a load error. Share / Download / Save capture whatever is shown.
+- Existing events have no image until saved once more through the portal wizard.

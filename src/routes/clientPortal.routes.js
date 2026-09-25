@@ -189,6 +189,40 @@ router.post(
     eventController.uploadCover,
 );
 
+/**
+ * The finished invitation, rendered to PNG by the portal wizard after a save
+ * (`events.invitation_image`). Owner only — enforced in the service. 10MB: a
+ * print-resolution card is a large PNG, and it is the portal's own render, not
+ * an arbitrary upload. Raster only, same reason as the cover.
+ */
+const invitationImageUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 10 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+        const allowed = ['image/png', 'image/jpeg', 'image/webp'];
+        if (allowed.includes(file.mimetype)) return cb(null, true);
+        cb(new Error('The invitation must be a PNG, JPG or WEBP image.'), false);
+    },
+});
+
+router.post(
+    '/events/:id/invitation-image',
+    (req, res, next) => {
+        invitationImageUpload.single('file')(req, res, (err) => {
+            if (err) {
+                return res.status(400).json({
+                    success: false,
+                    message: err.code === 'LIMIT_FILE_SIZE'
+                        ? 'The invitation image is larger than 10MB.'
+                        : err.message || 'The invitation image could not be uploaded.',
+                });
+            }
+            next();
+        });
+    },
+    eventController.uploadInvitationImage,
+);
+
 // Per-event notification template toggles — a client's control over which
 // of the admin's applicable templates are on for ONE of their own events.
 // '/events/notification-templates/summary' sits at a different depth than

@@ -1278,6 +1278,33 @@ const uploadCoverImage = async (companyId, file) => {
     return { url: result.url };
 };
 
+/**
+ * Store the finished invitation, rendered to PNG by the portal wizard after a
+ * save (see `events.invitation_image`). Owner only — the row is looked up by
+ * the caller's own `website_client_id`, so a guest's call matches nothing.
+ *
+ * Every save uploads under a fresh name (a CDN never serves the old picture),
+ * and the previous file is left in storage: `mediaService.deleteFile` wants a
+ * storage path, and deriving one from a URL is a guess that could delete the
+ * wrong object.
+ */
+const uploadInvitationImage = async (clientId, companyId, rawEventId, file) => {
+    if (!file || !file.buffer) throw ApiError.badRequest('Please choose an image to upload.');
+
+    const event = await Event.findOne({
+        where: { id: Number(rawEventId) || 0, website_client_id: clientId },
+        attributes: ['id', 'invitation_image'],
+    });
+    if (!event) throw ApiError.notFound('Event not found.');
+
+    const result = await mediaService.upload(file, { folder: 'event-invitations' }, companyId || 1);
+    if (!result || !result.url) throw ApiError.badRequest('That image could not be stored.');
+
+    await event.update({ invitation_image: result.url });
+
+    return { url: result.url };
+};
+
 
 /* ── Wishlist ────────────────────────────────────────────────────────────────
  *
@@ -1408,6 +1435,7 @@ const setWishlisted = async (clientId, eventId, wishlisted) => {
 module.exports = {
     WRITABLE_FIELDS,
     uploadCoverImage,
+    uploadInvitationImage,
     deriveStatus,
     isFamilyCategory,
     createEvent,

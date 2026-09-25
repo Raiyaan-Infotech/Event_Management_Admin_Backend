@@ -1769,6 +1769,7 @@ CREATE TABLE IF NOT EXISTS `events` (
   `theme_id` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `primary_color` varchar(9) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Hex, #RRGGBB or #RRGGBBAA',
   `cover_image` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'The event''s own photo — mobile list card and event screen. NULL = template artwork. See apply-event-cover-image.js',
+  `invitation_image` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'The finished invitation as a PNG, uploaded by the portal wizard on save. See add-event-invitation-image.js',
   `qr_token` text COLLATE utf8mb4_unicode_ci,
   `qr_version` tinyint unsigned NOT NULL DEFAULT '1',
   `qr_issued_at` datetime DEFAULT NULL,
