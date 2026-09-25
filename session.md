@@ -13855,3 +13855,28 @@ Jamal: "which menu I tick in the plan must show in the client portal, not hardco
 - Portal wizard: when step 6 shows the saved event, the real card (`[data-invitation-card]`, live QR) is rendered with `nodeToPngBlob` (3x) and uploaded **silently** — no toast, logged on failure; once per `id:updated_at`. Create AND edit.
 - App: `ClientEventDetail.invitationImage`; View Invitation shows it (fitWidth), falling back to the drawn `_InvitationCard` when null or on a load error. Share / Download / Save capture whatever is shown.
 - Existing events have no image until saved once more through the portal wizard.
+
+### 592. Live "Transactional Templates (0)" while the welcome push still fires
+
+Jamal's screenshot: production admin → Notification Templates → Transactional Templates shows **All Templates (0)**, yet a participant joining still gets the Welcome push.
+
+**Cause (from the code; production not readable from here):** `sync-notification-data-to-prod.js` inserted `notification_categories` and `notification_templates` rows WITHOUT `company_id`. The admin list is company-scoped (`base.service.buildWhereClause` → `company_id = req.companyId`), so NULL rows never list. `notificationTrigger.findApplicableTemplate` has no company filter, so the `welcome_invitation` template still fires. Locally every row has `company_id = 1`, which is why local lists all 27.
+
+**Fix:**
+- `sync-notification-data-to-prod.js` now copies `company_id` for both tables.
+- New `fix-notification-company.js` (dry run default, `--prod`, `--apply`, `--company=N`): sets `company_id` on NULL rows to the only live company (or the one passed); JSON backup, one UPDATE per table. Local: 0 rows to fix. **Production: Jamal to run.** If its dry run shows 0 NULL rows, the cause is a company MISMATCH instead — the tool prints the companies to check that.
+
+**What actually sends a push today (answer to "which are missing"):** only `welcome_invitation` (guest joins → push to that guest) and the host's manual Messages → Push. RSVP / participant-added / guest-added only write the host's in-app bell. The other 20 local templates (RSVP Confirmation, 24-Hour Reminder, Event Update, Event Cancelled, …) have NO `trigger_key` — defined, never fired. `TEMPLATE_TRIGGER_KEYS` reserves rsvp_confirmation / rsvp_declined / reminder_24h with no implementation; the admin Trigger dropdown (`SYSTEM_TRIGGERS`) offers only Welcome Invitation.
+
+### 593. RSVP list vs Participants showing different numbers
+
+Jamal: "rsvp list and participant showing different — check live db, fix".
+
+Both read `event_participants` for the host (`website_client_id`). Locally the two portal LISTS return the same rows and the same status buckets; they differ in three ways:
+1. **Code gap, fixed:** `clientParticipant.listParticipants` / `getParticipantStats` did not exclude `event_id IS NULL` rows (leftover phone-book rows, §572/§581); `clientRsvp.buildWhere` always did. Both now use `event_id IS NOT NULL`.
+2. **Headline tile:** RSVP page "Total Invitations" = ROWS; portal Participants "Total Guests" = HEADS (SUM party_size). Local event #22: 36 vs 62. Not changed — needs Jamal's call on which number both should lead with.
+3. **App Participants screen = JOINED only** (`participant_client_id` set), RSVP = everyone invited. Event #22: 1 vs 36. By design (§539), not changed.
+
+Production could not be read from here. New read-only tool `compare-rsvp-participants.js` (`--prod`) prints per host: no_event, host_mismatch (row host ≠ event owner — portal and app then disagree), deleted_event, status_clash (rsvp_status vs response_type), and per event rows / heads / joined / buckets. Local: all causes 0. **Waiting on Jamal's `--prod` output.**
+
+**§593 production result (read with Jamal's permission, read-only):** no bad rows on any live event — no_event, host_mismatch, deleted_event and status_clash all 0. Event #20: 25 rows, of which **22 are `TEST DATA §588`** seeder rows (never joined, party_size 2 even for declined / no-response) and **3 are real** QR-joined participants. So the app's Participants (joined only) shows 3 while the portal RSVP list shows 25 and "Total Guests" 47. Fix = `node src/database/seeders/plan-limits-test-data.seeder.js --remove` when Jamal is done testing, then restore the §587 plan limits.

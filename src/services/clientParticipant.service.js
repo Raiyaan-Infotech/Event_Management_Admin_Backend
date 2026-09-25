@@ -132,7 +132,10 @@ const listParticipants = async (clientId, query = {}) => {
     const tab = String(query.status || 'all').toLowerCase();
     const search = String(query.search || '').trim();
 
-    const where = { website_client_id: clientId };
+    // Only rows ON an event — the same rule as the RSVP list (clientRsvp.buildWhere).
+    // A row with no event is a leftover phone-book contact (§572/§581); without
+    // this the two screens counted different people for the same host (§593).
+    const where = { website_client_id: clientId, event_id: { [Op.ne]: null } };
     if (query.event_id) where.event_id = Number(query.event_id);
     if (tab === 'joined') where.participant_client_id = { [Op.ne]: null };
     else if (tab === 'not_responded') where.rsvp_status = { [Op.in]: ['not_responded', 'invited'] };
@@ -174,7 +177,8 @@ const listParticipants = async (clientId, query = {}) => {
  * four people at the venue.
  */
 const getParticipantStats = async (clientId, query = {}) => {
-    const where = { website_client_id: clientId };
+    // Same rule as the list above and the RSVP tiles: event rows only (§593).
+    const where = { website_client_id: clientId, event_id: { [Op.ne]: null } };
     const eventId = Number(query.event_id) || null;
     if (eventId) where.event_id = eventId;
 
