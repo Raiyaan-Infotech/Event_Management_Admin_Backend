@@ -16,7 +16,6 @@ const bcrypt = require('bcryptjs');
 const ApiError = require('../utils/apiError');
 const mediaService = require('./media.service');
 const { TtlCache } = require('../utils/ttlCache');
-const { isAppFeature, isPortalSection, isEventMenu } = require('../utils/menuPlacement');
 
 /**
  * Plan gating is read on EVERY event open and every options call, is identical
@@ -302,9 +301,9 @@ const platformFromHeader = (value) =>
  * The menu ids a plan grants.
  *
  * No platform anywhere in this answer (session §520, §544, §546, §552): a plan
- * grants its menus everywhere, and a menu is either Active or it is not. Where a
- * granted menu then appears is decided by the menu itself at the point of use
- * (utils/menuPlacement), not by the grant.
+ * grants its menus everywhere, and a menu is either Active or it is not. Every
+ * granted menu is offered to every event; `is_default` decides only whether the
+ * event may switch it off.
  */
 const grantedMenuIds = async (planId) => {
     // Cached: the same answer for every guest of every event on this plan, and
@@ -431,24 +430,16 @@ const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
             where: activeWhere(companyId, { id: { [Op.in]: menuIds } }),
             // A menu is scoped by category only (NULL = every category), so the
             // wizard offers just the menus that suit the category picked in step 1.
-            attributes: [...TAXONOMY_ATTRS, 'slug', 'menu_group', 'event_category_id'],
+            attributes: [...TAXONOMY_ATTRS, 'slug', 'menu_group', 'is_default', 'event_category_id'],
             order: [['sort_order', 'ASC'], ['id', 'ASC']],
         })
         : [];
 
-    // Three different things share the grant table, told apart by the menu
-    // itself (see utils/menuPlacement). Event FEATURES are what the wizard
-    // offers and an event stores; PORTAL SECTIONS only decide which sidebar
-    // sections the client sees, so they are kept out of `menus` — the wizard
-    // would otherwise offer "Guests" as an event feature, and event create
-    // validation (which reads `menus`) would accept it. App features are not
-    // per-event choices either — the plan alone grants them.
-    const menus = granted.filter((m) => isEventMenu(m.slug));
-    const portalSections = granted.filter((m) => isPortalSection(m.slug)).map((m) => m.slug);
-
-    // The plan's mobile APP features, for the wizard's per-event on/off
-    // switches.
-    const appFeatures = granted.filter((m) => isAppFeature(m.slug));
+    // EVERY menu the plan grants is an event menu (Jamal, 2026-09-25): no slug
+    // lists deciding what the wizard may offer. What the admin ticks on the plan
+    // is what the client sees. `is_default` decides the switch — a Default menu
+    // is always on and cannot be turned off, an Add-on can.
+    const menus = granted;
 
     // The admin-authored invitation templates this plan entitles them to. The
     // wizard narrows these further by the category actually chosen in
@@ -472,10 +463,13 @@ const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
         reason: menus.length ? null : 'Your plan does not include any menus yet. Please contact us.',
         categories: categories.map((r) => r.toJSON()),
         menus: menus.map((r) => r.toJSON()),
-        /** Slugs of the portal sidebar sections this plan grants on this platform. */
-        portal_sections: portalSections,
-        /** The plan's mobile app features — each event can switch any of them off. */
-        app_features: appFeatures.map((r) => r.toJSON()),
+        /** Slugs of every menu the plan grants — the portal sidebar reads these. */
+        portal_sections: granted.map((m) => m.slug),
+        /**
+         * Always empty now: app features are ordinary menus in `menus`. Kept so
+         * an older portal build renders an empty section instead of crashing.
+         */
+        app_features: [],
         templates,
     };
 };

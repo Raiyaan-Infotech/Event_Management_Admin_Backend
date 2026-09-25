@@ -15,7 +15,6 @@ const {
 const { Op } = Sequelize;
 const ApiError = require('../utils/apiError');
 const eventQr = require('../utils/eventQr');
-const { isAppFeature, isPortalSection, isLockedMenu } = require('../utils/menuPlacement');
 const clientPortalService = require('./clientPortal.service');
 const mediaService = require('./media.service');
 const subscriptionPlanService = require('./subscriptionPlan.service');
@@ -300,25 +299,21 @@ const normalise = async (clientId, body, { partial = false } = {}) => {
             }
         }
 
-        // Locked menus are added back rather than refused: the client did not
+        // Default menus are added back rather than refused: the client did not
         // choose to drop them (the switch is disabled), so a payload without one
-        // is a stale or hand-made request, not an instruction.
-        const locked = options.menus.filter((m) => isLockedMenu(m.slug)).map((m) => m.id);
-        data.menu_ids = [...new Set([...ids, ...locked])];
-    }
+        // is a stale or hand-made request, not an instruction. Only the ones
+        // that suit this event's category, same rule as the check above.
+        const defaults = options.menus
+            .filter((m) => Number(m.is_default) === 1)
+            .filter((m) => !data.event_category_id || !m.event_category_id
+                || Number(m.event_category_id) === Number(data.event_category_id))
+            .map((m) => m.id);
+        data.menu_ids = [...new Set([...ids, ...defaults])];
 
-    // ── Step 3 — the plan's app features this event switches OFF ────────────
-    // Kept to ids the plan actually grants as app features; anything else is
-    // dropped rather than refused — an OFF entry for a feature the plan no
-    // longer grants cannot turn anything on, so it is only noise.
-    if (has('disabled_app_menu_ids')) {
-        // A locked feature is never switchable, so it is dropped from the OFF
-        // list for the same reason a locked menu is added back above.
-        const appIds = new Set(
-            (options.app_features ?? []).filter((m) => !isLockedMenu(m.slug)).map((m) => Number(m.id))
-        );
-        const raw = Array.isArray(picked.disabled_app_menu_ids) ? picked.disabled_app_menu_ids : [];
-        data.disabled_app_menu_ids = [...new Set(raw.map(Number).filter((id) => appIds.has(id)))];
+        // Every menu is now chosen in `menu_ids`; the separate OFF list for app
+        // features is retired. Cleared on every menu save so an old entry can
+        // never hide a menu the client just switched on.
+        data.disabled_app_menu_ids = [];
     }
 
     // ── Step 4 — design ─────────────────────────────────────────────────────
@@ -574,10 +569,10 @@ const getEventForViewer = async (clientId, eventId, opts = {}) => {
  * ── `menus` IS GATED BY THE PLAN AS IT IS NOW ───────────────────────────────
  * `menu_ids` is what was chosen when the event was saved and is returned
  * untouched (the portal's edit form reads it). `menus` — what the event SHOWS —
- * is those ids narrowed to what the owner's plan grants today on the caller's
- * platform (`opts.platform`, 'website' | 'mobile'). So:
+ * is those ids plus the plan's default menus, narrowed to what the owner's plan
+ * grants today. The same on every platform (`opts.platform` is accepted but no
+ * longer changes the answer). So:
  *   - a menu the admin removes from the plan disappears from existing events
- *   - a web-only menu never reaches the app
  *   - adding the menu back to the plan brings it back, because nothing was
  *     deleted from the event.
  */
@@ -604,16 +599,6 @@ const getEventForViewer = async (clientId, eventId, opts = {}) => {
 // only that the viewer is a guest at all (reaching this function as a
 // non-owner already proves that — see getEventForViewer).
 const HOST_ONLY_MENU_SLUGS = new Set(['guests']);
-
-/**
- * Menus that are never an Explore tile in the app. The plan still grants them
- * for the portal. Splash Screens is not a screen to open: the event's own
- * splash plays when the event opens (`/splash-screens/for-event`). Messages
- * stays a tile (Jamal, 2026-09-25). Matched on the base slug, so a
- * per-category copy (`splash-screens-2`) is caught too.
- */
-const NOT_APP_TILE_SLUGS = new Set(['splash-screens']);
-const baseSlugOf = (slug) => String(slug).replace(/-\d+$/, '');
 
 /**
  * The app's own three Family sub-tabs (Family / Relative / Close Friend),
@@ -663,42 +648,36 @@ const presentOne = async (event, { platform = 'website', isOwner = true, viewerI
     const presented = present(event);
 
     const grantedIds = await clientPortalService.ownerGrantedMenuIds(presented.website_client_id);
-    const granted = new Set(grantedIds);
-    const visibleIds = presented.menu_ids.map(Number).filter((id) => granted.has(id));
 
     /*
-      ── EVENT FEATURES + APP FEATURES IN ONE QUERY ──────────────────────
-      Resolve the menu names for the ids stored on the row. Done here rather
-      than through an association because menu_ids is a JSON array — see the
-      model comment for why it is not a join table.
+      ── ONE LIST, DECIDED BY THE PLAN AND THE EVENT ─────────────────────
+      Every menu the host's plan grants is an event menu (Jamal, 2026-09-25 —
+      no slug lists deciding placement). The event shows:
+        - the menus it switched ON (`menu_ids`), and
+        - every DEFAULT menu, which cannot be switched off — also covers an
+          event saved before a menu became default,
+      both narrowed to what the plan grants TODAY, so a menu the admin removes
+      from the plan disappears from existing events and comes back with it.
+      Same list for the portal and the app; the app decides which of them it
+      draws as tiles (the splash, for one, plays on open instead).
 
-      EVENT FEATURES are the event's own selection, narrowed by the plan.
-      APP FEATURES are mobile-only: the host's plan granting them on MOBILE
-      decides which exist, and each event shows all of them except the ones
-      its `disabled_app_menu_ids` switched off. `portal` rows count when the
-      plan also grants them on mobile (Guests is one menu for both surfaces)
-      and cannot be switched off per event. See apply-app-feature-menus.js.
-
-      These were two sequential `findAll`s over the same table with disjoint
-      groups — now ONE round trip, partitioned in JS. The design and the guest
-      stats do not depend on the menus or on each other either, so all three go
-      together instead of three-deep. On the event-open path that is three
-      round trips saved, ~200–374ms each in production.
+      Resolved here rather than through an association because menu_ids is a
+      JSON array — see the model comment. The design and the guest stats go in
+      the same Promise.all: ~200–374ms a round trip in production.
     */
-    const wantsApp = platform === 'mobile' && grantedIds.length > 0;
-    const menuIdsToRead = [...new Set([...visibleIds, ...(wantsApp ? grantedIds : [])])];
+    const chosen = new Set(presented.menu_ids.map(Number));
 
     const [menuRows] = await Promise.all([
-        menuIdsToRead.length
+        grantedIds.length
             ? EventMenu.findAll({
                 where: {
-                    id: { [Op.in]: menuIdsToRead },
+                    id: { [Op.in]: grantedIds },
                     is_active: 1,
                 },
                 // name / icon / color / sort_order: the app draws its Explore
                 // tiles straight from these (Menu Management is the source of
                 // the label, icon and order — nothing about a tile is hardcoded).
-                attributes: ['id', 'name', 'slug', 'icon', 'color', 'sort_order'],
+                attributes: ['id', 'name', 'slug', 'icon', 'color', 'sort_order', 'is_default', 'event_category_id'],
                 order: [['sort_order', 'ASC'], ['id', 'ASC']],
                 raw: true,
             })
@@ -710,39 +689,30 @@ const presentOne = async (event, { platform = 'website', isOwner = true, viewerI
         guestStatsFor(presented.id).then((stats) => { presented.stats = stats; }),
     ]);
 
-    const visible = new Set(visibleIds);
-    // App features the host switched off for THIS event (portal rows such as
-    // Guests are not per-event choices, so they are never in this list).
-    const switchedOff = new Set(presented.disabled_app_menu_ids.map(Number));
-    const eventFeatures = [];
-    const appFeatures = [];
+    const categoryId = presented.event_category_id ? Number(presented.event_category_id) : null;
+    const menus = [];
     for (const row of menuRows) {
-        // Before the bucketing: a suffixed copy is not a portal section, so it
-        // would otherwise land in the event features and still be a tile.
-        if (platform === 'mobile' && NOT_APP_TILE_SLUGS.has(baseSlugOf(row.slug))) continue;
-        // The groups are disjoint, so a row lands in exactly one bucket and the
-        // two buckets keep the order they were concatenated in before. Ordering
-        // inside each is still the query's (sort_order, id).
-        if (isAppFeature(row.slug) || isPortalSection(row.slug)) {
-            if (!wantsApp) continue;
-            if (isAppFeature(row.slug) && switchedOff.has(Number(row.id))) continue;
-            if (!isOwner) {
-                // See HOST_ONLY_MENU_SLUGS: this opens the host's guest
-                // register, which answers a participant with an empty list.
-                if (HOST_ONLY_MENU_SLUGS.has(row.slug)) continue;
-                // Family opens a directory of OTHER family members, which only
-                // makes sense to somebody who is one.
-                if (row.slug === 'family' && !viewerIsFamily) continue;
-                // `participants` needs no extra check: reaching this function
-                // as a non-owner already proves the viewer joined the event.
-            }
-            appFeatures.push(row);
-        } else if (visible.has(Number(row.id))) {
-            eventFeatures.push(row);
+        const on = chosen.has(Number(row.id))
+            // A default menu is always on — but only where it suits the
+            // event's category, the same rule the wizard and the save apply.
+            || (Number(row.is_default) === 1
+                && (!row.event_category_id || !categoryId || Number(row.event_category_id) === categoryId));
+        if (!on) continue;
+        if (!isOwner) {
+            // See HOST_ONLY_MENU_SLUGS: this opens the host's guest register,
+            // which answers a participant with an empty list.
+            if (HOST_ONLY_MENU_SLUGS.has(row.slug)) continue;
+            // Family opens a directory of OTHER family members, which only
+            // makes sense to somebody who is one.
+            if (row.slug === 'family' && !viewerIsFamily) continue;
+            // `participants` needs no extra check: reaching this function as a
+            // non-owner already proves the viewer joined the event.
         }
+        const { is_default: _d, event_category_id: _c, ...menu } = row;
+        menus.push(menu);
     }
 
-    presented.menus = [...eventFeatures, ...appFeatures];
+    presented.menus = menus;
 
     return presented;
 };

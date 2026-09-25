@@ -13819,3 +13819,28 @@ Jamal asked for this. All 4 active plans on production (Basic 9, Standard 10, Pr
 - **Basic DOES grant Messages on live:** a `subscription_plan_menus` row (9, 16), last saved 2026-09-24 03:41 UTC. That is the portal sidebar. Untick it in admin → Subscriptions → Basic → Menus → Client Portal Sections if Basic should not have it.
 
 **Where it came from (§589):** a regression from §553/§554 (commit 861c1d5, 2026-09-23). Before that, `grantedMenuIds(plan, "mobile")` required `event_menus.active_mobile = 1`. In the portal group only Guests had it, so Messages and Splash Screens (mobile = 0) never reached the app. §553 dropped the per-platform flags as redundant with `menu_group`, and §554 then replaced `menu_group` with slug lists that treat all three portal sections the same. From then on every granted portal section reached the app. `NOT_APP_TILE_SLUGS` restores the old outcome: of the portal sections, only Guests is an app tile.
+
+### 590. Menus follow the plan and the Default flag — every slug list removed
+
+Jamal: "which menu I tick in the plan must show in the client portal, not hardcoded"; "all menus show; Default cannot be switched off, Add-on can"; "why is the locked menu hardcoded — a menu I add tomorrow would need code too".
+
+**Why Messages never showed in the wizard:** two causes. (1) `menuPlacement.js` classed `messages` as a portal section, and `getEventOptions` kept portal sections out of `menus`. (2) The portal wizard grouped menus by `core` / `additional` / `custom`, but §554 renamed the enum to `core` / `addon`, so EVERY Add-on menu (Messages, Invite & Share, Social Wall, Event Information) was silently dropped from step 3.
+
+**The rule now, all data-driven:**
+- `event_menus.is_default = 1` (Menu Management → Plan Default) = locked: every plan grants it, every event has it, no switch.
+- `is_default = 0` = Add-on: optional on a plan, switchable per event.
+
+**Backend**
+- `utils/menuPlacement.js` deleted (APP_FEATURE / PORTAL_SECTION / LOCKED slug lists). `align-locked-menus.js` keeps a frozen copy of its list.
+- `clientPortal.getEventOptions`: `menus` = every granted menu (+ `is_default`); `portal_sections` = every granted slug; `app_features` = `[]` (kept for old builds).
+- `clientEvent` save: Default menus added back to `menu_ids` (category-scoped); `disabled_app_menu_ids` cleared on every menu save (retired).
+- `clientEvent.presentOne`: `menus` = (`menu_ids` ∪ Default menus) ∩ plan grants, same on web and mobile. Splash Screens stays in the data; the APP hides it from the tile grid (`_notTiles` in `wedding_home_screen.dart`). Host-only Guests and the Family-viewer gate unchanged.
+- `subscriptionPlan.saveMenus`: re-adds every `is_default = 1` menu (was the slug list).
+- `eventMenu.service`: making a menu Default (create / edit / quick toggle) grants it to every live plan at once — one `INSERT … SELECT`.
+- Tool `backfill-event-menu-ids.js` (dry run default, `--apply`, `--prod`): writes the menus events used to get IMPLICITLY (old app-feature + portal-section lists, minus `disabled_app_menu_ids`) into `menu_ids`, so existing events keep Invite & Share / Social Wall / Messages. One UPDATE, JSON backup first. **Applied on LOCAL** (18/18) and **on PRODUCTION by Jamal** (5/5: #20 #21 #22 #27 #28; backup `D:\Jamal\prod-backups\prod-event-menu-ids-1790311269182.json`). #27 got no Invite & Share / Messages / Social Wall: its owner's plan does not grant them, or the event had them switched off. Only #22 got Social Wall.
+
+**Portal (`event_client_single`)** — wizard step 3 is two panels, "Included Menus" (Default, locked) and "Add-on Menus" (switchable), both from `is_default`. `lib/locked-menus.ts` deleted; `MenuOption.menu_group` is `core | addon`.
+
+**Admin** — `lib/locked-menus.ts` `isLockedMenu(menu)` reads `is_default`. Plan wizard: Default section = locked. Menu form: the Default switch is no longer disabled for 7 slugs.
+
+⚠ Every local menu is tagged category 1 (Wedding). Menus are category-scoped, so an event in another category gets none of them — before, app features and portal sections ignored category. Untag or retag the menus in Menu Management if other categories need them.

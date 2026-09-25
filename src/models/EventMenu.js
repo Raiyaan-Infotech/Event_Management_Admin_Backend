@@ -34,9 +34,9 @@ module.exports = (sequelize) => {
             type: DataTypes.STRING(300),
             allowNull: true,
         },
-        // A label only: Core or Add-on. WHERE a menu appears (mobile tile,
-        // portal sidebar section, event menu) is a property of the feature and
-        // lives in utils/menuPlacement.js, not in this column.
+        // A label only: Core or Add-on. Every menu a plan grants is offered to
+        // every event; `is_default` (not this column) decides whether an event
+        // may switch it off.
         menu_group: {
             type: DataTypes.ENUM('core', 'addon'),
             allowNull: false,

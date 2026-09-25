@@ -26,7 +26,9 @@ const APPLY = process.argv.includes('--apply');
 const PROD = process.argv.includes('--prod');
 const BACKUP_DIR = 'D:\\Jamal\\prod-backups';
 
-const { LOCKED_MENU_SLUGS } = require('../../utils/menuPlacement');
+// Frozen copy: the slug list this tool was written against. The live rule is
+// now `event_menus.is_default` (utils/menuPlacement.js was removed 2026-09-25).
+const LOCKED_MENU_SLUGS = ['splash-screens', 'event-invitation', 'participants', 'venue', 'rsvp', 'agenda', 'guests'];
 
 const parseEnv = (file) => {
     const out = {};

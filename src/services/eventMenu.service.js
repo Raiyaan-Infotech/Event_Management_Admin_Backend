@@ -142,6 +142,26 @@ const getById = async (id, companyId = undefined) => {
     return plainRow(menu);
 };
 
+/**
+ * A Default menu is granted by EVERY plan (and no event can switch it off), so
+ * marking a menu Default grants it to each live plan that lacks it — at once,
+ * not on each plan's next save. ONE statement (production is ~370ms a query).
+ * Additive only: switching Default off leaves the grants for the admin to
+ * untick per plan.
+ */
+const grantToEveryPlan = async (menuId) => {
+    await sequelize.query(
+        `INSERT INTO subscription_plan_menus (plan_id, menu_id, sort_order, created_at, updated_at)
+         SELECT p.id, :menuId, 999, NOW(), NOW()
+           FROM subscription_plans p
+          WHERE p.deleted_at IS NULL
+            AND NOT EXISTS (SELECT 1 FROM subscription_plan_menus g
+                             WHERE g.plan_id = p.id AND g.menu_id = :menuId)`,
+        { replacements: { menuId: Number(menuId) } },
+    );
+    invalidateGrants();
+};
+
 const create = async (data, userId = null, companyId = undefined) => {
     const payload = pickWritable(data);
 
@@ -153,6 +173,7 @@ const create = async (data, userId = null, companyId = undefined) => {
     payload.slug = await buildUniqueSlug(payload.slug || payload.name, companyId);
 
     const menu = await baseService.create(EventMenu, MODEL_NAME, payload, userId, companyId);
+    if (payload.is_default === 1) await grantToEveryPlan(menu.id);
     return getById(menu.id, companyId);
 };
 
@@ -180,6 +201,7 @@ const update = async (id, data, userId = null, companyId = undefined) => {
     }
 
     await baseService.update(EventMenu, MODEL_NAME, id, payload, userId, companyId);
+    if (payload.is_default === 1) await grantToEveryPlan(id);
     invalidateGrants();
     return getById(id, companyId);
 };
@@ -202,7 +224,9 @@ const updateToggle = async (id, field, value, userId = null, companyId = undefin
     if (!TOGGLE_FIELDS.includes(field)) {
         throw ApiError.badRequest(`Unknown toggle "${field}".`);
     }
-    await baseService.update(EventMenu, MODEL_NAME, id, { [field]: toBit(value, field === 'is_default' ? 0 : 1) }, userId, companyId);
+    const bit = toBit(value, field === 'is_default' ? 0 : 1);
+    await baseService.update(EventMenu, MODEL_NAME, id, { [field]: bit }, userId, companyId);
+    if (field === 'is_default' && bit === 1) await grantToEveryPlan(id);
     invalidateGrants();
     return getById(id, companyId);
 };
