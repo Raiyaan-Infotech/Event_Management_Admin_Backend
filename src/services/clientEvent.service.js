@@ -606,13 +606,14 @@ const getEventForViewer = async (clientId, eventId, opts = {}) => {
 const HOST_ONLY_MENU_SLUGS = new Set(['guests']);
 
 /**
- * Portal sections that are never an Explore tile in the app. The plan still
- * grants them: Messages is a portal sidebar section with no app screen, and
- * Splash Screens is not a menu at all. The event's own splash plays when the
- * event opens (`/splash-screens/for-event`). As tiles they opened "coming soon"
- * for the host, and a PARTICIPANT was shown the host's tools.
+ * Menus that are never an Explore tile in the app. The plan still grants them
+ * for the portal. Splash Screens is not a screen to open: the event's own
+ * splash plays when the event opens (`/splash-screens/for-event`). Messages
+ * stays a tile (Jamal, 2026-09-25). Matched on the base slug, so a
+ * per-category copy (`splash-screens-2`) is caught too.
  */
-const NOT_APP_TILE_SLUGS = new Set(['messages', 'splash-screens']);
+const NOT_APP_TILE_SLUGS = new Set(['splash-screens']);
+const baseSlugOf = (slug) => String(slug).replace(/-\d+$/, '');
 
 /**
  * The app's own three Family sub-tabs (Family / Relative / Close Friend),
@@ -716,12 +717,14 @@ const presentOne = async (event, { platform = 'website', isOwner = true, viewerI
     const eventFeatures = [];
     const appFeatures = [];
     for (const row of menuRows) {
+        // Before the bucketing: a suffixed copy is not a portal section, so it
+        // would otherwise land in the event features and still be a tile.
+        if (platform === 'mobile' && NOT_APP_TILE_SLUGS.has(baseSlugOf(row.slug))) continue;
         // The groups are disjoint, so a row lands in exactly one bucket and the
         // two buckets keep the order they were concatenated in before. Ordering
         // inside each is still the query's (sort_order, id).
         if (isAppFeature(row.slug) || isPortalSection(row.slug)) {
             if (!wantsApp) continue;
-            if (NOT_APP_TILE_SLUGS.has(row.slug)) continue;
             if (isAppFeature(row.slug) && switchedOff.has(Number(row.id))) continue;
             if (!isOwner) {
                 // See HOST_ONLY_MENU_SLUGS: this opens the host's guest
