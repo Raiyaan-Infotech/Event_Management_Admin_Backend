@@ -59,6 +59,10 @@ module.exports = (sequelize) => {
             venue_image: { type: DataTypes.STRING(500), allowNull: true },
             venue_lat: { type: DataTypes.DECIMAL(10, 7), allowNull: true },
             venue_lng: { type: DataTypes.DECIMAL(10, 7), allowNull: true },
+            /** The event's ONE ceremony; its date/time are the event's own. */
+            ceremony_title: { type: DataTypes.STRING(150), allowNull: true },
+            ceremony_venue: { type: DataTypes.STRING(255), allowNull: true },
+            ceremony_description: { type: DataTypes.TEXT, allowNull: true },
 
             /**
              * ── The invitation's own detail fields ──────────────────────────

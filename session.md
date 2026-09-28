@@ -13899,3 +13899,53 @@ Ran the new read-only `compare-rsvp-participants.js --prod` with Jamal's permiss
 Participants only lists people who joined through the app (the 3 real ones); RSVP counts every row including the seeded ones — event #20's test rows alone contribute 12 Accepted heads and 12 Declined heads, which is where Jamal's "12" was coming from. Not a bug — told Jamal to run `plan-limits-test-data.seeder.js --remove` (still outstanding, same item as §587/§588's cleanup) and then re-check; numbers will drop to 3/4 on #20 and 0 on the rest until real guests join.
 
 Separately fixed a small UI overlap Jamal reported: **Notification Templates list page**, the Status filter + Reset button sat on their own row while the grid above had an unused 5th column, so they visually crowded together. Moved Status (now labelled, same height as the other filters) + Reset into that 5th column, same row as Search / Notification Category / Event Category. `templates/page.tsx` only; `tsc --noEmit` clean, not opened in a browser yet.
+
+## Session 49 — Organizer vs client vs participant in the app, the mobile Create Event wizard, and venue/ceremony/menu-order fields (2026-09-28)
+
+### 596. Roles on the mobile app (decided by Jamal)
+- **Event Organizer** welcome button is used by BOTH the **client (super admin)** — creates events and manages all their own — and a future **assigned organizer** (admin of an assigned event only: edit, never create). **Participants never create.**
+- Until an organizer-assignment table exists, "client" = the account holds a **subscription plan**.
+- Welcome screen: third card "Event Organizer — Manage your events". Role is a client-side flag (`userRoleProvider`, SharedPreferences, loaded before `runApp`); the backend has no role column.
+
+### 597. Organizer login gate (backend + app)
+- `websiteClient.service.requestLoginOtp`: body `login_as: 'organizer'` → **403 "This mobile number is not registered as an event organizer."** unless the account has `subscription_plan_id` OR owns a live event. Checked **before** a code is generated/sent (no MSG91 cost).
+- App keeps a second check in `signInWithOtp(beforeSignIn:)` — runs after verify but BEFORE the session is published (publishing redirects `/login-mobile` → `/home` and disposed the screen, which is why the first after-verify check never ran).
+- Login phone field now exactly 10 digits.
+- **Deployed** (commit 75840ae) and verified on production from the OnePlus: participant 9884699435 → 403 at Send OTP, no OTP; organizer 9000000028 logs in.
+
+### 598. Organizer / client Home and navigation (app)
+- Home tab **is** the latest owned event's page (highest `events.id`), embedded — no card, no Open button, no back arrow. Only moves `selectedEventId` while its tab is visible (My Events sets it for a tapped event).
+- Organizer bar: Home · My Events · Scan QR · Guests · Settings. Guests = the account's phone book (`/event/guests`). Bell opens Notifications with no tab lit.
+- **My Events + Create Event** FAB only for an Event-Organizer login whose account has a plan. Participant login: no Create (was shown by mistake for plan-holding accounts; fixed).
+- Found on production only: after the permission screen the auto-open was dropped by a gate refresh → Home stuck on "Opening your event…". Fixed by the embedded design above.
+
+### 599. Mobile Create / Edit Event wizard (`/event/create`, `/event/edit?id=&step=`)
+- 8 steps: Event Type → Basic Details → Ceremony & Date → Venue → Design → Menus → Settings → Review. Same fields and endpoints as the portal wizard (`GET /client/event-options`, `POST|PUT /client/events`, `POST /client/events/cover-image`); categories, templates and menus come from admin, nothing hardcoded. `event-options` now also returns `timezones` (same 4 labels as the portal's `TIME_ZONES`; keep both in step).
+- Success screen `/event/created` (success.json Lottie; View / Manage Guests / Edit / Share).
+- Owner ⋮ on the event page: Edit, Duplicate (POST copy, counts on plan), Share, Delete (real), Event Settings (wizard at Settings step); View as Participant and Archive = "coming soon".
+- Edit/Duplicate drop menu ids the plan no longer grants (event 71 held a retired menu and every save failed).
+- Still design-only (on screen, not saved): Hashtag, Guest Registration switches, Features switches.
+
+### 600. New `events` columns — ⚠ run on production BEFORE deploying this backend
+Tool `src/database/tools/add-event-venue-details.js` (dry run default, `--apply`, `--prod`); applied **LOCAL only**; `initial_setup.sql` + `Event` model updated.
+- `venue_landmark`, `venue_map_link` (http/https only), `venue_image` (http/https or /uploads), `venue_lat` / `venue_lng` DECIMAL(10,7) (both or neither; arrive as strings).
+- `menu_order` JSON — the event's `menus` are returned in this order (ids not in it keep admin `sort_order`, after). Non-granted ids dropped on save.
+- `ceremony_title`, `ceremony_venue` (NULL = main venue), `ceremony_description` — **one ceremony per event**, no dates of its own (uses the event's).
+- Validated locally by API round trips on event 71 (saved, read back, cleared; bad link and half pin rejected).
+```
+node src/database/tools/add-event-venue-details.js --prod --apply
+```
+
+### 601. Wizard UI decisions (Jamal)
+- Ceremony & Date step order: Ceremony Title → Start/End Date → Start/End Time → Venue → Description. The multi-ceremony list and Add Ceremony page were removed.
+- Venue "Search on Map" = tap the map to drop a pin (fills lat/lng AND the map link). No typed search — needs Google Places API (key + billing).
+- Menu drag handles → `menu_order`.
+- Portal (`event_client_single` event-wizard.tsx) got the same fields: Landmark, Map Link, Lat/Lng inputs, Venue Image, ↑/↓ menu ordering, ceremony fields. `tsc` + eslint clean; not opened in a browser (dev server not running).
+
+### 602. Open items
+- **Google Maps blank everywhere in the app**: key `AIzaSyDA3Hb3…` rejects debug SHA-1 `02:F3:16:EF:DC:F7:1E:97:7F:A7:90:19:57:EB:A2:EA:22:6D:5C:E3` (+ release SHA-1) — add in Cloud Console, enable Maps SDK for Android.
+- Production `OTP_ACCEPT_ANY=true` — any 6 digits signs anyone in.
+- Organizer-assignment table (`event_organizers`) — designed, not built (next).
+- Ceremony / venue / menu-order on production need the §600 tool first (time zone is an existing column; its list went live with 75840ae).
+- Mobile + portal changes **not committed**; backend §600 changes not committed.
+- A full create from the phone was started (client 9000000099, local) and stopped at the photo step.

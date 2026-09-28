@@ -579,7 +579,11 @@ const requestLoginOtp = async (data = {}, vendorId = DEFAULT_VENDOR_ID) => {
     // the same rows `GET /client/events` returns. Refused BEFORE a code is
     // issued, so nobody types an OTP only to be turned away afterwards.
     if (data.login_as === 'organizer') {
-        const owned = await Event.count({ where: { website_client_id: client.id } });
+        // A client (super admin) holds a plan and may sign in before creating
+        // their first event; anyone else must own a live event.
+        const owned = client.subscription_plan_id
+            ? 1
+            : await Event.count({ where: { website_client_id: client.id } });
         if (!owned) {
             throw ApiError.forbidden('This mobile number is not registered as an event organizer.');
         }

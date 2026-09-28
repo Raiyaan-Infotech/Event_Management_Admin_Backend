@@ -54,6 +54,7 @@ const WRITABLE_FIELDS = [
     'venue_name', 'venue_address',
     'venue_landmark', 'venue_map_link', 'venue_image', 'venue_lat', 'venue_lng',
     'menu_order',
+    'ceremony_title', 'ceremony_venue', 'ceremony_description',
     'organizer', 'contact_phone', 'contact_email', 'footer_note',
     'privacy', 'status',
     'menu_ids', 'disabled_app_menu_ids',
@@ -210,6 +211,10 @@ const normalise = async (clientId, body, { partial = false } = {}) => {
     if (has('venue_name')) data.venue_name = str(picked.venue_name, 255);
     if (has('venue_address')) data.venue_address = str(picked.venue_address, 500);
     if (has('venue_landmark')) data.venue_landmark = str(picked.venue_landmark, 255);
+    // The single ceremony. No dates: it happens within the event's.
+    if (has('ceremony_title')) data.ceremony_title = str(picked.ceremony_title, 150);
+    if (has('ceremony_venue')) data.ceremony_venue = str(picked.ceremony_venue, 255);
+    if (has('ceremony_description')) data.ceremony_description = str(picked.ceremony_description, 2000);
 
     // Links and images are rendered/opened by every app and portal, so only
     // http(s) (and our own /uploads for the image) — never javascript: etc.
