@@ -53,6 +53,12 @@ module.exports = (sequelize) => {
 
             venue_name: { type: DataTypes.STRING(255), allowNull: true },
             venue_address: { type: DataTypes.STRING(500), allowNull: true },
+            // Added by add-event-venue-details.js.
+            venue_landmark: { type: DataTypes.STRING(255), allowNull: true },
+            venue_map_link: { type: DataTypes.STRING(500), allowNull: true },
+            venue_image: { type: DataTypes.STRING(500), allowNull: true },
+            venue_lat: { type: DataTypes.DECIMAL(10, 7), allowNull: true },
+            venue_lng: { type: DataTypes.DECIMAL(10, 7), allowNull: true },
 
             /**
              * ── The invitation's own detail fields ──────────────────────────
@@ -87,6 +93,8 @@ module.exports = (sequelize) => {
 
             // ── Step 3 — the menus toggled on ───────────────────────────────
             menu_ids: { type: DataTypes.JSON, allowNull: true },
+            /** Menu ids in the host's order; NULL = admin sort_order. */
+            menu_order: { type: DataTypes.JSON, allowNull: true },
             /**
              * The plan's mobile APP features (Chat, Wishes, …) the client switched
              * OFF for this event. Stored as the OFF list, not the ON list: NULL /

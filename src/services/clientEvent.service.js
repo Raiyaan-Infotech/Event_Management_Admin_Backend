@@ -52,6 +52,8 @@ const WRITABLE_FIELDS = [
     'name', 'host_one', 'host_two', 'tagline', 'description',
     'start_date', 'end_date', 'start_time', 'end_time', 'timezone',
     'venue_name', 'venue_address',
+    'venue_landmark', 'venue_map_link', 'venue_image', 'venue_lat', 'venue_lng',
+    'menu_order',
     'organizer', 'contact_phone', 'contact_email', 'footer_note',
     'privacy', 'status',
     'menu_ids', 'disabled_app_menu_ids',
@@ -207,6 +209,42 @@ const normalise = async (clientId, body, { partial = false } = {}) => {
     if (has('description')) data.description = str(picked.description, 5000);
     if (has('venue_name')) data.venue_name = str(picked.venue_name, 255);
     if (has('venue_address')) data.venue_address = str(picked.venue_address, 500);
+    if (has('venue_landmark')) data.venue_landmark = str(picked.venue_landmark, 255);
+
+    // Links and images are rendered/opened by every app and portal, so only
+    // http(s) (and our own /uploads for the image) — never javascript: etc.
+    if (has('venue_map_link')) {
+        const value = str(picked.venue_map_link, 500);
+        if (value && !/^https?:\/\//i.test(value)) {
+            throw ApiError.badRequest('Please enter a valid map link starting with http:// or https://.');
+        }
+        data.venue_map_link = value;
+    }
+    if (has('venue_image')) {
+        const value = str(picked.venue_image, 500);
+        if (value && !/^(https?:\/\/|\/uploads\/)/i.test(value)) {
+            throw ApiError.badRequest('Invalid venue image.');
+        }
+        data.venue_image = value;
+    }
+
+    // The pin is a pair: both or neither.
+    if (has('venue_lat') || has('venue_lng')) {
+        const blank = (v) => v === null || v === undefined || v === '';
+        if (blank(picked.venue_lat) && blank(picked.venue_lng)) {
+            data.venue_lat = null;
+            data.venue_lng = null;
+        } else {
+            const lat = Number(picked.venue_lat);
+            const lng = Number(picked.venue_lng);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)
+                || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+                throw ApiError.badRequest('Invalid map location.');
+            }
+            data.venue_lat = Number(lat.toFixed(7));
+            data.venue_lng = Number(lng.toFixed(7));
+        }
+    }
     if (has('timezone')) data.timezone = str(picked.timezone, 80);
 
     // The invitation's own detail fields. Each backs a template component; all
@@ -314,6 +352,21 @@ const normalise = async (clientId, body, { partial = false } = {}) => {
         // features is retired. Cleared on every menu save so an old entry can
         // never hide a menu the client just switched on.
         data.disabled_app_menu_ids = [];
+    }
+
+    // The host's menu order. Ids the plan does not grant are dropped rather
+    // than refused (an order is presentation, not entitlement); null resets
+    // to the admin's sort_order.
+    if (has('menu_order')) {
+        const raw = picked.menu_order;
+        if (raw === null || raw === undefined || raw === '') {
+            data.menu_order = null;
+        } else if (!Array.isArray(raw)) {
+            throw ApiError.badRequest('Invalid menu order.');
+        } else {
+            const allowed = new Set(options.menus.map((m) => m.id));
+            data.menu_order = [...new Set(raw.map(Number))].filter((id) => allowed.has(id));
+        }
     }
 
     // ── Step 4 — design ─────────────────────────────────────────────────────
@@ -710,6 +763,17 @@ const presentOne = async (event, { platform = 'website', isOwner = true, viewerI
         }
         const { is_default: _d, event_category_id: _c, ...menu } = row;
         menus.push(menu);
+    }
+
+    // The host's own order when they set one; menus it does not mention keep
+    // the admin sort_order, after the ordered ones.
+    const hostOrder = Array.isArray(presented.menu_order) ? presented.menu_order.map(Number) : [];
+    if (hostOrder.length) {
+        const rank = (id) => {
+            const i = hostOrder.indexOf(Number(id));
+            return i < 0 ? hostOrder.length : i;
+        };
+        menus.sort((a, b) => rank(a.id) - rank(b.id));
     }
 
     presented.menus = menus;
