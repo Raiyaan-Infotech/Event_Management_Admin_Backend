@@ -13880,3 +13880,22 @@ Both read `event_participants` for the host (`website_client_id`). Locally the t
 Production could not be read from here. New read-only tool `compare-rsvp-participants.js` (`--prod`) prints per host: no_event, host_mismatch (row host ≠ event owner — portal and app then disagree), deleted_event, status_clash (rsvp_status vs response_type), and per event rows / heads / joined / buckets. Local: all causes 0. **Waiting on Jamal's `--prod` output.**
 
 **§593 production result (read with Jamal's permission, read-only):** no bad rows on any live event — no_event, host_mismatch, deleted_event and status_clash all 0. Event #20: 25 rows, of which **22 are `TEST DATA §588`** seeder rows (never joined, party_size 2 even for declined / no-response) and **3 are real** QR-joined participants. So the app's Participants (joined only) shows 3 while the portal RSVP list shows 25 and "Total Guests" 47. Fix = `node src/database/seeders/plan-limits-test-data.seeder.js --remove` when Jamal is done testing, then restore the §587 plan limits.
+
+### 594. Messages tile hidden from the app's event home grid too
+
+Jamal: "Messages Menu Not show in event home page menu tile okay do that now" — same treatment as Splash Screens (§589/§590): the menu stays in `event.menus` (plan + `is_default` still decide it, per §590), only the app's Explore grid skips drawing it as a tile. `wedding_home_screen.dart`'s `_notTiles` set now has `{'splash-screens', 'splash-screen', 'messages'}`. Portal sidebar Messages page and the per-event switch are unaffected. `flutter analyze` clean on the file. Ships with the next app rebuild.
+
+### 595. §593 checked against live data — real cause was the plan-limit test data
+
+Ran the new read-only `compare-rsvp-participants.js --prod` with Jamal's permission: no structural bugs on live (no_event / host_mismatch / deleted_event / status_clash all 0 on every host). The mismatch Jamal saw (Participants 3, RSVP 12 on event #20) is because **almost every row on live right now is the §588 seeder's test data**, not a code bug:
+
+| Event | Real (joined via app) | §588 test rows |
+|---|---|---|
+| #20 Ismail & Sameera | 3 people (4 heads), all accepted | 22 |
+| #21 Arsath & Nilofer | 0 | 39 (all) |
+| #22 Najeeb & Rukhsana | 0 | 59 (all) |
+| #27 Jamal & Ayesha | 0 | 9 (all) |
+
+Participants only lists people who joined through the app (the 3 real ones); RSVP counts every row including the seeded ones — event #20's test rows alone contribute 12 Accepted heads and 12 Declined heads, which is where Jamal's "12" was coming from. Not a bug — told Jamal to run `plan-limits-test-data.seeder.js --remove` (still outstanding, same item as §587/§588's cleanup) and then re-check; numbers will drop to 3/4 on #20 and 0 on the rest until real guests join.
+
+Separately fixed a small UI overlap Jamal reported: **Notification Templates list page**, the Status filter + Reset button sat on their own row while the grid above had an unused 5th column, so they visually crowded together. Moved Status (now labelled, same height as the other filters) + Reset into that 5th column, same row as Search / Notification Category / Event Category. `templates/page.tsx` only; `tsc --noEmit` clean, not opened in a browser yet.

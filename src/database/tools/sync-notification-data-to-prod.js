@@ -99,7 +99,7 @@ async function findIdByName(conn, table, name, extraWhere = '') {
         /* ── 1. Categories ─────────────────────────────────────────────── */
         console.log('  notification_categories');
         const [localCats] = await local.query(
-            'SELECT id, name, description, icon, color, sort_order, is_active FROM notification_categories WHERE deleted_at IS NULL',
+            'SELECT id, name, description, icon, color, sort_order, is_active, company_id FROM notification_categories WHERE deleted_at IS NULL',
         );
         const customLocalCats = localCats.filter((c) => !DEFAULT_CATEGORY_NAMES.has(c.name));
 
@@ -123,9 +123,11 @@ async function findIdByName(conn, table, name, extraWhere = '') {
                 continue;
             }
             const [res] = await prod.query(
-                `INSERT INTO notification_categories (name, description, icon, color, sort_order, is_active, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-                [cat.name, cat.description, cat.icon, cat.color, cat.sort_order, cat.is_active],
+                `INSERT INTO notification_categories (name, description, icon, color, sort_order, is_active, company_id, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+                // company_id copied: the admin list is company-scoped, and a NULL row is
+                // invisible there while still firing (how prod ended up empty, §592).
+                [cat.name, cat.description, cat.icon, cat.color, cat.sort_order, cat.is_active, cat.company_id],
             );
             categoryIdByName.set(cat.name, res.insertId);
             console.log(`  + ${cat.name.padEnd(30)} inserted (prod id ${res.insertId})`);
@@ -191,14 +193,14 @@ async function findIdByName(conn, table, name, extraWhere = '') {
             await prod.query(
                 `INSERT INTO notification_templates
                    (name, trigger_key, notification_category_id, event_category_id, title, content,
-                    variables_used, image_url, channels, is_active, sort_order, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+                    variables_used, image_url, channels, is_active, sort_order, company_id, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
                 [
                     t.name, t.trigger_key ?? null, prodCategoryId, prodEventCategoryId, t.title, t.content,
                     // JSON columns: mysql2 returns these already parsed on SELECT, but a raw
                     // INSERT (unlike Sequelize) needs them re-stringified by hand.
                     JSON.stringify(t.variables_used), t.image_url, JSON.stringify(t.channels),
-                    t.is_active, t.sort_order,
+                    t.is_active, t.sort_order, t.company_id,
                 ],
             );
             console.log(`  + ${t.name.padEnd(30)} inserted`);

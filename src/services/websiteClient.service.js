@@ -1,6 +1,6 @@
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
-const { Sequelize, WebsiteClient, Vendor } = require('../models');
+const { Sequelize, WebsiteClient, Vendor, Event } = require('../models');
 const { Op } = Sequelize;
 const baseService = require('./base.service');
 const ApiError = require('../utils/apiError');
@@ -573,6 +573,17 @@ const findClientByMobile = async (mobile, vendorId) => {
  */
 const requestLoginOtp = async (data = {}, vendorId = DEFAULT_VENDOR_ID) => {
     const client = await findClientByMobile(data.mobile, vendorId);
+
+    // The app's "Event Organizer" button sends `login_as: 'organizer'`. There is
+    // no organizer flag on the account, so owning a live event is the test —
+    // the same rows `GET /client/events` returns. Refused BEFORE a code is
+    // issued, so nobody types an OTP only to be turned away afterwards.
+    if (data.login_as === 'organizer') {
+        const owned = await Event.count({ where: { website_client_id: client.id } });
+        if (!owned) {
+            throw ApiError.forbidden('This mobile number is not registered as an event organizer.');
+        }
+    }
 
     const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
     const otpHash = await bcrypt.hash(code, 10);

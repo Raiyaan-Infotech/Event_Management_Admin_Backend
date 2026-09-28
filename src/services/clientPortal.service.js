@@ -59,6 +59,19 @@ const PLAN_ATTRS = [
     'storage_limit', 'storage_unit',
 ];
 
+/**
+ * The time-zone labels an event may carry (`events.timezone`). Served in
+ * event-options so the mobile app offers exactly what the portal's wizard does
+ * instead of keeping its own copy. The portal still has the same list in
+ * event-wizard.tsx `TIME_ZONES` — keep the two identical until it reads this.
+ */
+const EVENT_TIME_ZONES = [
+    '(GMT +05:30) India Standard Time',
+    '(GMT +04:00) Gulf Standard Time',
+    '(GMT +00:00) Greenwich Mean Time',
+    '(GMT -05:00) Eastern Standard Time',
+];
+
 const TAXONOMY_ATTRS = ['id', 'name', 'description', 'icon', 'color', 'sort_order', 'is_active'];
 
 /** Only live, active rows — a client must never be offered a disabled option. */
@@ -471,6 +484,7 @@ const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
          */
         app_features: [],
         templates,
+        timezones: EVENT_TIME_ZONES,
     };
 };
 
