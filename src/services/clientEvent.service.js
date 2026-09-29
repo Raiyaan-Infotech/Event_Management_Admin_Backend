@@ -910,6 +910,9 @@ const TEMPLATE_DESIGN_ATTRS = [
     'overlay_enabled', 'overlay_color', 'overlay_opacity',
     'secondary_color', 'primary_font', 'secondary_font', 'border_style',
     'frame_style_id', 'decoration_ids',
+    // The template's default sections and order; the event's own
+    // `components` / `component_order` override them when set.
+    'components', 'component_order',
 ];
 
 const attachDesign = async (rows, companyId) => {

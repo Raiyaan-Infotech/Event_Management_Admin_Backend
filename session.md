@@ -13949,3 +13949,81 @@ node src/database/tools/add-event-venue-details.js --prod --apply
 - Ceremony / venue / menu-order on production need the §600 tool first (time zone is an existing column; its list went live with 75840ae).
 - Mobile + portal changes **not committed**; backend §600 changes not committed.
 - A full create from the phone was started (client 9000000099, local) and stopped at the photo step.
+
+## Session 50 — Full create-event verification, edit-mode back-button fix, and Share Event Invitation (2026-09-29)
+
+### 603. Full create test, on-device against local backend
+Logged in as client 9000000099 through Event Organizer, ran the full 8-step
+wizard end to end (title/tagline/description/hosts/photo, ceremony title +
+event dates/times, venue name/address/landmark/map link, menu reorder —
+dragged Gallery to top + switched Near By off, Private, organizer/contact/
+footer). `POST /client/events` → 201, event id 85. Read the row back from
+the DB — every field matched exactly, including the reordered `menu_order`
+(Gallery id 4 first) and the 16-not-17 menu count. Confirmed on the event
+page: Explore shows Gallery first, and Home shows this newest event.
+Found and fixed while reviewing Review's summary text: it showed "Near Near
+Marina Beach" (landmark line was prefixing "Near " onto text that already
+started with it) — now shows the typed landmark as-is.
+
+### 604. Cross-account isolation verified against the local API
+Logged in as a second organizer (9884699435, 15 events of their own) and hit
+event 85 (owned by 9000000099) directly:
+- Not present in their `GET /client/events` list.
+- `GET /client/events/85` → 404.
+- `PUT` (rename attempt) → "Event not found."
+- `DELETE` → "Event not found."
+Confirms `website_client_id` scoping already fully isolates one client's
+events from another's, both reads and writes — no organizer-assignment table
+exists yet, so "organizer" today still means "the event's owner."
+
+### 605. Edit-wizard top-bar back button was stepping through the wizard
+Jamal: "event home page → ⋮ → Edit Event → top bar back arrow goes to the
+PREVIOUS WIZARD STEP, not back to the event page." `create_event_screen.dart`
+had one `_back()` wired to both the top-bar `BackButton` and the bottom
+Back button — correct for Create (client has never left this screen before)
+but wrong for Edit (should exit straight back to the event). Added
+`_exitOrBack()`: when `_editing`, the top bar / system back pops the whole
+screen; the bottom Back button still steps between pages via the existing
+`_back()`. `PopScope.canPop` is now `_editing || _step == 0`. Jamal confirmed
+fixed on device.
+
+### 606. Efficiency lesson — logged to memory
+One on-device create/edit test (adb taps + a screenshot read after nearly
+every step, including several retries from coordinates guessed off a scaled
+screenshot) burned ~93% of Jamal's daily token limit. Saved
+`feedback_limit_screenshot_testing` (renamed in content to "efficient device
+testing"): use `uiautomator dump` for exact element bounds instead of
+guessing from a screenshot, batch a full step before checking, screenshot
+only at checkpoints Jamal actually needs to see, verify saved data via
+curl/DB rather than reading it off screens, and never re-test something he
+has already confirmed fixed.
+
+### 607. Share Event Invitation — new flow, design only
+Jamal supplied a 12-screen mockup (Event Details ⋮ → Share Event Invitation →
+Template → Preview → Select Guests → WhatsApp/Email compose → Sending →
+Sent) and asked for it built with "wa.me url ... like that" for WhatsApp.
+Asked which of WhatsApp/Email should be real vs. design-only before
+building — Jamal: design only for both, no real send yet.
+Built as one screen, `lib/features/event/invite/share_invitation_flow.dart`
+(route `/event/share`, wired from the event page's ⋮ → Share Event and from
+the post-create success screen's Share Event button, replacing the older
+`/event/invite`). Steps: Options → Template (4 palette cards, category tabs
+presentational) → Preview (reuses the existing `InvitationPreviewCard`, real
+event data) → Select Guests (reuses `GuestPicker`/`kGuests` sample list) →
+compose (WhatsApp message preview built from the real event's hosts/date/
+venue/`kInviteLink`; Email gets Subject/Content fields, a toolbar mock, and
+an "include link" checkbox) → Sending (timer-simulated per-guest progress,
+~0.9s/guest) → Sent (reuses `InviteResultView`). Nothing is delivered or
+recorded — no wa.me launch, no mailto, no `/client/messages` call — entirely
+local widget state, same as the rest of Create Event's design-only sections.
+`flutter analyze` clean. NOT yet installed/tested on device this session.
+
+### 608. Real delivery — still an open decision
+Backend already has the pieces for a real WhatsApp send (`msg91Whatsapp.
+service.js`, used today only for OTP) and a real Email send
+(`emailSender.service.js` + SMTP config), and a `/client/messages/*` campaign
+API that currently records-but-never-delivers (`clientMessage.service.js` —
+its own comment: "Nothing here delivers anything yet"). A real wa.me-queue or
+MSG91-template send, and a real mailto/SMTP send, are both still to be
+decided and built — same design-only holding pattern as Create Event's
+Hashtag/Guest-Registration/Feature-switch fields.
