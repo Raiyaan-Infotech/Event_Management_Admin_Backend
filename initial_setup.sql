@@ -1782,6 +1782,7 @@ CREATE TABLE IF NOT EXISTS `events` (
   `qr_token` text COLLATE utf8mb4_unicode_ci,
   `qr_version` tinyint unsigned NOT NULL DEFAULT '1',
   `qr_issued_at` datetime DEFAULT NULL,
+  `qr_style` tinyint unsigned NOT NULL DEFAULT '0' COMMENT 'How the invitation draws the QR: 0 classic, 1 rounded, 2 heart',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `deleted_at` datetime DEFAULT NULL,

@@ -61,6 +61,7 @@ const WRITABLE_FIELDS = [
     'theme_id', 'primary_color',
     'cover_image',
     'components', 'component_order',
+    'qr_style',
 ];
 
 /**
@@ -451,6 +452,13 @@ const normalise = async (clientId, body, { partial = false } = {}) => {
             }
             data.component_order = [...seen, ...COMPONENT_KEYS.filter((k) => !seen.includes(k))];
         }
+    }
+
+    // How the invitation draws the QR: 0 classic, 1 rounded, 2 heart.
+    if (has('qr_style')) {
+        const style = Number(picked.qr_style);
+        if (![0, 1, 2].includes(style)) throw ApiError.badRequest('Invalid QR code style.');
+        data.qr_style = style;
     }
 
     return { data, plan: options.plan };

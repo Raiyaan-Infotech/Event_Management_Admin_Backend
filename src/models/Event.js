@@ -154,6 +154,8 @@ module.exports = (sequelize) => {
             qr_token: { type: DataTypes.TEXT, allowNull: true },
             qr_version: { type: DataTypes.TINYINT.UNSIGNED, allowNull: false, defaultValue: 1 },
             qr_issued_at: { type: DataTypes.DATE, allowNull: true },
+            /** How the invitation draws the QR: 0 classic, 1 rounded, 2 heart. */
+            qr_style: { type: DataTypes.TINYINT.UNSIGNED, allowNull: false, defaultValue: 0 },
         },
         {
             tableName: 'events',

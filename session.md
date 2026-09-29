@@ -14027,3 +14027,55 @@ its own comment: "Nothing here delivers anything yet"). A real wa.me-queue or
 MSG91-template send, and a real mailto/SMTP send, are both still to be
 decided and built — same design-only holding pattern as Create Event's
 Hashtag/Guest-Registration/Feature-switch fields.
+
+## Session 51 — Invitation artwork fixes, Edit Event hub, Splash Screen editor, Invitation Card, real send (2026-09-29)
+
+### 609. Frame / decorations missing — three causes
+- **Portal** `invitation-card.tsx`: `frame_url` was used raw; every other media field goes through `mediaUrl()`. A relative `/uploads/...` path resolved against the portal's origin and 404'd. Now `mediaUrl(template.frame_url)`. ⚠ Portal change is UNCOMMITTED (the same repo also has unrelated edits to `event-wizard.tsx` / `use-client-events.ts`, not mine).
+- **App**: `_toDesign` (event) and `EventTemplateOption.fromJson` never resolved `frame_url` / `decorationItems[].file_url` / `background_image` through `AppConfig.absoluteMediaUrl`; `EventTemplateOption` didn't parse the artwork at all.
+- **App, the real one on production**: every production frame + decoration is a **PNG** (local ones are SVG). `AppNetworkSvg` drew them with flutter_svg, which renders nothing for a PNG and swallowed the error. It now sniffs the cached file's first 512 bytes: `<svg` → SvgPicture, else `Image.file`. One fix covers tiles, previews, View Invitation, home thumbs, splash.
+- Merge with GitHub commit 48afaa7 (another session fixed the same bug a different way): kept its public `InvitationCard` as the single renderer; `InvitationArt` (extracted from `EventThumb`) still backs thumbs / tiles.
+
+### 610. Invitation sections on/off + order in the app
+Event row `components` / `component_order` (host's override from the portal wizard) were never parsed by the app. Now `ClientEventDetail.componentsOverride` / `orderOverride`, template defaults in `EventDesign.componentsOn` / `componentOrder`, rule in `visibleComponents()` (event override, else template; absent = on — same as the portal). `InvitationCard._words` renders section by section. Backend: `TEMPLATE_DESIGN_ATTRS` (clientEvent.service) gained `components`, `component_order` so an event's `design` carries the template defaults (commit f88add2, pushed).
+
+### 611. Template category tabs
+`/client/event-options` templates now include `template_category_id` + `templateCategory {id,name,sort_order}` (clientPortal.service `templatesForPlan`, include with `is_active=1`, commit 782d234, pushed). App: tabs/chips built from the categories present, admin order; hidden when only one. Now on Invitation Card → Design (the Share flow's own template step was removed, see §615).
+
+### 612. Production incident — `Unknown column 'event.ceremony_title'`
+Commit 9ebc293 (ceremony fields) was deployed before production had the columns → every event query 500'd. `schema-audit` named exactly `ceremony_title, ceremony_venue, ceremony_description`. The original local script (`add-event-venue-details.js`, untracked) was gone from disk; wrote `tools/add-event-ceremony-details.js` (single ALTER, definitions = initial_setup.sql). Jamal applied it on prod. Lesson restated: **column on prod before the code that selects it.**
+
+### 613. Edit Event hub (app)
+⋮ → Edit Event now opens a hub (`/event/edit?id=`) instead of the 8-step wizard: header (cover, hosts ♥, category, date, venue) + rows. Each row opens ONE section of `CreateEventScreen` (`section:` param, `EditSection` enum) with Cancel / Save — same prefill + full PUT, so nothing else changes. `&step=` still opens the wizard.
+- Basic (title, sub title = `tagline`, type shown locked, description, hosts), Date & Time (+ time zone, the one ceremony), Venue (name*/address*, map pin), Photos (cover + gallery grid → upload screen), Manage Ceremonies (one ceremony), App Settings (menus), Privacy & Invitation (privacy, organizer/contact/footer, **real QR** from the owner row's `qr_token` via new `qr_flutter` dep, Download to gallery, Copy code).
+- Removed on request: Hashtag, Venue Short Name.
+
+### 614. Splash Screen editor (app, `/event/splash-edit?id=`)
+Backend untouched — `/client/splash-screens` CRUD + `/media` + UNIQUE per event already existed. Flow: current splash (9:16 phone preview) → Template / My Images / Event Photos → Preview (Title, Date, Show Title / Date / Floral Frame) → saved `status: active` → success (Lottie `success.json`); Delete → confirm (card shows the splash) → progress → deleted.
+- Template = `InvitationArt` rendered to PNG (`RepaintBoundary`, 4x) and uploaded as `background_url`.
+- No columns for the new options → `background_config.show_title`, `.date_text`, `.frame` (free JSON, `asConfig`). Splash player honours them; frame = the event's invitation frame.
+- "Image not showing" was the editor's 4:3 preview cropping a 9:16 template to its plain middle.
+
+### 615. Invitation Card (app, `/event/invitation-card?id=`) + Send Invitation rework
+Hub "Event Design" row → Invitation Card. Tabs, each saving only its own fields (partial `PUT`, `normalise(partial)`):
+- Design `theme_id` (◀ ▶ carousel, category chips, strip); Content `cover_image` (couple photo), `tagline` (heading), `host_one`/`host_two` (split on `&`), `description`, `start_date`/`start_time` (end pushed if before), `venue_name`, organizer/contact/footer; Settings `components` + `qr_style`. Preview renders unsaved edits (`ClientEventDetail.copyWith`, `InvitationCard` `componentsOverride` / `qrCaption` / `qrStyle`).
+- `InvitationCard`: `event_title` shows the host's heading when set; `event_photos` shows the couple photo; QR is the real code (`EventQr`) for the owner.
+- Send Invitation: options (event card + WhatsApp / Email / Share Invitation); template step removed. Share Invitation: tabs Share Link / QR Code / Download — WhatsApp via `wa.me`, others via share sheet; QR download/share (`qrPng`); card image download/share.
+
+### 616. QR Code Style — new column `events.qr_style`
+TINYINT UNSIGNED NOT NULL DEFAULT 0 (0 classic, 1 rounded, 2 heart; heart uses correction M, others L). Model, `WRITABLE_FIELDS`, `normalise` (rejects anything else), initial_setup.sql, `tools/add-event-qr-style.js`. Applied LOCAL + **PRODUCTION** (verified: column present, all 5 prod events = 0; schema-audit: nothing missing). App: `EventQr` widget + `qrPng(style)` used everywhere. ⚠ Backend change staged, NOT committed/pushed — until it deploys the live API ignores `qr_style` on save and doesn't return it (app falls back to classic).
+
+### 617. Real sending (replaces §608's simulation)
+Server can't deliver (no WhatsApp Business / SMTP env — `clientMessage.service` `channelState`), so delivery goes through the host's own phone:
+- WhatsApp: per-guest `wa.me/<dial+number>?text=` (whatsapp number preferred over mobile), personalised "Hello <name>"; Sending screen lists guests with Send / Resend, "Send to Next Guest", Finish. Text only.
+- Email: `mailto:?bcc=<all>&subject=&body=` (editor markers stripped to plain text).
+- Sent count = guests actually opened/sent. Nothing recorded in `event_messages` (would sit as `queued` forever, like the 138 queued invite rows on event 22).
+
+### 618. Still design-only
+Invitation Card: Upload tile, Show Venue Map, QR Code Text (preview only), Card Background. Share: Event Link + copy (no public event page), email "Include event link", View Sent Invitations. Edit Event: Show Date & Time, second ceremony, Show Direction in App, Allow Guest Upload, Live Streaming.
+
+### 619. Open items
+1. Commit + push backend `qr_style` (prod column already present — safe to deploy).
+2. Portal: commit the `mediaUrl(frame_url)` fix (separate from the other uncommitted portal edits).
+3. On-device test of §613–617 (nothing in this session was run on a phone).
+4. Portal card doesn't draw couple photo / heading / QR style — app-only for now.
