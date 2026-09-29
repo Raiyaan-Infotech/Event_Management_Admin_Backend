@@ -10,6 +10,7 @@ const {
     Event,
     FrameStyle,
     Decoration,
+    TemplateCategory,
 } = require('../models');
 const { Op } = Sequelize;
 const bcrypt = require('bcryptjs');
@@ -104,6 +105,7 @@ const TEMPLATE_ATTRS = [
     'frame_style_id', 'decoration_ids',
     'components', 'component_order',
     'event_category_id',
+    'template_category_id',
     'is_featured', 'sort_order',
 ];
 
@@ -212,6 +214,15 @@ const templatesForPlan = async (companyId, plan) => {
     const rows = await EventTemplate.findAll({
         where,
         attributes: [...TEMPLATE_ATTRS, ...TEMPLATE_GATE_ATTRS],
+        // The design family, so a picker can group templates into tabs. An
+        // inactive category reads as none rather than hiding the template.
+        include: [{
+            model: TemplateCategory,
+            as: 'templateCategory',
+            attributes: ['id', 'name', 'sort_order'],
+            where: { is_active: 1 },
+            required: false,
+        }],
         order: [['is_featured', 'DESC'], ['sort_order', 'ASC'], ['id', 'ASC']],
     });
 
