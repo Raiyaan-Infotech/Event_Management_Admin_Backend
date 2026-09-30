@@ -1413,6 +1413,29 @@ CREATE TABLE IF NOT EXISTS `event_gallery_items` (
   CONSTRAINT `fk_event_gallery_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Table structure for `event_agenda_items` — an event's agenda / schedule
+CREATE TABLE IF NOT EXISTS `event_agenda_items` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `event_id` int unsigned NOT NULL,
+  `website_client_id` int unsigned NOT NULL COMMENT 'the event owner',
+  `title` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `description` varchar(200) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `agenda_date` date NOT NULL,
+  `end_date` date DEFAULT NULL COMMENT 'multi-day items only; NULL = single day',
+  `start_time` time NOT NULL,
+  `end_time` time NOT NULL COMMENT 'earlier than start_time = ends after midnight',
+  `location` varchar(150) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `images` json DEFAULT NULL COMMENT 'array of stored image URLs',
+  `sort_order` int NOT NULL DEFAULT '0',
+  `company_id` int unsigned DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_agenda_event` (`event_id`,`sort_order`),
+  KEY `idx_agenda_client` (`website_client_id`),
+  CONSTRAINT `fk_event_agenda_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Table structure for `guests` — the client phone book (§581)
 CREATE TABLE IF NOT EXISTS `guests` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,

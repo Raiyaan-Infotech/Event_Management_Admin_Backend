@@ -14079,3 +14079,33 @@ Invitation Card: Upload tile, Show Venue Map, QR Code Text (preview only), Card 
 2. Portal: commit the `mediaUrl(frame_url)` fix (separate from the other uncommitted portal edits).
 3. On-device test of §613–617 (nothing in this session was run on a phone).
 4. Portal card doesn't draw couple photo / heading / QR style — app-only for now.
+
+## Session 52 — QR Code Style: save bug + portal renders the style (2026-09-30)
+
+### 620. "QR style not saving" — it saved; the screen re-read a stale copy
+Prod column checked first: `add-event-qr-style.js --prod` dry run → `qr_style already present`, and backend (`WRITABLE_FIELDS` + `normalise`) was already correct and deployed (61b83f0). Real cause in the app: `InvitationCardScreen._put` did `ref.invalidate(selectedEventProvider)`. That provider is a `CacheFirstNotifier`, so the rebuild returns the OLD cached event first → `_seed` re-read `qr_style = 0` → picker snapped back to Classic; the fresh fetch arrived later but `_seeded` was already true. Fix: inside the save loader, `await ref.read(selectedEventProvider.notifier).refresh()` (network fetch, also rewrites the cache) instead of invalidate. Affects every Invitation Card tab, not just QR. `flutter analyze` clean.
+
+### 621. Portal draws the QR in the host's style
+App already used `qr_style` everywhere it draws a QR (`EventQr` / `qrPng`). The portal ignored it. `qrcode.react` has no round-module option, so added `qrcode` (+ `@types/qrcode`) and a shared `components/common/styled-qr.tsx` (`StyledQrSvg`, `toQrStyle`) mirroring the app: 0 classic, 1 round dots + round eyes, 2 classic + red heart (forces level ≥ M). Used by `EventQr` (now one visible SVG marked `data-qr-svg`; its Download goes through `downloadQrAsPng`, which now prefers `[data-qr-svg] svg` over any icon svg) and by `InvitationCard`. `qr_style` added to `ClientEvent` and passed at: events list QR dialog, event detail, wizard step 6 + preview, invitation download (card + QR). `tsc` + eslint clean; not opened in a browser. Portal changes UNCOMMITTED (repo also holds other people's edits to event-wizard / invitation-card / use-client-events).
+
+## Session 52 (cont.) — Agenda / Schedule (2026-09-30)
+
+### 622. Decisions (Jamal)
+- "Multiple Days" = ONE item spanning days (`end_date`), not a copy per day.
+- End time earlier than start = ends after midnight (After Party 22:00–00:00); equal is refused.
+- No plan limit — the plan only decides whether the Agenda menu exists.
+- Round 1 = backend + app; portal later.
+- **"Show in Event App" is NOT a new column.** I first added `events.show_agenda`, then a generic `events.hidden_menu_ids` — both rejected and removed (local columns dropped too). It is the Agenda menu in the event's `menu_ids`, saved with the normal event PUT, exactly like App Settings: Add-on = switchable, Default = shown ON and locked. Never add a per-menu (or hidden-menu) column for this.
+
+### 623. Backend
+- New table `event_agenda_items` (title 100, description 200, `agenda_date`, `end_date` NULL, start/end TIME, location 150, `images` JSON, `sort_order`, FK events CASCADE). In initial_setup.sql + `tools/add-event-agenda.js` (table only). Applied LOCAL; ⚠ **run `--prod --apply` before deploying**.
+- `clientAgenda.service/controller`, routes under `/client`: `GET/POST /events/:id/agenda`, `PUT /events/:id/agenda/reorder` (one CASE UPDATE), `POST /events/:id/agenda/media` (JPG/PNG/WEBP ≤2MB, folder `event-agenda/<id>`), `GET/PUT/DELETE /agenda/:itemId`, `POST /agenda/:itemId/duplicate` (placed right after the original, "(Copy)").
+- Reads: host or participant; writes: host only. Dates must fall inside the event's start..end. List returns `items`, `days`, `menu_id`, `is_default`, `show_in_app`, `can_edit`. Removing an item/image deletes the stored file unless another item still uses it (duplicates share URLs).
+- Verified against local DB via the service: create/validation (missing title, outside dates, same time, bad image URL, other client), partial update, move day, duplicate, reorder, list, non-member read refused, delete.
+
+### 624. App
+- `data/repositories/agenda_repository.dart` (`AgendaItem`, `AgendaPage`, `eventAgendaProvider`, `setShowInApp` = menu_ids PUT).
+- `features/event/agenda/`: list (switch, All/Day N tabs with counts, edit/delete/≡ reorder, Add Agenda), form (Single/Multiple Days, title 100 / description 200 counters, date limited to event days, times, location, up to 10 images via crop + upload, "Agenda Added" page), details (+ ⋮ Actions: Edit, Duplicate, Move to Another Day — multi-day keeps its length, Change Order, Delete), delete confirmation → "Agenda Deleted" page, reorder (drag + Save Order).
+- Routes `/event/agenda/{manage,form,item,delete,reorder}`; Edit Event hub row "Agenda / Schedule" after Venue.
+- Guest `EventAgendaScreen` now shows real items for the selected day (was sample data); "Total Events" = real count.
+- `flutter analyze` clean for all new code. NOT run on a device.

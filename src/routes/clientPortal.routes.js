@@ -15,6 +15,8 @@ const deviceController = require('../controllers/clientDevice.controller');
 const splashController = require('../controllers/clientSplashScreen.controller');
 const galleryController = require('../controllers/clientGallery.controller');
 const galleryService = require('../services/clientGallery.service');
+const agendaController = require('../controllers/clientAgenda.controller');
+const agendaService = require('../services/clientAgenda.service');
 const guestRegistrationController = require('../controllers/guestRegistration.controller');
 const eventNotificationTemplateController = require('../controllers/clientEventNotificationTemplate.controller');
 const { isWebsiteClientAuthenticated } = require('../middleware/websiteClientAuth');
@@ -552,6 +554,49 @@ router.delete('/gallery/:itemId', galleryController.remove);
 router.get('/events/:id/gallery/categories', galleryController.listCategories);
 router.post('/events/:id/gallery/categories', galleryController.createCategory);
 router.delete('/gallery/categories/:categoryId', galleryController.removeCategory);
+
+/**
+ * Event agenda / schedule. Reads are open to the host and the event's
+ * participants; every write is host-only (enforced in the service).
+ * Its "Show in Event App" switch is the Agenda MENU in the event's `menu_ids`
+ * (saved with the normal event PUT) — `menu_id` / `is_default` come back on
+ * the list so the app can lock it when Agenda is a Default menu.
+ * Literal paths (`/reorder`, `/media`) have no `:itemId`
+ * sibling at the same depth, so no ordering trap here.
+ */
+const agendaImageUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: agendaService.MAX_IMAGE_BYTES },
+    fileFilter: (req, file, cb) => {
+        if (agendaService.IMAGE_MIMES.includes(file.mimetype)) return cb(null, true);
+        cb(new Error('Please choose a JPG, PNG or WEBP image.'), false);
+    },
+});
+
+router.get('/events/:id/agenda', agendaController.list);
+router.post('/events/:id/agenda', agendaController.create);
+router.put('/events/:id/agenda/reorder', agendaController.reorder);
+router.post(
+    '/events/:id/agenda/media',
+    (req, res, next) => {
+        agendaImageUpload.single('file')(req, res, (err) => {
+            if (err) {
+                return res.status(400).json({
+                    success: false,
+                    message: err.code === 'LIMIT_FILE_SIZE'
+                        ? `That image is larger than ${Math.round(agendaService.MAX_IMAGE_BYTES / (1024 * 1024))}MB.`
+                        : err.message || 'That image could not be uploaded.',
+                });
+            }
+            next();
+        });
+    },
+    agendaController.uploadImage,
+);
+router.get('/agenda/:itemId', agendaController.getOne);
+router.put('/agenda/:itemId', agendaController.update);
+router.post('/agenda/:itemId/duplicate', agendaController.duplicate);
+router.delete('/agenda/:itemId', agendaController.remove);
 
 // The app's read: the ACTIVE splash for one event, or null. Declared BEFORE
 // `/splash-screens/:id` — the same ordering trap as `/events/stats`, since

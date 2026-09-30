@@ -153,6 +153,7 @@ db.SplashScreen = require('./SplashScreen')(sequelize, Sequelize);
 db.Event = require('./Event')(sequelize, Sequelize);
 db.EventGalleryCategory = require('./EventGalleryCategory')(sequelize, Sequelize);
 db.EventGalleryItem = require('./EventGalleryItem')(sequelize, Sequelize);
+db.EventAgendaItem = require('./EventAgendaItem')(sequelize, Sequelize);
 db.EventParticipant = require('./EventParticipant')(sequelize, Sequelize);
 // The client's phone book (§581). Participants are EventParticipant.
 db.Guest = require('./Guest')(sequelize, Sequelize);
