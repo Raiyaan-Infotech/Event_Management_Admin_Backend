@@ -821,6 +821,12 @@ const guestStatsFor = async (eventId) => {
                 (SELECT COUNT(*) FROM event_participants
                   WHERE event_id = :id AND deleted_at IS NULL
                     AND participant_client_id IS NOT NULL) AS guests_joined,
+                (SELECT COUNT(*) FROM event_participants
+                  WHERE event_id = :id AND deleted_at IS NULL
+                    AND response_type = 'yes') AS confirmed,
+                (SELECT COUNT(*) FROM event_participants
+                  WHERE event_id = :id AND deleted_at IS NULL
+                    AND response_type IN ('none', 'maybe')) AS pending,
                 (SELECT COUNT(*) FROM event_messages
                   WHERE event_id = :id AND deleted_at IS NULL
                     AND kind = 'invite' AND status IN ('sent', 'delivered')) AS invitations_sent`,
@@ -829,6 +835,10 @@ const guestStatsFor = async (eventId) => {
         return {
             invited_guests: Number(row?.invited_guests) || 0,
             guests_joined: Number(row?.guests_joined) || 0,
+            // Organizer Event Details stat row: answered yes / not answered
+            // yet (no answer or "maybe").
+            confirmed: Number(row?.confirmed) || 0,
+            pending: Number(row?.pending) || 0,
             invitations_sent: Number(row?.invitations_sent) || 0,
         };
     } catch (err) {
@@ -1035,8 +1045,46 @@ const listEvents = async (clientId, query = {}) => {
         distinct: true,
     });
 
+    // The organizer's list card shows "245 Guests · 180 Confirmed", and the
+    // app's organizer dashboard totals Pending and Messages over the list too.
+    // ONE query for the whole page — never per event (prod is ~370ms a query).
+    // Same meanings as guestStatsFor: Guests = participants; Confirmed =
+    // answered yes; Pending = no answer or "maybe"; Messages = invitations
+    // that actually left.
+    const ids = rows.map((r) => r.id);
+    const counts = new Map();
+    if (ids.length) {
+        const found = await sequelize.query(
+            `SELECT e.id AS event_id,
+                    (SELECT COUNT(*) FROM event_participants p
+                      WHERE p.event_id = e.id AND p.deleted_at IS NULL) AS guest_count,
+                    (SELECT COUNT(*) FROM event_participants p
+                      WHERE p.event_id = e.id AND p.deleted_at IS NULL
+                        AND p.response_type = 'yes') AS confirmed_count,
+                    (SELECT COUNT(*) FROM event_participants p
+                      WHERE p.event_id = e.id AND p.deleted_at IS NULL
+                        AND p.response_type IN ('none', 'maybe')) AS pending_count,
+                    (SELECT COUNT(*) FROM event_messages m
+                      WHERE m.event_id = e.id AND m.deleted_at IS NULL
+                        AND m.kind = 'invite' AND m.status IN ('sent', 'delivered')) AS messages_count
+               FROM events e
+              WHERE e.id IN (:ids)`,
+            { replacements: { ids }, type: Sequelize.QueryTypes.SELECT },
+        );
+        for (const c of found) counts.set(Number(c.event_id), c);
+    }
+    const presented = rows.map((r) => {
+        const row = present(r);
+        const c = counts.get(Number(row.id));
+        row.guest_count = Number(c?.guest_count) || 0;
+        row.confirmed_count = Number(c?.confirmed_count) || 0;
+        row.pending_count = Number(c?.pending_count) || 0;
+        row.messages_count = Number(c?.messages_count) || 0;
+        return row;
+    });
+
     return {
-        rows: await attachDesign(rows.map(present), rows[0]?.company_id ?? null),
+        rows: await attachDesign(presented, rows[0]?.company_id ?? null),
         pagination: {
             page,
             limit,
