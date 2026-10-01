@@ -55,7 +55,7 @@ const WRITABLE_FIELDS = [
     'venue_landmark', 'venue_map_link', 'venue_image', 'venue_lat', 'venue_lng',
     'menu_order',
     'ceremony_title', 'ceremony_venue', 'ceremony_description',
-    'organizer', 'contact_phone', 'contact_email', 'footer_note',
+    'organizer', 'organizer_image', 'contact_phone', 'contact_email', 'footer_note',
     'privacy', 'status',
     'menu_ids', 'disabled_app_menu_ids',
     'theme_id', 'primary_color',
@@ -403,6 +403,14 @@ const normalise = async (clientId, body, { partial = false } = {}) => {
             throw ApiError.badRequest('Invalid event image.');
         }
         data.cover_image = value;
+    }
+    // The organizer's photo or logo — the same rule as the cover.
+    if (has('organizer_image')) {
+        const value = str(picked.organizer_image, 500);
+        if (value && !/^(https?:\/\/|\/uploads\/)/i.test(value)) {
+            throw ApiError.badRequest('Invalid organizer image.');
+        }
+        data.organizer_image = value;
     }
 
     /**
@@ -774,7 +782,10 @@ const presentOne = async (event, { platform = 'website', isOwner = true, viewerI
             // `participants` needs no extra check: reaching this function as a
             // non-owner already proves the viewer joined the event.
         }
-        const { is_default: _d, event_category_id: _c, ...menu } = row;
+        // `is_default` goes out as a boolean: the organizer's event page files
+        // Default menus under Quick Links and add-ons under Additional Menus.
+        const { event_category_id: _c, ...menu } = row;
+        menu.is_default = Number(row.is_default) === 1;
         menus.push(menu);
     }
 

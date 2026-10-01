@@ -1395,6 +1395,7 @@ CREATE TABLE IF NOT EXISTS `event_gallery_items` (
   `event_id` int unsigned NOT NULL,
   `website_client_id` int unsigned NOT NULL COMMENT 'owner, denormalised so storage is summed per account without joining events',
   `type` enum('image','video') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'image',
+  `category_id` int unsigned DEFAULT NULL COMMENT 'NULL = Uncategorised',
   `url` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `thumbnail_url` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'video poster; NULL for images',
   `file_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -1410,7 +1411,9 @@ CREATE TABLE IF NOT EXISTS `event_gallery_items` (
   PRIMARY KEY (`id`),
   KEY `idx_gallery_event` (`event_id`,`deleted_at`,`sort_order`),
   KEY `idx_gallery_client_type` (`website_client_id`,`type`,`deleted_at`),
-  CONSTRAINT `fk_event_gallery_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+  KEY `idx_gallery_item_category` (`category_id`),
+  CONSTRAINT `fk_event_gallery_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_gallery_item_category` FOREIGN KEY (`category_id`) REFERENCES `event_gallery_categories` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table structure for `event_agenda_items` — an event's agenda / schedule
@@ -1604,6 +1607,11 @@ CREATE TABLE IF NOT EXISTS `event_message_campaigns` (
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `deleted_at` datetime DEFAULT NULL,
+  `image_url` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Notification image (FCM notification.image)',
+  `click_action` varchar(30) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'open_app | deep_link | custom',
+  `deep_link` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Screen to open when tapped',
+  `data_payload` json DEFAULT NULL COMMENT 'Additional key/value data sent with the notification',
+  `push_options` json DEFAULT NULL COMMENT 'Sound, badge, priority, TTL, delivery options',
   PRIMARY KEY (`id`),
   KEY `idx_campaigns_client` (`website_client_id`,`deleted_at`),
   KEY `idx_campaigns_event` (`event_id`,`deleted_at`),
@@ -1745,6 +1753,7 @@ INSERT INTO `notification_categories` (`name`, `description`, `sort_order`, `is_
 CREATE TABLE IF NOT EXISTS `notification_templates` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `name` varchar(150) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `trigger_key` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `notification_category_id` int unsigned NOT NULL,
   `event_category_id` int unsigned DEFAULT NULL,
   `title` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -1761,10 +1770,93 @@ CREATE TABLE IF NOT EXISTS `notification_templates` (
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `deleted_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_notification_templates_trigger_key` (`trigger_key`),
   KEY `idx_notification_templates_category` (`notification_category_id`,`is_active`),
   KEY `idx_notification_templates_event_category` (`event_category_id`),
   CONSTRAINT `fk_notification_templates_notification_category` FOREIGN KEY (`notification_category_id`) REFERENCES `notification_categories` (`id`),
   CONSTRAINT `fk_notification_templates_event_category` FOREIGN KEY (`event_category_id`) REFERENCES `event_categories` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table structure for `client_device_tokens`
+CREATE TABLE IF NOT EXISTS `client_device_tokens` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `website_client_id` int unsigned NOT NULL,
+  `token` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `platform` enum('android','ios','web') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'android',
+  `device_name` varchar(120) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `app_version` varchar(40) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `is_active` tinyint(1) NOT NULL DEFAULT '1',
+  `disabled_reason` varchar(120) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `last_seen_at` datetime DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_device_token` (`token`),
+  KEY `idx_device_token_client` (`website_client_id`,`is_active`),
+  CONSTRAINT `fk_device_token_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table structure for `event_gallery_categories`
+CREATE TABLE IF NOT EXISTS `event_gallery_categories` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `event_id` int unsigned NOT NULL,
+  `website_client_id` int unsigned NOT NULL,
+  `name` varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `icon` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `sort_order` int NOT NULL DEFAULT '0',
+  `company_id` int unsigned DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_gallery_cat_event` (`event_id`,`deleted_at`,`sort_order`),
+  CONSTRAINT `fk_gallery_cat_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table structure for `guest_food_preference_options`
+CREATE TABLE IF NOT EXISTS `guest_food_preference_options` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `event_category_id` int unsigned DEFAULT NULL,
+  `name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `description` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+  `icon` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT '',
+  `color` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `sort_order` int NOT NULL DEFAULT '0',
+  `is_active` tinyint NOT NULL DEFAULT '1' COMMENT '0=inactive, 1=active, 2=pending approval',
+  `company_id` int unsigned DEFAULT NULL,
+  `created_by` int unsigned DEFAULT NULL,
+  `updated_by` int unsigned DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_guest_food_preference_options_listing` (`company_id`,`deleted_at`,`is_active`,`sort_order`),
+  KEY `idx_guest_food_preference_options_scope` (`company_id`,`event_category_id`,`deleted_at`,`is_active`,`sort_order`),
+  KEY `fk_guest_food_preference_options_category` (`event_category_id`),
+  CONSTRAINT `fk_guest_food_preference_options_category` FOREIGN KEY (`event_category_id`) REFERENCES `event_categories` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table structure for `guest_relationship_options`
+CREATE TABLE IF NOT EXISTS `guest_relationship_options` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `event_category_id` int unsigned DEFAULT NULL,
+  `name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `description` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+  `icon` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT '',
+  `color` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `sort_order` int NOT NULL DEFAULT '0',
+  `is_active` tinyint NOT NULL DEFAULT '1' COMMENT '0=inactive, 1=active, 2=pending approval',
+  `company_id` int unsigned DEFAULT NULL,
+  `created_by` int unsigned DEFAULT NULL,
+  `updated_by` int unsigned DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_guest_relationship_options_listing` (`company_id`,`deleted_at`,`is_active`,`sort_order`),
+  KEY `idx_guest_relationship_options_scope` (`company_id`,`event_category_id`,`deleted_at`,`is_active`,`sort_order`),
+  KEY `fk_guest_relationship_options_category` (`event_category_id`),
+  CONSTRAINT `fk_guest_relationship_options_category` FOREIGN KEY (`event_category_id`) REFERENCES `event_categories` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table structure for `events`
@@ -1776,6 +1868,8 @@ CREATE TABLE IF NOT EXISTS `events` (
   `subscription_plan_id` int unsigned DEFAULT NULL,
   `event_category_id` int unsigned DEFAULT NULL,
   `name` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `host_one` varchar(120) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'First host (Groom on a wedding) — its own line on the invitation',
+  `host_two` varchar(120) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Second host (Bride on a wedding)',
   `tagline` varchar(150) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `description` text COLLATE utf8mb4_unicode_ci,
   `start_date` date DEFAULT NULL,
@@ -1793,6 +1887,10 @@ CREATE TABLE IF NOT EXISTS `events` (
   `ceremony_title` varchar(150) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'The event''s single ceremony, e.g. Haldi',
   `ceremony_venue` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Ceremony venue; NULL = the main venue',
   `ceremony_description` text COLLATE utf8mb4_unicode_ci COMMENT 'Ceremony description',
+  `organizer` varchar(200) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Organizer / Hosted By, printed on the invitation',
+  `contact_phone` varchar(30) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `contact_email` varchar(150) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `footer_note` varchar(300) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `privacy` enum('private','public','unlisted') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'private',
   `status` enum('draft','upcoming','cancelled') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'upcoming' COMMENT 'Past is derived from end_date at read time, never stored',
   `menu_ids` json DEFAULT NULL,
@@ -1801,7 +1899,10 @@ CREATE TABLE IF NOT EXISTS `events` (
   `theme_id` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `primary_color` varchar(9) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Hex, #RRGGBB or #RRGGBBAA',
   `cover_image` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'The event''s own photo — mobile list card and event screen. NULL = template artwork. See apply-event-cover-image.js',
+  `organizer_image` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'The organizer''s photo or logo, asked with the invitation details. NULL = none. See apply-event-organizer-image.js',
   `invitation_image` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'The finished invitation as a PNG, uploaded by the portal wizard on save. See add-event-invitation-image.js',
+  `components` json DEFAULT NULL COMMENT 'Per-event invitation section on/off override; NULL = the template''s own',
+  `component_order` json DEFAULT NULL COMMENT 'Per-event invitation section order; NULL = the template''s own',
   `qr_token` text COLLATE utf8mb4_unicode_ci,
   `qr_version` tinyint unsigned NOT NULL DEFAULT '1',
   `qr_issued_at` datetime DEFAULT NULL,
@@ -3392,6 +3493,8 @@ CREATE TABLE IF NOT EXISTS `website_clients` (
   `vendor_id` int unsigned NOT NULL DEFAULT '1',
   `company_id` int DEFAULT NULL,
   `name` varchar(200) NOT NULL,
+  `company_name` varchar(150) DEFAULT NULL,
+  `bio` text,
   `email` varchar(255) NOT NULL,
   `dial_code` varchar(8) DEFAULT '+91',
   `mobile` varchar(20) DEFAULT NULL,
@@ -3416,6 +3519,7 @@ CREATE TABLE IF NOT EXISTS `website_clients` (
   `favourite_events` json DEFAULT NULL COMMENT 'Event ids the client hearted (wishlist) on Home / My Events',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uniq_website_client_email` (`vendor_id`,`email`),
+  UNIQUE KEY `uniq_website_client_mobile` (`vendor_id`,`mobile`),
   KEY `idx_website_clients_listing` (`company_id`,`deleted_at`,`is_active`,`created_at`),
   KEY `idx_website_clients_vendor` (`vendor_id`,`deleted_at`),
   KEY `idx_website_clients_source` (`source`,`deleted_at`),
@@ -10850,6 +10954,7 @@ CREATE TABLE IF NOT EXISTS `splash_screens` (
   `main_title` varchar(60) COLLATE utf8mb4_unicode_ci NOT NULL,
   `sub_title` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `event_name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Plain text today — see header. Not a foreign key until events are wired up.',
+  `event_id` int unsigned DEFAULT NULL,
   `tagline` varchar(150) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `background_type` enum('image','video','solid_color','gradient','logo','couple_photo') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'image',
   `background_url` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'The uploaded image / video / logo / couple photo, per background_type',
@@ -10873,8 +10978,10 @@ CREATE TABLE IF NOT EXISTS `splash_screens` (
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `deleted_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_splash_screens_event_id` (`event_id`),
   KEY `splash_screens_client` (`website_client_id`,`deleted_at`),
-  CONSTRAINT `fk_splash_screens_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+  CONSTRAINT `fk_splash_screens_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_splash_screens_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;

@@ -119,6 +119,8 @@ module.exports = (sequelize) => {
              * Added by apply-event-cover-image.js.
              */
             cover_image: { type: DataTypes.STRING(500), allowNull: true },
+            // Added by apply-event-organizer-image.js.
+            organizer_image: { type: DataTypes.STRING(500), allowNull: true },
 
             /**
              * The finished invitation as an IMAGE — the portal's own card
