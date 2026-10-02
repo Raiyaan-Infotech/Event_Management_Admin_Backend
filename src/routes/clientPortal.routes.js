@@ -547,12 +547,32 @@ router.post(
     },
     galleryController.upload,
 );
+router.put('/events/:id/gallery/reorder', galleryController.reorder);
+router.put('/gallery/:itemId', galleryController.update);
 router.delete('/gallery/:itemId', galleryController.remove);
 
 // Gallery categories — per event, host-authored. Declared after the item routes
 // so '/gallery/categories' can never be read as an item id.
 router.get('/events/:id/gallery/categories', galleryController.listCategories);
 router.post('/events/:id/gallery/categories', galleryController.createCategory);
+router.post(
+    '/events/:id/gallery/categories/cover',
+    (req, res, next) => {
+        galleryUpload.single('file')(req, res, (err) => {
+            if (err) {
+                return res.status(400).json({
+                    success: false,
+                    message: err.code === 'LIMIT_FILE_SIZE'
+                        ? `That image is larger than ${Math.round(galleryService.MAX_IMAGE_BYTES / (1024 * 1024))}MB.`
+                        : err.message || 'That image could not be uploaded.',
+                });
+            }
+            next();
+        });
+    },
+    galleryController.uploadCategoryCover,
+);
+router.put('/gallery/categories/:categoryId', galleryController.updateCategory);
 router.delete('/gallery/categories/:categoryId', galleryController.removeCategory);
 
 /**

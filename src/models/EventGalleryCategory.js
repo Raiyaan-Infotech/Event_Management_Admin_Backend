@@ -13,6 +13,9 @@ module.exports = (sequelize) => {
         event_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
         website_client_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
         name: { type: DataTypes.STRING(120), allowNull: false },
+        description: { type: DataTypes.STRING(200), allowNull: true },
+        /** NULL = the list falls back to the category's newest photo. */
+        cover_image: { type: DataTypes.STRING(500), allowNull: true },
         icon: { type: DataTypes.STRING(100), allowNull: true },
         sort_order: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
         company_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },

@@ -39,7 +39,27 @@ const removeCategory = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, result, 'Category removed.');
 });
 
+const updateCategory = asyncHandler(async (req, res) => {
+    const result = await service.updateCategory(req.websiteClient.id, req.params.categoryId, req.body);
+    return ApiResponse.success(res, result, 'Category updated.');
+});
+
+const uploadCategoryCover = asyncHandler(async (req, res) => {
+    const result = await service.uploadCategoryCover(req.websiteClient.id, req.params.id, req.file);
+    return ApiResponse.success(res, result, 'Image uploaded.');
+});
+
+const update = asyncHandler(async (req, res) => {
+    const result = await service.updateItem(req.websiteClient.id, req.params.itemId, req.body);
+    return ApiResponse.success(res, result, 'Updated.');
+});
+
+const reorder = asyncHandler(async (req, res) => {
+    const result = await service.reorderItems(req.websiteClient.id, req.params.id, req.body);
+    return ApiResponse.success(res, result, 'Gallery order saved.');
+});
+
 module.exports = {
-    list, usage, upload, remove,
-    listCategories, createCategory, removeCategory,
+    list, usage, upload, update, reorder, remove,
+    listCategories, createCategory, updateCategory, uploadCategoryCover, removeCategory,
 };

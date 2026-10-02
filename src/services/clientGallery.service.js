@@ -25,6 +25,14 @@ const VIDEO_MIMES = ['video/mp4', 'video/webm', 'video/quicktime'];
 
 const mb = (bytes) => Math.round((bytes / (1024 * 1024)) * 10) / 10;
 
+/** The order every gallery list is drawn in. */
+const ITEM_ORDER = [['sort_order', 'ASC'], ['id', 'DESC']];
+
+const cleanText = (raw, max) => {
+    const text = typeof raw === 'string' ? raw.trim().slice(0, max) : '';
+    return text || null;
+};
+
 /** A plan's storage ceiling in BYTES. NULL (unlimited) stays null. */
 const storageBytesFor = (plan) => {
     if (!plan || plan.storage_limit === null || plan.storage_limit === undefined) return null;
@@ -164,7 +172,7 @@ const listItems = async (clientId, eventId, query = {}) => {
 
     const items = await EventGalleryItem.findAll({
         where,
-        order: [['sort_order', 'ASC'], ['id', 'DESC']],
+        order: ITEM_ORDER,
     });
 
     return {
@@ -197,14 +205,63 @@ const listCategories = async (clientId, eventId) => {
     });
     const byId = new Map(counts.map((c) => [c.category_id, Number(c.n)]));
 
-    return rows.map((r) => ({
-        id: r.id,
-        name: r.name,
-        icon: r.icon,
-        sort_order: r.sort_order,
-        item_count: byId.get(r.id) || 0,
-    }));
+    // A category with no cover of its own shows its first photo — the same
+    // order the grid draws, so the thumbnail is the photo the host sees first.
+    const photos = await EventGalleryItem.findAll({
+        where: { event_id: eventId, type: 'image', category_id: { [Op.ne]: null } },
+        attributes: ['category_id', 'url'],
+        order: ITEM_ORDER,
+        raw: true,
+    });
+    const firstPhoto = new Map();
+    for (const p of photos) {
+        if (!firstPhoto.has(p.category_id)) firstPhoto.set(p.category_id, p.url);
+    }
+
+    return rows.map((r) => presentCategory(r, byId.get(r.id) || 0, firstPhoto.get(r.id)));
 };
+
+const presentCategory = (r, itemCount = 0, firstPhotoUrl = null) => ({
+    id: r.id,
+    name: r.name,
+    description: r.description || null,
+    /** What the host chose. NULL when they chose nothing. */
+    cover_image: r.cover_image || null,
+    /** What a list should draw: the chosen cover, else the first photo. */
+    cover_url: r.cover_image || firstPhotoUrl || null,
+    icon: r.icon,
+    sort_order: r.sort_order,
+    item_count: itemCount,
+});
+
+/**
+ * Put one category at a 1-based position and renumber the event's categories
+ * 0..n-1 — the form's "Display Order" is a position in the list, not a raw
+ * sort_order, so two categories can never end up sharing one.
+ */
+const placeCategory = async (eventId, categoryId, rawPosition) => {
+    const rows = await EventGalleryCategory.findAll({
+        where: { event_id: eventId },
+        order: [['sort_order', 'ASC'], ['id', 'ASC']],
+        attributes: ['id'],
+    });
+    const ids = rows.map((r) => r.id).filter((id) => id !== categoryId);
+    const position = Number(rawPosition);
+    const index = Number.isFinite(position) && position >= 1
+        ? Math.min(Math.floor(position) - 1, ids.length)
+        : ids.length;
+    ids.splice(index, 0, categoryId);
+
+    // One UPDATE with CASE — prod is ~370ms a query, so never row by row.
+    const cases = ids.map((id, i) => `WHEN ${Number(id)} THEN ${i}`).join(' ');
+    await EventGalleryCategory.sequelize.query(
+        `UPDATE event_gallery_categories SET sort_order = CASE id ${cases} END WHERE event_id = ? AND id IN (${ids.map(Number).join(',')})`,
+        { replacements: [eventId] }
+    );
+};
+
+const hasPosition = (body) =>
+    body.position !== undefined && body.position !== null && body.position !== '';
 
 const createCategory = async (clientId, eventId, body = {}) => {
     const event = await resolveEvent(clientId, eventId);
@@ -224,12 +281,78 @@ const createCategory = async (clientId, eventId, body = {}) => {
         event_id: event.id,
         website_client_id: clientId,
         name,
+        description: cleanText(body.description, 200),
+        cover_image: cleanText(body.cover_image, 500),
         icon: typeof body.icon === 'string' ? body.icon.slice(0, 100) : null,
         sort_order: Number.isFinite(Number(last)) ? Number(last) + 1 : 0,
         company_id: event.company_id ?? null,
     });
 
-    return { id: row.id, name: row.name, icon: row.icon, sort_order: row.sort_order, item_count: 0 };
+    // No position sent = last, which is where it already is.
+    if (hasPosition(body)) {
+        await placeCategory(event.id, row.id, body.position);
+        await row.reload();
+    }
+
+    return presentCategory(row);
+};
+
+/**
+ * Edit a category. Only the fields that were SENT change — the form sends all
+ * four, but a caller that sends just a name must not blank the description.
+ */
+const updateCategory = async (clientId, categoryId, body = {}) => {
+    const row = await EventGalleryCategory.findOne({
+        where: { id: Number(categoryId) || 0, website_client_id: clientId },
+    });
+    if (!row) throw ApiError.notFound('That category was not found.');
+
+    if (body.name !== undefined) {
+        const name = String(body.name || '').trim().slice(0, 120);
+        if (!name) throw ApiError.badRequest('Please enter a category name.');
+
+        const clash = await EventGalleryCategory.findOne({
+            where: { event_id: row.event_id, name, id: { [Op.ne]: row.id } },
+            attributes: ['id'],
+        });
+        if (clash) throw ApiError.conflict(`"${name}" is already a category on this event.`);
+        row.name = name;
+    }
+    if (body.description !== undefined) row.description = cleanText(body.description, 200);
+    if (body.cover_image !== undefined) row.cover_image = cleanText(body.cover_image, 500);
+    await row.save();
+
+    if (hasPosition(body)) await placeCategory(row.event_id, row.id, body.position);
+
+    const categories = await listCategories(clientId, row.event_id);
+    return { category: categories.find((c) => c.id === row.id), categories };
+};
+
+/**
+ * Store a category's cover image and hand back its URL — the form saves the
+ * URL with the category, as the agenda form does with its images. Not a
+ * gallery item: it is not counted against the event's photo limit.
+ */
+const uploadCategoryCover = async (clientId, eventId, file) => {
+    if (!file || !file.buffer) throw ApiError.badRequest('Please choose an image to upload.');
+    const event = await resolveEvent(clientId, eventId);
+
+    if (!IMAGE_MIMES.includes(file.mimetype)) {
+        throw ApiError.badRequest('Please choose a JPG, PNG, WEBP or GIF image.');
+    }
+    const size = Number(file.size || file.buffer.length || 0);
+    if (size > MAX_IMAGE_BYTES) {
+        throw ApiError.badRequest(
+            `Images must be ${mb(MAX_IMAGE_BYTES)}MB or smaller. This file is ${mb(size)}MB.`
+        );
+    }
+
+    const client = await WebsiteClient.findByPk(clientId, { attributes: ['company_id'] });
+    const stored = await mediaService.upload(
+        file, { folder: `event-gallery/${event.id}/covers` }, event.company_id || client?.company_id || 1
+    );
+    if (!stored || !stored.url) throw ApiError.badRequest('That image could not be stored.');
+    return { url: stored.url };
 };
 
 /**
@@ -379,6 +502,67 @@ const removeItem = async (clientId, itemId) => {
     return { removed: true, usage: await getUsage(clientId, eventId) };
 };
 
+/**
+ * Edit one item: its caption, and / or the category it is filed under.
+ * Host only — `website_client_id` is the owner.
+ */
+const updateItem = async (clientId, itemId, body = {}) => {
+    const item = await EventGalleryItem.findOne({
+        where: { id: Number(itemId) || 0, website_client_id: clientId },
+    });
+    if (!item) throw ApiError.notFound('That gallery item was not found.');
+
+    if (body.caption !== undefined) item.caption = cleanText(body.caption, 300);
+    if (body.category_id !== undefined) {
+        const wanted = Number(body.category_id);
+        if (wanted > 0) {
+            // Unlike an upload, a move names its target on purpose — a category
+            // that is not on this event is refused, not silently dropped.
+            const categoryId = await resolveCategoryId(item.event_id, wanted);
+            if (!categoryId) throw ApiError.notFound('That category was not found.');
+            item.category_id = categoryId;
+        } else {
+            item.category_id = null;
+        }
+    }
+    await item.save();
+
+    return { item: present(item), categories: await listCategories(clientId, item.event_id) };
+};
+
+/**
+ * Save a new order for the items that were sent.
+ *
+ * The app reorders ONE category at a time, so the ids are usually a subset of
+ * the event's items. They take back the same slots they already held in the
+ * full list — the other categories' photos do not move in the All view.
+ */
+const reorderItems = async (clientId, eventId, body = {}) => {
+    const event = await resolveEvent(clientId, eventId);
+    if (!Array.isArray(body.ids)) throw ApiError.badRequest('Invalid gallery order.');
+
+    const rows = await EventGalleryItem.findAll({
+        where: { event_id: event.id }, order: ITEM_ORDER, attributes: ['id'],
+    });
+    const all = rows.map((r) => r.id);
+    const known = new Set(all);
+    const sent = [...new Set(body.ids.map(Number))].filter((id) => known.has(id));
+    const moving = new Set(sent);
+
+    let next = 0;
+    const order = all.map((id) => (moving.has(id) ? sent[next++] : id));
+
+    // One UPDATE with CASE — prod is ~370ms a query, so never row by row.
+    if (order.length) {
+        const cases = order.map((id, i) => `WHEN ${Number(id)} THEN ${i}`).join(' ');
+        await EventGalleryItem.sequelize.query(
+            `UPDATE event_gallery_items SET sort_order = CASE id ${cases} END WHERE event_id = ? AND id IN (${order.map(Number).join(',')})`,
+            { replacements: [event.id] }
+        );
+    }
+    return { reordered: true };
+};
+
 module.exports = {
     MAX_IMAGE_BYTES,
     MAX_VIDEO_BYTES,
@@ -388,7 +572,11 @@ module.exports = {
     listItems,
     listCategories,
     createCategory,
+    updateCategory,
+    uploadCategoryCover,
     removeCategory,
     uploadItem,
+    updateItem,
+    reorderItems,
     removeItem,
 };

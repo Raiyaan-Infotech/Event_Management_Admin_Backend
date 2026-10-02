@@ -1802,6 +1802,8 @@ CREATE TABLE IF NOT EXISTS `event_gallery_categories` (
   `event_id` int unsigned NOT NULL,
   `website_client_id` int unsigned NOT NULL,
   `name` varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `description` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `cover_image` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'NULL = newest photo in the category',
   `icon` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `sort_order` int NOT NULL DEFAULT '0',
   `company_id` int unsigned DEFAULT NULL,
