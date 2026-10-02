@@ -101,6 +101,7 @@ const present = (row) => {
         size_bytes: Number(item.size_bytes || 0),
         category_id: item.category_id ?? null,
         caption: item.caption,
+        show_in_app: item.show_in_app !== false && item.show_in_app !== 0,
         sort_order: item.sort_order,
         created_at: item.created_at,
     };
@@ -169,6 +170,9 @@ const listItems = async (clientId, eventId, query = {}) => {
         const catId = Number(query.category_id);
         where.category_id = catId > 0 ? catId : null;
     }
+    // "Show in Event App" off = the host still manages it, a guest never
+    // receives it.
+    if (!isOwner) where.show_in_app = true;
 
     const items = await EventGalleryItem.findAll({
         where,
@@ -177,7 +181,7 @@ const listItems = async (clientId, eventId, query = {}) => {
 
     return {
         items: items.map(present),
-        categories: await listCategories(clientId, event.id),
+        categories: await listCategories(clientId, event.id, { visibleOnly: !isOwner }),
         usage: await getUsage(clientId, eventId),
         /** Participants view only — the app hides its Upload button on this. */
         can_upload: isOwner,
@@ -191,14 +195,18 @@ const listItems = async (clientId, eventId, query = {}) => {
  * computed here rather than trusted to a stored counter that drifts the first
  * time an item is deleted by any other path.
  */
-const listCategories = async (clientId, eventId) => {
+const listCategories = async (clientId, eventId, { visibleOnly = false } = {}) => {
     const rows = await EventGalleryCategory.findAll({
         where: { event_id: eventId },
         order: [['sort_order', 'ASC'], ['id', 'ASC']],
     });
 
+    // A guest's counts and covers leave out what the host has hidden, so a
+    // chip never promises a photo the grid will not show.
+    const visible = visibleOnly ? { show_in_app: true } : {};
+
     const counts = await EventGalleryItem.findAll({
-        where: { event_id: eventId },
+        where: { event_id: eventId, ...visible },
         attributes: ['category_id', [Sequelize.fn('COUNT', Sequelize.col('id')), 'n']],
         group: ['category_id'],
         raw: true,
@@ -208,7 +216,7 @@ const listCategories = async (clientId, eventId) => {
     // A category with no cover of its own shows its first photo — the same
     // order the grid draws, so the thumbnail is the photo the host sees first.
     const photos = await EventGalleryItem.findAll({
-        where: { event_id: eventId, type: 'image', category_id: { [Op.ne]: null } },
+        where: { event_id: eventId, type: 'image', category_id: { [Op.ne]: null }, ...visible },
         attributes: ['category_id', 'url'],
         order: ITEM_ORDER,
         raw: true,
@@ -219,6 +227,15 @@ const listCategories = async (clientId, eventId) => {
     }
 
     return rows.map((r) => presentCategory(r, byId.get(r.id) || 0, firstPhoto.get(r.id)));
+};
+
+/**
+ * The categories for the standalone endpoint, as the VIEWER may see them — the
+ * host, or a participant of the event; anyone else is refused.
+ */
+const listCategoriesForViewer = async (clientId, eventId) => {
+    const { event, isOwner } = await resolveEventForView(clientId, eventId);
+    return listCategories(clientId, event.id, { visibleOnly: !isOwner });
 };
 
 const presentCategory = (r, itemCount = 0, firstPhotoUrl = null) => ({
@@ -503,7 +520,7 @@ const removeItem = async (clientId, itemId) => {
 };
 
 /**
- * Edit one item: its caption, and / or the category it is filed under.
+ * Edit one item: its caption, whether guests see it, and / or its category.
  * Host only — `website_client_id` is the owner.
  */
 const updateItem = async (clientId, itemId, body = {}) => {
@@ -513,6 +530,9 @@ const updateItem = async (clientId, itemId, body = {}) => {
     if (!item) throw ApiError.notFound('That gallery item was not found.');
 
     if (body.caption !== undefined) item.caption = cleanText(body.caption, 300);
+    if (body.show_in_app !== undefined) {
+        item.show_in_app = [true, 'true', 1, '1'].includes(body.show_in_app);
+    }
     if (body.category_id !== undefined) {
         const wanted = Number(body.category_id);
         if (wanted > 0) {
@@ -571,6 +591,7 @@ module.exports = {
     getUsage,
     listItems,
     listCategories,
+    listCategoriesForViewer,
     createCategory,
     updateCategory,
     uploadCategoryCover,

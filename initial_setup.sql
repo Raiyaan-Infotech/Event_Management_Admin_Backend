@@ -1402,6 +1402,7 @@ CREATE TABLE IF NOT EXISTS `event_gallery_items` (
   `mime_type` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `size_bytes` bigint unsigned NOT NULL DEFAULT '0' COMMENT 'counted against the plan storage limit',
   `caption` varchar(300) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `show_in_app` tinyint(1) NOT NULL DEFAULT '1' COMMENT '0 = hidden from guests, the host still sees it',
   `sort_order` int NOT NULL DEFAULT '0',
   `uploaded_by` int unsigned DEFAULT NULL COMMENT 'website_clients.id — the host today, a guest when guest uploads land',
   `company_id` int unsigned DEFAULT NULL,

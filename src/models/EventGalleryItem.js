@@ -33,6 +33,8 @@ module.exports = (sequelize) => {
         size_bytes: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false, defaultValue: 0 },
 
         caption: { type: DataTypes.STRING(300), allowNull: true },
+        /** "Show in Event App". false = guests do not get it; the host does. */
+        show_in_app: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
         sort_order: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
 
         /** The host today; a guest once guest uploads exist. */

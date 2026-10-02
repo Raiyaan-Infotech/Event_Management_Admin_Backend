@@ -25,7 +25,7 @@ const remove = asyncHandler(async (req, res) => {
 });
 
 const listCategories = asyncHandler(async (req, res) => {
-    const result = await service.listCategories(req.websiteClient.id, Number(req.params.id));
+    const result = await service.listCategoriesForViewer(req.websiteClient.id, req.params.id);
     return ApiResponse.success(res, { categories: result }, 'Categories loaded.');
 });
 
