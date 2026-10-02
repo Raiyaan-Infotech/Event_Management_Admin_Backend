@@ -54,6 +54,13 @@ const getById = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, { guest }, 'Guest retrieved');
 });
 
+const uploadPhoto = asyncHandler(async (req, res) => {
+    const result = await guestService.uploadGuestPhoto(
+        req.websiteClient.id, req.websiteClient.company_id, req.file
+    );
+    return ApiResponse.success(res, result, 'Photo uploaded.');
+});
+
 const create = asyncHandler(async (req, res) => {
     const guest = await guestService.createGuest(
         req.websiteClient.id,
@@ -199,7 +206,7 @@ const sampleCsv = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
-    list, stats, capacity, formOptions, getById, create, update, remove, bulk,
+    list, stats, capacity, formOptions, getById, create, update, remove, bulk, uploadPhoto,
     listGroups, allGroups, groupStats, getGroup, createGroup, updateGroup, removeGroup,
     previewImport, commitImport, exportGuests, sampleCsv,
 };

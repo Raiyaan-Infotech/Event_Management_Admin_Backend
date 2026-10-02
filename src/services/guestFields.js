@@ -29,6 +29,7 @@ const PERSON_FIELDS = [
     'gender', 'relationship', 'relationship_option_id', 'company',
     'address_line1', 'address_line2', 'city', 'state', 'postal_code', 'country',
     'dietary_preference', 'food_preference_option_id', 'special_requirements', 'notes',
+    'photo',
 ];
 
 const ATTENDANCE_FIELDS = [
@@ -152,6 +153,8 @@ const normalisePerson = async (clientId, body, { partial = false, existing = nul
         company: 200, address_line1: 255, address_line2: 255, city: 120, state: 120,
         postal_code: 20, country: 100, dietary_preference: 255,
         special_requirements: 500, notes: 500, relationship: 60,
+        // A URL from the guest photo upload; empty clears it.
+        photo: 500,
     };
     for (const [field, max] of Object.entries(optional)) {
         if (has(field)) data[field] = str(picked[field], max);

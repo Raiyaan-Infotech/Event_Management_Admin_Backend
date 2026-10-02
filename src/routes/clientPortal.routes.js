@@ -299,6 +299,24 @@ router.get('/guests/capacity', guestController.capacity);
 router.get('/guests/form-options', guestController.formOptions);
 router.get('/guests/export', guestController.exportGuests);
 router.post('/guests/bulk', guestController.bulk);
+// A guest's photo: images only, 4MB — the same filter as the client's own avatar.
+router.post(
+    '/guests/photo',
+    (req, res, next) => {
+        avatarUpload.single('file')(req, res, (err) => {
+            if (err) {
+                return res.status(400).json({
+                    success: false,
+                    message: err.code === 'LIMIT_FILE_SIZE'
+                        ? 'That image is larger than 4MB.'
+                        : err.message || 'That image could not be uploaded.',
+                });
+            }
+            next();
+        });
+    },
+    guestController.uploadPhoto,
+);
 
 // Import. `preview` writes nothing; `import` is the only one that does.
 router.get('/guests/import/sample', guestController.sampleCsv);

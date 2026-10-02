@@ -9,6 +9,7 @@ const {
 const { Op } = Sequelize;
 const ApiError = require('../utils/apiError');
 const notifications = require('./clientNotification.service');
+const mediaService = require('./media.service');
 // The same two catalogues the guest's own registration form reads — see
 // getGuestFormOptions for why the host cannot go through the admin routes.
 const relationshipOptions = require('./guestRelationshipOption.service');
@@ -285,6 +286,17 @@ const updateGuest = async (clientId, guestId, body) => {
 };
 
 /**
+ * Store a guest's photo and hand back its URL — the form saves the URL with the
+ * guest (`photo`), as the agenda and gallery-cover uploads do.
+ */
+const uploadGuestPhoto = async (clientId, companyId, file) => {
+    if (!file || !file.buffer) throw ApiError.badRequest('Please choose an image to upload.');
+    const stored = await mediaService.upload(file, { folder: `guests/${clientId}` }, companyId || 1);
+    if (!stored || !stored.url) throw ApiError.badRequest('That image could not be stored.');
+    return { url: stored.url };
+};
+
+/**
  * Remove a guest from the phone book. Their participations stay — somebody
  * who attended an event still attended it — and keep pointing at the
  * (soft-deleted) guest.
@@ -374,6 +386,7 @@ module.exports = {
     createGuest,
     updateGuest,
     deleteGuest,
+    uploadGuestPhoto,
     bulkUpdate,
     present,
     composeName,
