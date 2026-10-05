@@ -14583,6 +14583,9 @@ Jamal: when a CUSTOM template is chosen (app or web) ask for an image, otherwise
 - Also this turn: admin template VIEW page lists the 9 grouped rows (components and permissions) like the wizard, not the 11 keys.
 - Staged, not committed: backend (model, service, tool, `initial_setup.sql`, this file), client portal (7 files), app, admin (`[id]/page.tsx`).
 
+### 678. MY BUG — the new Image / Custom sample templates showed a bare picture on their tiles (2026-10-05)
+Jamal's screenshot: the old "heart" tile shows the invitation (names, date, QR), the new "Classic Custom" shows only its flower pattern. Cause: §676's seeder set `thumbnail` on the Image and Custom rows, and a thumbnail REPLACES the rendered invitation on every tile (`template-artwork.tsx`). Fix: `thumbnail: null` in the seeder, and `UPDATE event_templates SET thumbnail = NULL WHERE code LIKE 'sample-%'` — **10 rows on LOCAL, 10 on PRODUCTION**, the sample rows only. The tiles now draw the invitation like every other template. Not seen in a browser after the fix (the portal caches event options for 5 minutes — a refresh shows it).
+
 ### Session 55 — closing state (2026-10-05)
 - **Client portal** (`event_client_single`): committed + pushed by me on Jamal's instruction, with no attribution line, as `cfbc34b` — today's work together with the older uncommitted QR-style files (`styled-qr.tsx`, `qrcode` package), which the card already depended on.
 - **Backend**: `56fa0b3` (social icons removed) and `64afd76` (the QR-always-on rule) committed + pushed by Jamal. STAGED, not committed: this file. The local server needs a restart. Still untracked: `apply-event-organizer-image.js`, `client-events-report.js`.

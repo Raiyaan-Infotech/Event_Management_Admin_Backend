@@ -280,9 +280,11 @@ const uploadSvg = async (name, body) => {
                 plan_ids: [],
                 sort_order: sort,
                 show_on_homepage: 0,
-                // The Image and Custom rows show their artwork; the others are
-                // drawn live from their colours, which a thumbnail would hide.
-                thumbnail: t.value === 'image' ? imageUrl : t.value === 'custom' ? customUrl : null,
+                // No thumbnail, on purpose: a thumbnail REPLACES the rendered
+                // invitation on every template tile, so a row that has one shows
+                // a bare picture with no names, date or QR on it — which read as
+                // "the new templates show no data" the first time these ran.
+                thumbnail: null,
             });
             created += 1;
             console.log(`  template  create  ${code.padEnd(28)} #${row.id}  ${row.name}`);
