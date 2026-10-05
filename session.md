@@ -14586,10 +14586,48 @@ Jamal: when a CUSTOM template is chosen (app or web) ask for an image, otherwise
 ### 678. MY BUG — the new Image / Custom sample templates showed a bare picture on their tiles (2026-10-05)
 Jamal's screenshot: the old "heart" tile shows the invitation (names, date, QR), the new "Classic Custom" shows only its flower pattern. Cause: §676's seeder set `thumbnail` on the Image and Custom rows, and a thumbnail REPLACES the rendered invitation on every tile (`template-artwork.tsx`). Fix: `thumbnail: null` in the seeder, and `UPDATE event_templates SET thumbnail = NULL WHERE code LIKE 'sample-%'` — **10 rows on LOCAL, 10 on PRODUCTION**, the sample rows only. The tiles now draw the invitation like every other template. Not seen in a browser after the fix (the portal caches event options for 5 minutes — a refresh shows it).
 
-### Session 55 — closing state (2026-10-05)
-- **Client portal** (`event_client_single`): committed + pushed by me on Jamal's instruction, with no attribution line, as `cfbc34b` — today's work together with the older uncommitted QR-style files (`styled-qr.tsx`, `qrcode` package), which the card already depended on.
-- **Backend**: `56fa0b3` (social icons removed) and `64afd76` (the QR-always-on rule) committed + pushed by Jamal. STAGED, not committed: this file. The local server needs a restart. Still untracked: `apply-event-organizer-image.js`, `client-events-report.js`.
-- **Admin portal**: `f9b49b7` (social icons removed) committed by Jamal.
-- **Mobile app**: everything staged, nothing committed (today's work on top of Session 54's gallery / participants / guests). The phone needs a rebuild to show any of it.
-- **Checked**: `flutter analyze` 0 errors / 0 warnings, tests 38/38; client portal `tsc` clean, no lint errors in the new code; admin portal `tsc` clean outside stale `.next` types; backend `node -c`. Paging confirmed on the local DB through the service only (Uttar Pradesh: 624 cities over 7 pages). **Nothing seen on a phone or in a browser, and the location endpoints were never called over HTTP from this session** (the local server did not answer).
-- **Open**: dietary dropdown on the two RSVP screens (portal); whether the phone's back key and the portal's sidebar / browser back should ask the exit question too; a lighter location list endpoint if the live server feels slow (each page costs about three queries); RSVP module (§666) still waiting on its four questions.
+### 679. Custom template: the host's picture IS the event photo (2026-10-05)
+Jamal, from the portal's preview step with a custom template and his own picture on it: "event photos when custom — it redirects to that bg img".
+- On a custom-type template the **Event Photos block is no longer drawn on the card** (the three camera icons / the cover photo box): the picture already fills the card.
+- The **Event Photos / Show Couple Photo switch now shows or hides the host's picture** on a custom template. Off → the template's own picture comes back. An event that follows its template (`components` null) shows it.
+- Portal: `eventCustomImage(event)` in `lib/event-templates.ts` is the one rule (thumbnails ×3, download); the wizard works `photosOn` out from the override; `invitation-card.tsx` leaves `event_photos` out of the visible blocks on a custom template. App: `_shownCustomImage(row)` in `event_repository.dart`, the wizard's draft, and `invitation_card.dart`'s `event_photos` case.
+- Also: the portal's "Your Image for this Template" panel hugs its content (was full width), and the selected custom tile draws the uploaded picture.
+- Client portal committed + pushed by me, no attribution: `2e2bb13` (panel + tile) and the commit for this section. App staged only.
+- Checked: portal `tsc` clean; `flutter analyze` 0 errors / 0 warnings, tests 38/38. Not seen in a browser or on a phone. **Seen in his screenshot and not addressed: the invitation's text is hard to read over a busy photo** — a custom picture has no overlay unless the template sets one.
+
+### 680. App — the custom image on the Invitation Card (Manage) screen too (2026-10-05)
+Closes §677's "not covered". `ClientEventDetail.customImage` (the stored picture, whether or not it is showing). Invitation Card → Design: once a custom-type template is selected a **Your Image** row appears under the templates (thumbnail, Upload / Change / Remove, 9:16 crop); Save appears when the template OR the picture changed and sends `theme_id` + `custom_image`; the preview draws the picture unless Show Couple Photo is off. So the app now asks for it in all three places a template can be chosen: Create Event, Edit Event → Invitation Card, and Invitation Card (Manage). `flutter analyze` 0 errors / 0 warnings, tests 38/38. Staged, not committed; not seen on a phone.
+
+### 681. App — four small fixes from the phone (2026-10-05)
+- **"Dietary Preference" → "Food Preference"** in Add / Edit Guest and Add Participant / Family Member (label and the dropdown's hint lines).
+- **"Cover Image" → "Event Image"** on the Gallery Category form. He wrote "Event Img not Event Cover img"; that label was the only on-screen "cover" wording in the app, so it is the one changed — to be confirmed with him.
+- **Date picker navigation** (`app_date_picker.dart`): he could not get around from the month view. The title now walks outward — days: "October 2026 ▾" opens the MONTHS (was: the years); months: "2026 ▾" opens the years, and the arrows step a YEAR (there were none); years: tap back to the months. Days still step a month with the arrows.
+- **Venue map → Enter Manually**: once a place is chosen on the map (tap, search or my-location) and read back, a success toast "Location selected. Check the venue details." shows and the step switches to the Enter Manually tab, where the filled name / address / landmark are.
+- `flutter analyze` 0 errors / 0 warnings, tests 38/38. Staged, not committed; not seen on a phone.
+
+### 682. App — the full-screen invitation preview fits the screen, no scrolling (2026-10-05)
+Jamal: "in invitation preview full screen, without scroll, fit that content — update img size and invitation size also". Create / Edit Event → Design → Preview → the expand button opened the card at full width in a scrolling list, so a long invitation ran below the fold. `_FullInvitationPage` now lays the card out at the screen's width and scales it as ONE piece (`FittedBox`, contain) into the space under the top bar: the photo, the names and every line shrink together and the whole card is on screen. Pinch still zooms. `flutter analyze` 0 errors / 0 warnings, tests 38/38. Not seen on a phone.
+
+### Session 55 — closing state (2026-10-05, end of day)
+Supersedes the closing state written at midday; §667–§682 are the day.
+- **Pushed, all four repos level with GitHub**:
+  - Backend — Jamal's commits through `549b411` (fonts module, sample seeders, `custom_image`, thumbnail fix); this file pushed by me at the end of the day.
+  - Admin portal — Jamal's commits through `29eb0c5` (social icons removed, Fonts page, wizard grouped to 9 rows, category asked once, view page grouped).
+  - Client portal — `cfbc34b`, `2e2bb13`, `1d5438c` by me (no attribution line, on his instruction) and `ccccba9`, `d02cd32` by him.
+  - Mobile app — his commits through `b679a13`, then the full-screen preview fit (§682) pushed by me, no attribution line.
+- **Production database — changed today**: `template_fonts` table created + 8 sample link fonts; 5 "… Sample Frame" frame styles + 20 `sample-*` templates (40 → he has since added one more); `events.custom_image` column; thumbnails cleared on the 10 Image / Custom sample templates. `schema-audit.js`: nothing missing. **NOT changed**: Ismail's event limit (Basic plan, `max_events` 2) — the write was blocked for this session; set it in the admin panel or run the scratchpad script.
+- **Local**: the same schema; 8 fonts, 5 sample frames, 20 sample templates (30 in all). Local backend needs a restart for the fonts routes and `custom_image`.
+- **Phone**: runs an older build. NOTHING from today has been seen on a device — it needs a rebuild: custom pickers, location + food-preference lists, 8 card switches, exit question, event-limit check, custom image (three places), the four small fixes, the fitted full-screen preview.
+- **Not seen in a browser either**, except through Jamal's own screenshots (template tiles, the custom image panel, the preview with his photo).
+- **Open, for Jamal**:
+  1. Ismail's event limit → 5 (admin panel → Subscriptions → Basic → Max Events), or move him to Standard.
+  2. Custom picture: text is hard to read over a busy photo — add a soft overlay behind the text?
+  3. Custom picture: optional today — make it required?
+  4. Admin wizard shows 9 rows (8 + Decoration Elements) — drop Decorations to make it 8?
+  5. "Event Image" was applied to the Gallery Category form's "Cover Image" — confirm that was the label he meant.
+  6. Menus: Additional first / Default second was my reading of his sentence — confirm (it could have meant the Menus step right after Venue).
+  7. Food Preference dropdown on the portal's two RSVP screens (still typed there; the portal's guest form label still reads "Dietary Preference").
+  8. Exit question: also on the phone's back key and on the portal's sidebar / browser back?
+  9. The 20 sample templates have not been opened with real text in the admin wizard or the app — worth a look, the Custom (arch) ones first.
+  10. RSVP module (§666) — still waiting on its four questions.
+- **Still untracked in the backend** (from Session 53, not mine to decide): `apply-event-organizer-image.js`, `client-events-report.js`.
