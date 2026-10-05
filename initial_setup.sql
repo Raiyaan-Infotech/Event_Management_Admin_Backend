@@ -1903,6 +1903,7 @@ CREATE TABLE IF NOT EXISTS `events` (
   `primary_color` varchar(9) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Hex, #RRGGBB or #RRGGBBAA',
   `cover_image` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'The event''s own photo — mobile list card and event screen. NULL = template artwork. See apply-event-cover-image.js',
   `organizer_image` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'The organizer''s photo or logo, asked with the invitation details. NULL = none. See apply-event-organizer-image.js',
+  `custom_image` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'The host''s own picture for a custom-type template; null = the template''s own',
   `invitation_image` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'The finished invitation as a PNG, uploaded by the portal wizard on save. See add-event-invitation-image.js',
   `components` json DEFAULT NULL COMMENT 'Per-event invitation section on/off override; NULL = the template''s own',
   `component_order` json DEFAULT NULL COMMENT 'Per-event invitation section order; NULL = the template''s own',

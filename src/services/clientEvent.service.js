@@ -59,7 +59,7 @@ const WRITABLE_FIELDS = [
     'privacy', 'status',
     'menu_ids', 'disabled_app_menu_ids',
     'theme_id', 'primary_color',
-    'cover_image',
+    'cover_image', 'custom_image',
     'components', 'component_order',
     'qr_style',
 ];
@@ -411,6 +411,17 @@ const normalise = async (clientId, body, { partial = false } = {}) => {
             throw ApiError.badRequest('Invalid organizer image.');
         }
         data.organizer_image = value;
+    }
+    // The host's own picture for a custom-type template — the same rule as
+    // the cover. Stored whatever the template's type: the event may be moved
+    // to a custom template later, and a picture that is not used costs
+    // nothing. Null clears it (back to the template's own picture).
+    if (has('custom_image')) {
+        const value = str(picked.custom_image, 500);
+        if (value && !/^(https?:\/\/|\/uploads\/)/i.test(value)) {
+            throw ApiError.badRequest('Invalid custom image.');
+        }
+        data.custom_image = value;
     }
 
     /**

@@ -121,6 +121,13 @@ module.exports = (sequelize) => {
             cover_image: { type: DataTypes.STRING(500), allowNull: true },
             // Added by apply-event-organizer-image.js.
             organizer_image: { type: DataTypes.STRING(500), allowNull: true },
+            /**
+             * The host's own picture for a CUSTOM-type template — it replaces
+             * the template's picture inside the template's shape, for this
+             * event only. Null = the template's own.
+             * Added by apply-event-custom-image.js.
+             */
+            custom_image: { type: DataTypes.STRING(500), allowNull: true },
 
             /**
              * The finished invitation as an IMAGE — the portal's own card
