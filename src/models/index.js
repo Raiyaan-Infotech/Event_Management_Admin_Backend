@@ -114,6 +114,9 @@ db.FrameStyle = require('./FrameStyle')(sequelize, Sequelize);
 // A frame surrounds the whole invitation; a decoration is one part of it.
 db.Decoration = require('./Decoration')(sequelize, Sequelize);
 
+// Fonts the admin added for invitation templates — an uploaded file or a link.
+db.TemplateFont = require('./TemplateFont')(sequelize, Sequelize);
+
 // Public website signups — people who registered themselves on a tenant site
 db.WebsiteClient = require('./WebsiteClient')(sequelize, Sequelize);
 

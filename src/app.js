@@ -122,6 +122,8 @@ app.use('/api/v1/template-categories', require('./routes/templateCategory.routes
 app.use('/api/v1/frame-styles', require('./routes/frameStyle.routes'));
 // Ornament images placed inside a template — corners, dividers, tops.
 app.use('/api/v1/decorations', require('./routes/decoration.routes'));
+// Fonts the admin adds for templates (upload or link); `/:id/file` is public.
+app.use('/api/v1/template-fonts', require('./routes/templateFont.routes'));
 app.use('/api/v1/plan-types', require('./routes/planType.routes'));
 app.use('/api/v1/subscription-plans', require('./routes/subscriptionPlan.routes'));
 app.use('/api/v1/plan-badges', require('./routes/planBadge.routes'));

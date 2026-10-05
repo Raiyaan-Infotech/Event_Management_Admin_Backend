@@ -2501,6 +2501,28 @@ CREATE TABLE IF NOT EXISTS `template_categories` (
   KEY `idx_template_categories_listing` (`company_id`,`sort_order`,`deleted_at`)
 ) ENGINE=InnoDB AUTO_INCREMENT=82 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Table structure for `template_fonts`
+CREATE TABLE IF NOT EXISTS `template_fonts` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'The CSS family name a template stores in primary_font / secondary_font',
+  `source` enum('upload','link') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'upload' COMMENT 'upload = a font file in media storage, link = an address the admin pasted',
+  `file_url` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'upload: where the font file is stored',
+  `file_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'upload: the original filename',
+  `file_format` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'upload: TTF | OTF | WOFF | WOFF2',
+  `file_size` int unsigned DEFAULT NULL COMMENT 'upload: bytes',
+  `link_url` varchar(1000) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'link: a stylesheet (Google Fonts css2) or a font file hosted elsewhere',
+  `is_active` tinyint NOT NULL DEFAULT '1',
+  `company_id` int DEFAULT NULL,
+  `created_by` int unsigned DEFAULT NULL,
+  `updated_by` int unsigned DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_template_fonts_company` (`company_id`,`deleted_at`),
+  KEY `idx_template_fonts_status` (`is_active`,`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Table structure for `translation_keys`
 CREATE TABLE IF NOT EXISTS `translation_keys` (
   `id` int NOT NULL AUTO_INCREMENT,

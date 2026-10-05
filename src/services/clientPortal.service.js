@@ -471,6 +471,11 @@ const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
     // cost a round trip mid-wizard.
     const templates = await templatesForPlan(companyId, plan);
 
+    // Fonts the admin added (Templates → Fonts). A template names its fonts;
+    // the portal needs to know where to load an added one from, or the
+    // invitation falls back to a default face. Guarded inside: never throws.
+    const fonts = await require('./templateFont.service').listForRender(companyId);
+
     // What the client has already spent against `max_events`, counted the same
     // way createEvent counts it — deleted events included. Sent here so the
     // wizard can refuse before the first field instead of after the last one,
@@ -495,6 +500,8 @@ const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
          */
         app_features: [],
         templates,
+        /** Added fonts: `{ id, name, source, link_url, link_kind }`. */
+        fonts,
         timezones: EVENT_TIME_ZONES,
     };
 };
