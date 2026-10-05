@@ -439,6 +439,10 @@ const normalise = async (clientId, body, { partial = false } = {}) => {
                 // own map — a key that was never stored is not "switched off".
                 map[key] = raw[key] === undefined ? 1 : (Number(raw[key]) ? 1 : 0);
             }
+            // The QR code is on every invitation (Jamal, 2026-10-05): neither
+            // the app nor the portal offers a switch for it any more, and an
+            // older build that still sends it off is overruled here.
+            map.event_qr_code = 1;
             data.components = map;
         }
     }
