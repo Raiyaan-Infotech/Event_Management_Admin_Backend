@@ -73,7 +73,6 @@ const COMPONENT_KEYS = [
     'event_photos',
     'contact_details',
     'invitation_message',
-    'social_icons',
     'footer_note',
     'decoration_elements',
 ];

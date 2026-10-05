@@ -48,7 +48,7 @@ const COMPANY_ID = 1;
 
 const COMPONENT_KEYS = [
     'event_title', 'host_names', 'date_time', 'venue', 'event_qr_code', 'organizer',
-    'event_photos', 'contact_details', 'invitation_message', 'social_icons',
+    'event_photos', 'contact_details', 'invitation_message',
     'footer_note', 'decoration_elements',
 ];
 const PERMISSION_KEYS = ['background', 'colors', 'fonts', ...COMPONENT_KEYS];

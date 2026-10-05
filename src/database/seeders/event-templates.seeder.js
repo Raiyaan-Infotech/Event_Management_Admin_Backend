@@ -108,7 +108,7 @@ const TEMPLATES = [
         primary_font: 'Marcellus', secondary_font: 'Inter',
         // Deliberately restrictive, so the client portal's permission gating has
         // something real to demonstrate rather than every template allowing all.
-        permissionOverrides: { decoration_elements: 0, social_icons: 0 },
+        permissionOverrides: { decoration_elements: 0 },
         sort_order: 4,
     },
     {
@@ -125,7 +125,7 @@ const TEMPLATES = [
         // A birthday invitation has no organiser or QR the way a managed event
         // does, so those are off — a template whose every switch is on is not a
         // template, it is a default.
-        componentOverrides: { organizer: 0, social_icons: 0 },
+        componentOverrides: { organizer: 0 },
         is_featured: 1, sort_order: 5,
     },
     {
@@ -170,7 +170,7 @@ const TEMPLATES = [
         background_color: '#F4F6F8', secondary_color: '#1F2937',
         overlay_opacity: 10, border_style: 'corners',
         primary_font: 'Inter', secondary_font: 'Inter',
-        componentOverrides: { host_names: 0, decoration_elements: 0, social_icons: 0 },
+        componentOverrides: { host_names: 0, decoration_elements: 0 },
         sort_order: 8,
     },
     {
@@ -203,7 +203,7 @@ const TEMPLATES = [
 
 const COMPONENT_KEYS = [
     'event_title', 'host_names', 'date_time', 'venue', 'event_qr_code', 'organizer',
-    'event_photos', 'contact_details', 'invitation_message', 'social_icons',
+    'event_photos', 'contact_details', 'invitation_message',
     'footer_note', 'decoration_elements',
 ];
 const PERMISSION_KEYS = ['background', 'colors', 'fonts', ...COMPONENT_KEYS];
