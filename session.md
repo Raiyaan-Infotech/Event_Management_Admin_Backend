@@ -14911,3 +14911,4 @@ Jamal pasted the "not done yet" list and said "fix this issue".
   7. My code-drawn frames (#85–#93) and decorations (#16–#21) are still in the LOCAL catalogue, unused — delete?
   8. From Session 55, still open: Ismail's event limit; RSVP module (§666).
 - **Still untracked in the backend** (from Session 53, not mine to decide): `apply-event-organizer-image.js`, `client-events-report.js`.
+- **After the push — Decoration Color "not added"** (2026-10-06). Jamal could not find it in the wizard. It was there (§705), but shown only once a decoration had been picked, and Border Color only once a border had been — so on a fresh Step 2 neither was visible. **Both are always shown now**, under the two pickers, with a line saying "Pick a decoration / border above — this colours it" until one is picked. Admin `19c5d97` → new commit pushed to `main`, no attribution. Not seen in a browser.
