@@ -14912,3 +14912,12 @@ Jamal pasted the "not done yet" list and said "fix this issue".
   8. From Session 55, still open: Ismail's event limit; RSVP module (§666).
 - **Still untracked in the backend** (from Session 53, not mine to decide): `apply-event-organizer-image.js`, `client-events-report.js`.
 - **After the push — Decoration Color "not added"** (2026-10-06). Jamal could not find it in the wizard. It was there (§705), but shown only once a decoration had been picked, and Border Color only once a border had been — so on a fresh Step 2 neither was visible. **Both are always shown now**, under the two pickers, with a line saying "Pick a decoration / border above — this colours it" until one is picked. Admin `19c5d97` → new commit pushed to `main`, no attribution. Not seen in a browser.
+
+### Session 56 — pushed state (2026-10-06, after the last fix)
+Supersedes nothing in the closing state above; this is where each repo ended. All on `main`, level with GitHub, no attribution line.
+- **Backend** — `3fd471d` feat(templates): font sizes, border and decoration colour; vintage frames, fonts and style templates · then docs commits for this file.
+- **Admin portal** — `19c5d97` feat(templates): wizard rework, vintage-frame previews, font sizes and border / decoration colour · `0cb54ac` fix: Border Color and Decoration Color always shown in Step 2.
+- **Client web** — `bd77efc` feat(invitation): card matches the admin preview.
+- **Mobile app** — `e953ea8` feat(invitation): template shade, fonts, colours and shapes on the card.
+- Render (backend) and Vercel (admin) deploy from these pushes; the production database already has the four new `event_templates` columns, so the deploy needs no further migration. The client web deploys from its own push. The app needs a rebuild.
+- Not confirmed by anyone yet: that the deploys finished, and how any of today's work looks in a browser or on a phone.
