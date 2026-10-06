@@ -98,6 +98,7 @@ const TEMPLATE_ATTRS = [
     'background_position', 'image_size',
     'orientation', 'dimension',
     'primary_font', 'secondary_font', 'border_style',
+    'primary_font_size', 'secondary_font_size', 'frame_color', 'decoration_color',
     // Without these two the portal cannot draw the frame or the decorations at
     // all — it was rendering a bare colour where the admin's own preview showed
     // an arch, a toran and a mosque silhouette, and the two previews of the SAME

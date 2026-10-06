@@ -6,10 +6,13 @@
  *   node src/database/seeders/template-fonts.seeder.js --apply
  *   node src/database/seeders/template-fonts.seeder.js --prod --apply
  *
- * Eight invitation-style fonts, all LINK fonts (Google Fonts stylesheets), so
- * nothing has to be uploaded to storage and the same rows work on any
- * database. None of them is one of the ten built into the template wizard —
- * a row called "Poppins" would only sit beside the built-in Poppins.
+ * Forty-two fonts, all LINK fonts (Google Fonts stylesheets), so nothing has
+ * to be uploaded to storage and the same rows work on any database: the ten
+ * the template wizard used to carry in its own code, eight invitation-style
+ * additions, and a curated set of twenty-four — scripts for the names, serifs
+ * for headings and dates, sans for the small lines. The wizard no longer has
+ * a list of its own —
+ * what is in this table is what it offers.
  *
  * ── THE NAME IS THE FAMILY ───────────────────────────────────────────
  * A stylesheet link declares its own family name, and the browser is asked
@@ -35,6 +38,21 @@ const COMPANY_ID = 1;
 
 /** name → the weights worth loading (a script face has only one). */
 const FONTS = [
+    // The ten the template wizard used to have built in (Jamal, 2026-10-06:
+    // the wizard's font lists come from THIS module and nowhere else). They
+    // are rows like any other now, so a template that names one still finds
+    // it, and the admin can switch one off or delete it.
+    ['Playfair Display', '400;600;700'],
+    ['Poppins', '300;400;500;600'],
+    ['Great Vibes', null],
+    ['Cormorant Garamond', '400;500;600;700'],
+    ['Montserrat', '300;400;500;600'],
+    ['Lora', '400;500;600;700'],
+    ['Cinzel', '400;600;700'],
+    ['Dancing Script', '400;600;700'],
+    ['Marcellus', null],
+    ['Inter', '300;400;500;600'],
+    // Invitation-style additions.
     ['Parisienne', null],
     ['Sacramento', null],
     ['Alex Brush', null],
@@ -43,6 +61,36 @@ const FONTS = [
     ['Tangerine', '400;700'],
     ['Libre Baskerville', '400;700'],
     ['Josefin Sans', '300;400;600'],
+
+    // A wider, curated set (Jamal, 2026-10-06: "better fonts"). Every link
+    // was asked for and answered with a stylesheet declaring that family.
+    // Calligraphy and script — for the names.
+    ['Italianno', null],
+    ['Monsieur La Doulaise', null],
+    ['Rouge Script', null],
+    ['Petit Formal Script', null],
+    ['Mrs Saint Delafield', null],
+    ['Herr Von Muellerhoff', null],
+    ['Imperial Script', null],
+    ['Corinthia', '400;700'],
+    ['Luxurious Script', null],
+    ['WindSong', '400;500'],
+    // Serif and display — for headings, dates and body lines.
+    ['Cormorant', '400;500;600'],
+    ['EB Garamond', '400;500;600'],
+    ['Bodoni Moda', '400;500;600'],
+    ['Cinzel Decorative', '400;700'],
+    ['Prata', null],
+    ['Gilda Display', null],
+    ['Forum', null],
+    ['Italiana', null],
+    ['Old Standard TT', '400;700'],
+    ['Libre Caslon Text', '400;700'],
+    // Sans — for the small lines.
+    ['Raleway', '300;400;500;600'],
+    ['Jost', '300;400;500'],
+    ['Tenor Sans', null],
+    ['Lato', '300;400;700'],
 ];
 
 const linkFor = (name, weights) =>

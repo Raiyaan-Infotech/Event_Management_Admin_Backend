@@ -244,6 +244,35 @@ module.exports = (sequelize) => {
             type: DataTypes.INTEGER.UNSIGNED,
             allowNull: true,
         },
+        /**
+         * Step 2's Border Color. The frame is drawn in this ONE colour; null
+         * means the frame keeps the colours it was uploaded with. A frame of
+         * several colours becomes a single-colour silhouette when this is set.
+         */
+        frame_color: {
+            type: DataTypes.STRING(9),
+            allowNull: true,
+        },
+        /** Step 2's Decoration Color — the same idea, for the decorations. */
+        decoration_color: {
+            type: DataTypes.STRING(9),
+            allowNull: true,
+        },
+        /**
+         * Step 2's font sizes, as a percentage of the renderer's standard
+         * size: the Primary Font draws the names, the Secondary Font every
+         * other line. 100 = unchanged.
+         */
+        primary_font_size: {
+            type: DataTypes.SMALLINT.UNSIGNED,
+            allowNull: false,
+            defaultValue: 100,
+        },
+        secondary_font_size: {
+            type: DataTypes.SMALLINT.UNSIGNED,
+            allowNull: false,
+            defaultValue: 100,
+        },
         /** Step 2's Decorations — ids into `decorations`, in display order. */
         decoration_ids: {
             type: DataTypes.JSON,

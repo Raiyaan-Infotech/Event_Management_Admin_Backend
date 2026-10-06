@@ -953,6 +953,10 @@ const TEMPLATE_DESIGN_ATTRS = [
     'gradient_from', 'gradient_via', 'gradient_to', 'gradient_type', 'gradient_direction',
     'overlay_enabled', 'overlay_color', 'overlay_opacity',
     'secondary_color', 'primary_font', 'secondary_font', 'border_style',
+    'primary_font_size', 'secondary_font_size', 'frame_color', 'decoration_color',
+    // A custom template's shape (heart / circle / arch): the app cuts an
+    // event's card and its list thumbnail to it.
+    'image_shape', 'corner_radius',
     'frame_style_id', 'decoration_ids',
     // The template's default sections and order; the event's own
     // `components` / `component_order` override them when set.

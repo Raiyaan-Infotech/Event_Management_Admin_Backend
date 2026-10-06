@@ -45,6 +45,7 @@ const WRITABLE_FIELDS = [
     'image_size', 'overlay_enabled', 'overlay_color', 'artwork_style',
     'overlay_opacity', 'orientation', 'dimension', 'primary_font',
     'secondary_font', 'border_style', 'frame_style_id', 'decoration_ids',
+    'primary_font_size', 'secondary_font_size', 'frame_color', 'decoration_color',
     // step 3
     'components', 'component_order',
     // step 4
@@ -350,6 +351,22 @@ const pickWritable = (data = {}) => {
     if (payload.overlay_color !== undefined) {
         const tint = String(payload.overlay_color ?? '').trim();
         payload.overlay_color = tint ? toHex(tint) : null;
+    }
+
+    // Border Color / Decoration Color: empty means "its own colours", stored as null.
+    for (const key of ['frame_color', 'decoration_color']) {
+        if (payload[key] === undefined) continue;
+        const colour = String(payload[key] ?? '').trim();
+        payload[key] = colour ? toHex(colour) : null;
+    }
+
+    // Font sizes are a percentage of the standard size. Held to 60-160: below
+    // that the small lines stop being readable, above it the names no longer
+    // fit a framed card.
+    for (const key of ['primary_font_size', 'secondary_font_size']) {
+        if (payload[key] === undefined) continue;
+        const n = parseInt(payload[key], 10);
+        payload[key] = Number.isNaN(n) ? 100 : Math.min(Math.max(n, 60), 160);
     }
     if (payload.image_size !== undefined) {
         // 10-400%. Below 10 the design is invisible and reads as a broken

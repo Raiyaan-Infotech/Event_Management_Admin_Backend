@@ -187,3 +187,7 @@ qa-reports/*/
 # emails and phone numbers. Keep them locally, never in the repo.
 prod-*.json
 local-*.json
+
+# Seeder artwork (frames, sample photographs) — large binaries, kept on disk
+# for the seeders that upload them, not in the repository.
+src/database/seeders/assets/
