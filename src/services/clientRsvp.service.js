@@ -90,7 +90,7 @@ const GUEST_ATTRS = [
     'special_requirements', 'plus_one', 'plus_one_count', 'custom_answers',
     'city', 'state', 'country', 'created_at', 'updated_at',
     'accommodation', 'relationship', 'photo', 'added_by_client_id',
-    'guest_id',
+    'guest_id', 'rsvp_side',
 ];
 
 const INCLUDE = [
@@ -145,6 +145,9 @@ const shape = (row) => {
         /** The four buckets the tiles and tabs share. */
         bucket: BUCKET[j.rsvp_status] || 'no_response',
         party_size: Number(j.party_size) || 1,
+        /** 'groom' | 'bride' | null — asked on the RSVP form when the event's
+            settings allow it. The relationship is `guest.relationship`. */
+        rsvp_side: j.rsvp_side || null,
         dietary_preference: j.dietary_preference,
         special_requirements: j.special_requirements,
         plus_one: Boolean(j.plus_one),

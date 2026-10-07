@@ -14921,3 +14921,124 @@ Supersedes nothing in the closing state above; this is where each repo ended. Al
 - **Mobile app** — `e953ea8` feat(invitation): template shade, fonts, colours and shapes on the card.
 - Render (backend) and Vercel (admin) deploy from these pushes; the production database already has the four new `event_templates` columns, so the deploy needs no further migration. The client web deploys from its own push. The app needs a rebuild.
 - Not confirmed by anyone yet: that the deploys finished, and how any of today's work looks in a browser or on a phone.
+
+## Session 57 — (2026-10-07)
+
+### 708. Client portal — "Your Image for this Template" showed under Color templates (2026-10-07)
+Jamal's screenshot: Design Style "classic", Template Type "Color", four Color tiles — and the image uploader under them. He asked that it show only when a custom template is chosen.
+- **Cause**: the rule was already "selected template is custom" (§677), but the selected template was looked up in the WHOLE list. With a custom template selected and the Template Type filter then moved to Color, the custom tile left the screen and its uploader stayed, under tiles it has nothing to do with.
+- **Fix** (`event-wizard.tsx`, client portal only): the lookup is in the filtered list (`styleFilteredTemplates`), so the uploader shows only while the selected custom tile is on screen. Changing the filter does NOT change the selection or drop the uploaded picture — filter back to Custom / All and it is there; clicking a Color tile selects it and the uploader stays gone.
+- Not changed: the Event Photos switch in the next step still follows the selected template, not the filter. The app is not affected (its types are tabs and the image is its own page).
+- Portal `tsc` clean. Not seen in a browser. Not committed.
+
+### 709. Client portal — the Primary Colour also colours the invitation's QR code; Reset button (2026-10-07)
+Jamal: "that img selection below choose primary color apply for qr and with reset btn also."
+- **QR in the Primary Colour**: `StyledQrSvg` got a `color` prop (modules, eyes and the rounded style's rings; default black). `invitation-card.tsx` passes `qrColour` — the event's Primary Colour **darkened against white until 7:1**, because the code always sits on its own white tile and a pale code does not scan. So a light pick (pale gold, pink) is drawn as a deep shade of the same hue, not as picked. No colour = black. The heart style's red heart is unchanged.
+  - Reaches everything that draws the card: the wizard preview, the invitation on the event page, the download.
+  - **Not changed**: the standalone event QR (`event-qr.tsx`, the one printed / scanned at the door) stays black; event-list thumbnails; **the mobile app** (its card's QR is still black); the admin preview (a template has no client colour).
+- **Reset** beside the swatches: back to the colour the selected template starts with (its Secondary Color — what clicking the tile sets), or the first swatch when it has none. Always shown, greyed when the colour is already that.
+- The hint under "Primary Colour" now reads "Used for the names and the QR code printed on your invitation."
+- Portal `tsc` clean. **Not seen in a browser, and no coloured code was scanned with a phone.** Not committed.
+
+### 710. Event Photos switch removed for clients; a Custom template REQUIRES the host's picture — client portal + app (2026-10-07)
+Jamal: "remove that Event Photos; when custom the user must upload their photo; the other template styles don't need it, it binds from the template; update the mobile also." Supersedes §679 (the switch showed / hid the host's picture), §687 / §705 (switch offered on Custom) and §677's "optional, on purpose".
+- **No Event Photos / Show Couple Photo switch any more**, on any template type — portal `COMPONENT_SWITCHES` (7 rows now, and so 7 Component Order chips), app `kCardSettingKeys` (7; `InvitationCardSettings.backgroundType` and its two callers removed).
+- **Custom template → the picture is required.**
+  - Portal: Design & Theme cannot be left forward without it (`validate`, target > 4 → the field goes red + "Please fill all mandatory fields."; both filters are reset to All so the selected tile and its uploader are on screen). The label carries the `*`.
+  - App: Create / Edit Event → Your Image page will not go Next without one ("Please upload your image."); Invitation Card (Manage) → Design will not Save a custom template without one. The **Remove** button is gone from both (Change only).
+- **The host's picture is always drawn on a custom template.** Portal `eventCustomImage()` and app `_shownCustomImage()` no longer read `components.event_photos` — so an older event saved with that switch OFF shows its picture again.
+- **Other types**: nothing asked, nothing switchable — what the template stored decides.
+- **Not enforced on the server**: `custom_image` is still nullable and the API accepts a custom-template event without one (an older app build, or an event created before today). Then the template's own sample picture is drawn, as before. Say if the backend should refuse it.
+- Not changed: existing events on a custom template with no picture — nothing forces them until they are next edited. On a non-custom template the app still draws the event's cover image as a block when that event's stored `event_photos` is on (older events); no switch can change it now.
+- Checked: portal `tsc` clean; `flutter analyze` no errors or warnings, `flutter test` 38/38. **Not seen in a browser or on a phone; the app needs a rebuild.** Not committed in either repo.
+- During the work one of my edits cut the end off the portal's `lib/event-templates.ts` (it dropped `resolveArtwork`); caught by `tsc` and rebuilt from the committed file — the diff there is the one function only.
+
+### 711. Custom image: a dropdown-sized control in the portal's filter row; the Custom tab's first card in the app; drawn on every custom template (2026-10-07)
+Jamal, from the portal's Design & Theme step: "this img upload option show near the template type dropdown, same size; the preview is shown in the template already. App: custom's first card is the upload img card, and that reflects in the other custom images."
+- **Client portal** (`event-wizard.tsx`): the big "Your Image for this Template" panel under the grid is gone. New `CustomImageButton` — a third control in the filter row, the dropdowns' width and height: "Your Image *", Upload Image / Change Image with a small thumbnail, same 9:16 crop. No Remove (required, §710). Shown while Template Type is **Custom**, or the selected tile on screen is a custom one.
+  - **Every custom tile draws the uploaded picture**, not only the selected one.
+  - Required check unchanged (§710); when it fails the filters go to All Styles + Custom so the control is on screen, red.
+- **App** (`create_event_screen.dart`, Create Event and Edit Event → Invitation Card): the separate **Your Image page is removed** — Design is four pages again (Template Category → Templates → Card Settings → Preview). On the Templates page the **Custom tab's first card is the upload card** ("Upload Image" → the picture + "Change Image"); it counts as one of the six cards on page one. Every custom template tile is drawn with the picture.
+  - Next is refused on a custom template without a picture ("Please upload your image.") and the page returns to the Custom tab.
+- **Not changed**: the app's separate Invitation Card (Manage) screen keeps its own Your Image row under the templates, and its tiles are not redrawn with the picture.
+- Checked: portal `tsc` + eslint clean; `flutter analyze` no errors or warnings, `flutter test` 38/38. **Not seen in a browser or on a phone; the app needs a rebuild.** Not committed.
+
+### 712. App — the invitation's QR code is drawn in the Primary Colour, like the client web (2026-10-07)
+Jamal: "Primary Color is reflected in the QR code in client web — do that in the app also." The app half of §709.
+- `EventQr` got a `color` (modules and eyes; default black — the settings' style samples, the share screen's big code and the QR PNG export are unchanged). `InvitationCard` draws its QR in the event's Primary Colour, **darkened against white to 7:1** (`readableTint`) — same rule as the web, so a pale pick becomes a deep shade of the same hue. No colour = black.
+- `ClientEventDetail.primaryColor` is new (`primary_color` from the event detail) — the card had no access to the saved colour before; only Create Event's preview was handed one.
+- **Found, NOT changed**: on a SAVED event the app's card draws the NAMES in the template's accent, not in the event's Primary Colour — only the Create Event preview uses the picked colour for the names (the client web uses it everywhere). So after this, a saved event's QR follows the Primary Colour and its names do not. One line to align (`nameColor ?? event.primaryColor` for the names) — it would recolour the names on every existing event's card in the app; his call.
+- Not verified: that the guest's (participant's) event payload carries `primary_color` — if it does not, a guest's card keeps a black code.
+- `flutter analyze` no errors or warnings, `flutter test` 38/38. **Not seen on a phone, no coloured code scanned; the app needs a rebuild.** Not committed.
+- **§711 follow-up — the upload icon stays on the card** (2026-10-07). Jamal: "in app, after upload img, show upload icon in center." The Custom tab's upload card showed only the picture once one was uploaded; it now keeps the camera-plus icon in the centre, on a dark round badge over the picture, so the card still reads as the place to tap. `flutter analyze` on the create feature: no errors or warnings. Not seen on a phone; needs a rebuild.
+
+### 713. Client portal — the image upload shows ONLY when Template Type is Custom (2026-10-07)
+Jamal's screenshot: All Styles + All Types, and "Your Image" still in the row. "When we choose Custom in template type, that time show the image upload — that is what I told from the beginning." **I had read it wrong three times** (§708, §710, §711): each time the rule followed the SELECTED template (a custom one selected → shown), when he meant the DROPDOWN. Now `customImageAsked = styleFilter === "custom"` and nothing else: All Types, Color, Image, Gradient → no upload control, whatever is selected.
+- Still required: a custom template selected with no picture stops Next, and the filter is moved to Custom so the control appears, red (§710 / §711).
+- Consequence: a client who selects a custom tile from the All Types list is not shown the upload until Next is pressed (then the filter jumps to Custom). 
+- The app needed no change: its upload card is already only on the Custom tab.
+- Portal `tsc` clean. Not seen in a browser. Not committed.
+
+### 714. RSVP module — Jamal's changes to the design's screen 3; understanding put back to him, NOT built (2026-10-07)
+Follows §666. He sent the 12-screen organizer design again with changes to RSVP Settings (screen 3):
+- **Remove three switches**: Require Approval, Send Reminder, Show RSVP in App.
+- **Add one switch**: "Allow to Specify the Relationship — Let's guest specify the relationship of Groom & Bride".
+- **RSVP form gains**: "Are you from the groom's side or the bride's side?" and the relationship with them.
+- Answers §666's question 3 in part (Require Approval and Send Reminder are out; Auto Confirmation stays in the design).
+Put back to him before building (his rule — review first): one switch for both questions?; Relationship off the Add / Edit Participant form too, or only the guest's registration form?; with Send Reminder gone from Settings, does it also leave the action menu (screen 7)?; Auto Confirmation off = response waits as Pending until Mark as Confirmed?; side question on weddings only? Nothing coded.
+
+### 715. App — RSVP Settings screen, DESIGN ONLY (2026-10-07)
+Jamal's answers to §714: one switch for both relationship questions; Send Reminder removed everywhere; responses confirm automatically (no pending-approval step); labels "Groom / Bride". Then: "do this config screen" — and, when I started on the backend, **"do that design only now"** (he stopped the backend look; nothing was changed there).
+- New `features/organizer/rsvp/rsvp_settings_screen.dart`, route `/event/rsvp-settings?id=` (organizer-only). The event card on top, then one card: **Enable RSVP** · **Response Options** (Attending / Not Attending / Maybe checkboxes; the last one cannot be unticked) · **Response Deadline** (the app's own date picker, today onward) · **Allow Number of Guests** · **Allow Special Requests** · **Allow to Specify the Relationship** ("Let guests specify the relationship of Groom & Bride"). With Enable RSVP off the rest is dimmed.
+- Not on the screen, per his crop and answers: Auto Confirmation, Require Approval, Send Reminder, Show RSVP in App.
+- Opens from **Edit Event → RSVP** (new row, after Agenda / Schedule) and from Event Settings → RSVP Settings (was "coming soon").
+- `EventHeaderCard` — Edit Event's header card made public so this screen draws the same one.
+- **NOTHING IS SAVED.** The values live on the screen and reset when it is left; there is no Save button. Still needed for it to be real: a place on the event for the settings (one field), the read / write, and the RSVP form obeying them — plus the groom / bride side + relationship questions, and Relationship off the registration form (§666, §714). Not started.
+- `flutter analyze` no errors or warnings, `flutter test` 38/38. Not seen on a phone; needs a rebuild. Not committed.
+
+### 716. App — RSVP Preview screen, DESIGN ONLY (2026-10-07)
+Jamal, on the design's screen 4: add the groom / bride question and the relationship-with-their-side dropdown, and put the same event card at the top.
+- New `features/organizer/rsvp/rsvp_preview_screen.dart`, opened by a **Preview RSVP Form** button under the RSVP Settings card (disabled while Enable RSVP is off). It is built from the switches on that screen: only the ticked response options, Number of Guests / Special Requests / the relationship block only when their switch is on.
+- Top to bottom: the event card (same `EventHeaderCard` as Edit Event and RSVP Settings — not the design's floral banner) · **Will you be attending?** (radio rows) · **Number of Guests** (− 2 +, minimum 1) · **Are you from the Groom's side or the Bride's side?** (Groom / Bride, side by side) · **Relationship with Groom / Bride** dropdown (its label follows the side picked; the options are the existing admin-managed relationship list, `guestFormOptionsProvider` — read only, no backend change) · **Special Requests (Optional)** · **Submit RSVP** · "Your response helps us plan better! Thank you".
+- Submit only says "This is a preview. Guests submit from their own app." Nothing is sent or saved.
+- Not done: the side question is shown on every event (the weddings-only rule from §714 is not applied — there is no saved setting to hang it on yet); the guest's real RSVP form (`participant/rsvp/rsvp_screen.dart`) is unchanged and has neither new question.
+- `flutter analyze` no errors or warnings, `flutter test` 38/38. Not seen on a phone; needs a rebuild. Not committed.
+
+### 717. RSVP module — settings saved for real, the guest's form obeys them, and the organizer's responses flow (screens 5–12) (2026-10-07)
+Jamal: "map with that backend; response deadline is event end date …; then new flow RSVP responses" (design screens 5–12). Supersedes §715 / §716's "design only".
+
+**Schema — two columns** (tool `src/database/tools/apply-rsvp-settings.js`, dry run by default; `initial_setup.sql` + models updated). **Applied LOCAL. PRODUCTION NOT MIGRATED.**
+- `events.rsvp_settings` json NULL — `{ enabled, response_options, deadline, allow_guest_count, allow_special_requests, allow_relationship }`. NULL = defaults (on, three answers, head count, special requests, relationship OFF).
+- `event_participants.rsvp_side` enum('groom','bride') NULL. The relationship itself reuses the existing `relationship` + `relationship_option_id`.
+- ⚠ **Run on production BEFORE this backend is deployed** — both models select the new columns, so every event and guest query fails until they exist: `node src/database/tools/apply-rsvp-settings.js --prod --apply`.
+
+**Backend**
+- New `clientRsvpSettings.service.js` (`settingsOf`, `deadlinePassed`, `get`, `update`) + `GET / PUT /client/events/:id/rsvp-settings` (owner only; handlers in `clientRsvp.controller.js`). Deliberately NOT through `updateEvent`, which reissues the event's QR code on every save.
+- **Deadline rule (my reading of his sentence — to confirm)**: no date chosen = the event's END date; a chosen date may not be AFTER the event ends (server refuses); the app's picker runs from today to the end date, so a past day cannot be picked. After the deadline day the guest's form is closed.
+- `getMyRsvp` now also returns `settings`, `deadline_passed` and (when the relationship switch is on) `relationship_options`; `can_respond` also needs Enable RSVP on and the deadline not passed. `submitMyRsvp` refuses when RSVP is off / the deadline passed / the answer is not one on offer; takes a head count only when allowed; stores special requests only when allowed; accepts `rsvp_side` + `relationship_option_id` only when the relationship switch is on (both optional).
+- `clientRsvp.service.js` rows carry `rsvp_side`.
+- **Behaviour change for EXISTING events**: with no settings saved the deadline is the event's end date, so a guest can no longer answer after the event has ended.
+
+**App — organizer**
+- `rsvp_settings_screen.dart` reads and **saves** (Save button); the deadline box shows the event's end date until a date is chosen. Preview and "View RSVP Responses" buttons under it.
+- New `rsvp_responses_screen.dart`, the organizer's `/event/rsvp` (the old read-only `organizer_rsvp_screen.dart` is deleted): event card · tabs All / Attending / Not Attending / Maybe / Pending with counts · search by name or phone · rows (photo, name, phone, guests, answer, date) → **Response Details** (guests, side, relationship, special requests, submitted on, status Confirmed / Pending, Internal Note) → **Edit Response** (answer, head count, special requests, internal note; name and phone shown, not editable — they belong to the guest) → "RSVP Updated Successfully!" · **More Actions** (View, Edit, Delete) → "Delete Response?" → "RSVP Deleted Successfully!" → back to the list.
+- Left out, per his answers: Send Reminder, Mark as Confirmed (an answer is Confirmed the moment it is given). Also not built: the list's filter icon (the tabs do that job).
+- **"Delete Response" clears the answer; it does not remove the guest** (existing `PUT /client/rsvps/:id/reset`): they go back to Pending and can answer again, so the All count does not drop as it does in the mockup. Removing the person is Guests → Delete. The Internal Note is the participant's existing `notes` field and is cleared with the answer.
+- New `rsvp_organizer_repository.dart` (settings, responses — every page, 100 a request — save, clear).
+
+**App — guest's RSVP form** (`participant/rsvp/rsvp_screen.dart`, `MyRsvp`): shows only the answers on offer; head count / special requests only when allowed; when the relationship switch is on asks **Groom or Bride** and **Relationship with Groom / Bride** (the admin-managed relationship list for the event's category — 16 on local for a wedding); "RSVP is closed" once the deadline has passed.
+
+**Not done**
+- Relationship is still on the QR registration form and the organizer's Add / Edit Participant form (his "no need" in §714 was not clear enough to remove a mandatory field on).
+- The side question is not limited to wedding events — it follows the switch only.
+- The client PORTAL's RSVP screens know nothing of the settings or the side.
+- An answer given on the QR registration form (`join`) is not checked against the settings.
+
+Checked: backend `node -c`; settings service against the local DB (defaults, late deadline refused, empty options refused, save + restore); the guest read on a real local participant (settings returned; 16 relationship options with the switch on); `flutter analyze` no errors or warnings, `flutter test` 38/38. **The HTTP routes were not called; nothing seen on a phone; the local backend needs a restart and the app a rebuild.** Nothing committed (the old organizer screen's deletion is staged in the app repo).
+
+### 718. "RSVP settings page — you deleted it" — it was showing an error, not the form (2026-10-07)
+Jamal, after a rebuild: the RSVP Settings page was gone. **The file, its route and both ways in were all there** (checked). Cause, mine: in §717 I made the screen READ its settings from `GET /client/events/:id/rsvp-settings` and show only "Could not load RSVP settings" when that read failed. **The app talks to PRODUCTION (Render) by default** (`app_config.dart`), and production has neither the route nor the columns — so on his phone the read always failed and the form never appeared. The design-only version of §715 had shown the form because it read nothing.
+- **Fix (app)**: the screen always opens. If the saved settings cannot be read it shows the standard settings with a small notice ("could not be loaded … Retry") instead of a dead end; a successful read or save clears the notice.
+- **Still true until production is updated**: on the phone, Save will fail (the live server has no such route), and the guest's form shows no Groom / Bride question. Needed, in order: `node src/database/tools/apply-rsvp-settings.js --prod --apply`, then push the backend. Not done — not asked.
+- Also learned while checking by HTTP on local: the seeded test client (`test@example.com`) now has two-factor login ON, so `tests/client-rsvps.test.js` and my new `tests/client-rsvp-settings.test.js` cannot sign in as written. The new test file is written but has NOT passed — 2 of its checks ran; the rest need a session. The RSVP Responses list uses routes production already has.
+- `flutter analyze` no errors or warnings. Not seen on a phone; needs a rebuild.

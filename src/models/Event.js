@@ -165,6 +165,14 @@ module.exports = (sequelize) => {
             qr_issued_at: { type: DataTypes.DATE, allowNull: true },
             /** How the invitation draws the QR: 0 classic, 1 rounded, 2 heart. */
             qr_style: { type: DataTypes.TINYINT.UNSIGNED, allowNull: false, defaultValue: 0 },
+
+            /**
+             * The organizer's RSVP form settings (the app's Edit Event →
+             * RSVP screen). NULL = never configured = the defaults — read it
+             * through clientRsvpSettings.service `settingsOf`, never raw.
+             * Added by apply-rsvp-settings.js.
+             */
+            rsvp_settings: { type: DataTypes.JSON, allowNull: true },
         },
         {
             tableName: 'events',

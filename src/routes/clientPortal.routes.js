@@ -254,6 +254,10 @@ router.get('/events/joined', guestRegistrationController.myEvents);
  * shows on the portal's RSVPs screen with nothing to sync.
  */
 router.get('/events/:id/my-rsvp', guestRegistrationController.myRsvp);
+// The ORGANIZER's settings for that form (the app's Edit Event → RSVP). Owner
+// only — the service looks the event up under the caller's own account.
+router.get('/events/:id/rsvp-settings', rsvpController.getSettings);
+router.put('/events/:id/rsvp-settings', rsvpController.updateSettings);
 router.post('/events/:id/my-rsvp', guestRegistrationController.submitMyRsvp);
 // The family directory — a guest-safe read beside my-rsvp, NOT /guests (that is
 // the host's register, scoped to the host's account). See familyDirectory.

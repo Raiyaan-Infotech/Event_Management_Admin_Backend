@@ -28,6 +28,7 @@ const notificationTrigger = require('./notificationTrigger.service');
 // Participants (event_participants) and the host's phone book (guests) — §581.
 const participantService = require('./clientParticipant.service');
 const guestService = require('./clientGuest.service');
+const rsvpSettings = require('./clientRsvpSettings.service');
 const rsvpService = require('./clientRsvp.service');
 const notifications = require('./clientNotification.service');
 const clientPortalService = require('./clientPortal.service');
@@ -693,6 +694,9 @@ const presentMyRsvp = (guest) => ({
     party_size: Number(guest.party_size) || 1,
     special_requirements: guest.special_requirements,
     dietary_preference: guest.dietary_preference,
+    rsvp_side: guest.rsvp_side || null,
+    relationship: guest.relationship || null,
+    relationship_option_id: guest.relationship_option_id || null,
     notes: guest.notes,
     responded_at: guest.responded_at,
 });
@@ -728,13 +732,31 @@ const getMyRsvp = async (clientId, rawEventId) => {
         throw ApiError.notFound('You are not a guest of this event.');
     }
 
-    const event = await Event.findByPk(eventId, { attributes: ['id', 'website_client_id', 'menu_ids'] });
-    const rsvpOn = await rsvpEnabledFor(event);
+    const event = await Event.findByPk(eventId, {
+        attributes: ['id', 'website_client_id', 'menu_ids', 'event_category_id', 'end_date', 'rsvp_settings'],
+    });
+    /*
+      Two switches, both must be on: the plan + the event's RSVP menu
+      (`rsvpEnabledFor`), and the organizer's own Enable RSVP. `settings` is
+      the form the organizer configured — which answers, whether to ask for a
+      head count, special requests, and the groom / bride side + relationship.
+    */
+    const settings = rsvpSettings.settingsOf(event);
+    const rsvpOn = (await rsvpEnabledFor(event)) && settings.enabled;
+    const closed = rsvpSettings.deadlinePassed(settings);
+
+    // Only fetched when the form will ask for it.
+    const relationships = settings.allow_relationship
+        ? await relationshipOptions.listForCategory(event.event_category_id, DEFAULT_COMPANY_ID)
+        : [];
 
     return {
         is_host: false,
         rsvp_enabled: rsvpOn,
-        can_respond: rsvpOn && guest.response_type === 'none',
+        deadline_passed: closed,
+        can_respond: rsvpOn && !closed && guest.response_type === 'none',
+        settings,
+        relationship_options: relationships.map((r) => ({ id: r.id, name: r.name })),
         rsvp: presentMyRsvp(guest),
     };
 };
@@ -885,18 +907,28 @@ const submitMyRsvp = async (clientId, rawEventId, body = {}) => {
         throw ApiError.notFound('You are not a guest of this event.');
     }
 
-    const event = await Event.findByPk(eventId, { attributes: ['id', 'website_client_id', 'menu_ids'] });
-    if (!(await rsvpEnabledFor(event))) {
+    const event = await Event.findByPk(eventId, {
+        attributes: ['id', 'website_client_id', 'menu_ids', 'event_category_id', 'end_date', 'rsvp_settings'],
+    });
+    const settings = rsvpSettings.settingsOf(event);
+    if (!(await rsvpEnabledFor(event)) || !settings.enabled) {
         throw ApiError.badRequest('RSVP is not enabled for this event.');
+    }
+    if (rsvpSettings.deadlinePassed(settings)) {
+        throw ApiError.badRequest('The last date to respond to this event has passed.');
     }
 
     const response = String(body.response_type || '').toLowerCase();
     if (!['yes', 'no', 'maybe'].includes(response)) {
         throw ApiError.badRequest('Please choose a response.');
     }
+    if (!settings.response_options.includes(response)) {
+        throw ApiError.badRequest('That response is not available for this event.');
+    }
 
     let partySize = 1;
-    if (response !== 'no') {
+    // A head count is taken only when the organizer asks for one.
+    if (response !== 'no' && settings.allow_guest_count) {
         partySize = Number(body.party_size ?? 1);
         if (!Number.isInteger(partySize) || partySize < 1 || partySize > 50) {
             throw ApiError.badRequest('Number of guests must be between 1 and 50.');
@@ -913,12 +945,34 @@ const submitMyRsvp = async (clientId, rawEventId, body = {}) => {
         plus_one: partySize > 1 ? 1 : 0,
         plus_one_count: partySize - 1,
     };
-    if (body.special_requirements !== undefined) {
+    if (body.special_requirements !== undefined && settings.allow_special_requests) {
         data.special_requirements = body.special_requirements
             ? String(body.special_requirements).slice(0, 500) : null;
     }
     if (body.notes !== undefined) {
         data.notes = body.notes ? String(body.notes).slice(0, 500) : null;
+    }
+
+    /*
+      Groom's side / Bride's side, and the relationship with that side — asked
+      only when the organizer switched "Allow to Specify the Relationship" on.
+      Optional even then: an answer without them is still an answer. The
+      relationship lands in the same two columns the registration form and the
+      host's guest form write, so every screen that shows it keeps working.
+    */
+    if (settings.allow_relationship) {
+        if (body.rsvp_side !== undefined && body.rsvp_side !== null && body.rsvp_side !== '') {
+            const side = String(body.rsvp_side).toLowerCase();
+            if (!rsvpSettings.SIDES.includes(side)) throw ApiError.badRequest('Please choose Groom or Bride.');
+            data.rsvp_side = side;
+        }
+        if (body.relationship_option_id !== undefined && body.relationship_option_id !== null && body.relationship_option_id !== '') {
+            const options = await relationshipOptions.listForCategory(event.event_category_id, DEFAULT_COMPANY_ID);
+            const option = options.find((o) => Number(o.id) === Number(body.relationship_option_id));
+            if (!option) throw ApiError.badRequest('That relationship is not available for this event.');
+            data.relationship_option_id = option.id;
+            data.relationship = String(option.name).slice(0, 60);
+        }
     }
 
     const [affected] = await EventParticipant.update(data, {

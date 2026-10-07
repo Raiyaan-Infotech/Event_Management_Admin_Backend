@@ -2,6 +2,7 @@ const { asyncHandler } = require('../utils/helpers');
 const ApiResponse = require('../utils/apiResponse');
 const logger = require('../utils/logger');
 const rsvpService = require('../services/clientRsvp.service');
+const rsvpSettingsService = require('../services/clientRsvpSettings.service');
 
 /**
  * RSVPs.
@@ -100,6 +101,26 @@ const moveToGroup = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, data, 'Guest moved');
 });
 
+/** One event's RSVP form settings — the organizer's Edit Event → RSVP screen. */
+const getSettings = asyncHandler(async (req, res) => {
+    const data = await rsvpSettingsService.get(req.websiteClient.id, req.params.id);
+    return ApiResponse.success(res, data, 'RSVP settings retrieved');
+});
+
+const updateSettings = asyncHandler(async (req, res) => {
+    const {
+        enabled, response_options, deadline,
+        allow_guest_count, allow_special_requests, allow_relationship,
+    } = req.body;
+    const data = await rsvpSettingsService.update(req.websiteClient.id, req.params.id, {
+        enabled, response_options, deadline,
+        allow_guest_count, allow_special_requests, allow_relationship,
+    });
+    logger.logRequest(req, `Client ${req.websiteClient.id} updated RSVP settings of event ${req.params.id}`);
+    return ApiResponse.success(res, data, 'RSVP settings saved');
+});
+
 module.exports = {
     list, stats, exportRows, getById, update, resetResponse, getGroup, moveToGroup,
+    getSettings, updateSettings,
 };

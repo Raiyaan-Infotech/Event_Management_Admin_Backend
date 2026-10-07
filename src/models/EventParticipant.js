@@ -150,6 +150,12 @@ module.exports = (sequelize) => {
          */
         relationship_option_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
         /**
+         * RSVP answer: the groom's side or the bride's side. NULL = not
+         * asked (the event's RSVP settings have the question off) or not
+         * answered. Added by apply-rsvp-settings.js.
+         */
+        rsvp_side: { type: DataTypes.ENUM('groom', 'bride'), allowNull: true },
+        /**
          * "Invited By". NULL forever on rows added before this existed —
          * backfilling them with the account owner would be inventing a fact,
          * so they read "—", which is correct.
