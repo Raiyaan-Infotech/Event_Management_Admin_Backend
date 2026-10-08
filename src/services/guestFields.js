@@ -36,6 +36,7 @@ const ATTENDANCE_FIELDS = [
     'table_number', 'party_size',
     'rsvp_status', 'response_type', 'invite_source',
     'plus_one', 'plus_one_count', 'custom_answers',
+    'rsvp_side', 'side',
 ];
 
 const GENDERS = ['male', 'female', 'other'];
@@ -242,6 +243,16 @@ const normaliseAttendance = (body, { existing = null } = {}) => {
         data.custom_answers = picked.custom_answers && typeof picked.custom_answers === 'object'
             ? picked.custom_answers
             : null;
+    }
+
+    if (has('rsvp_side') || has('side')) {
+        const raw = picked.rsvp_side !== undefined ? picked.rsvp_side : picked.side;
+        const val = raw ? String(raw).toLowerCase().trim() : null;
+        if (val && ['groom', 'bride'].includes(val)) {
+            data.rsvp_side = val;
+        } else if (val === null || val === '') {
+            data.rsvp_side = null;
+        }
     }
 
     return data;

@@ -514,6 +514,7 @@ const join = async (client, payload = {}) => {
 
     const fields = { participant_client_id: client.id };
     if (take('name')) fields.name = String(payload.name || '').trim() || existing?.name || client.name;
+    if (take('title')) fields.title = payload.title ? String(payload.title).slice(0, 30) : (existing?.title ?? null);
     if (take('gender')) fields.gender = ['male', 'female', 'other'].includes(payload.gender) ? payload.gender : null;
     if (take('relationship')) {
         fields.relationship = payload.relationship ? String(payload.relationship).slice(0, 60) : null;
@@ -830,7 +831,7 @@ const familyDirectory = async (clientId, rawEventId) => {
 
     const guests = await EventParticipant.findAll({
         where: { event_id: eventId },
-        attributes: ['id', 'name', 'photo', 'relationship'],
+        attributes: ['id', 'name', 'title', 'photo', 'relationship'],
         include: [{ model: GuestGroup, as: 'group', attributes: ['name', 'color'], required: false }],
         order: [['name', 'ASC']],
     });
@@ -840,6 +841,7 @@ const familyDirectory = async (clientId, rawEventId) => {
         .map((g) => ({
             id: g.id,
             full_name: g.name,
+            title: g.title,
             photo: g.photo,
             relationship: g.relationship,
             group: g.group ? { name: g.group.name, color: g.group.color } : null,
@@ -889,7 +891,7 @@ const participantsDirectory = async (clientId, rawEventId) => {
 
     const guests = await EventParticipant.findAll({
         where: { event_id: eventId, participant_client_id: { [Op.ne]: null } },
-        attributes: ['id', 'name', 'photo', 'relationship', 'rsvp_status'],
+        attributes: ['id', 'name', 'title', 'photo', 'relationship', 'rsvp_status'],
         include: [{ model: GuestGroup, as: 'group', attributes: ['name', 'color'], required: false }],
         order: [['name', 'ASC']],
     });
@@ -897,6 +899,7 @@ const participantsDirectory = async (clientId, rawEventId) => {
     return guests.map((g) => ({
         id: g.id,
         full_name: g.name,
+        title: g.title,
         photo: g.photo,
         relationship: g.relationship,
         rsvp_status: g.rsvp_status,

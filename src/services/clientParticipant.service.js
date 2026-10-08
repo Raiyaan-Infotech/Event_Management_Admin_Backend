@@ -56,6 +56,7 @@ const INCLUDE = [
 
 const present = (guest) => {
     const plain = guest.toJSON ? guest.toJSON() : guest;
+    const side = plain.rsvp_side ?? plain.side ?? null;
     return {
         ...plain,
         full_name: plain.name,
@@ -64,6 +65,8 @@ const present = (guest) => {
         // A boolean, never the id — the id names another person's account.
         has_joined: Boolean(plain.participant_client_id),
         participant_client_id: undefined,
+        side,
+        rsvp_side: side,
     };
 };
 
@@ -259,6 +262,7 @@ const createParticipant = async (clientId, companyId, body = {}) => {
         if (clash) throw ApiError.conflict(`${clash.name} is already a participant of this event.`);
 
         const guest = await guests.guestForMobile(clientId, person.mobile, transaction);
+        if (!person.title && guest?.title) person.title = guest.title;
 
         const digits = String(person.mobile || '').replace(/\D/g, '');
         const candidates = [...new Set([digits, digits.slice(-10)])].filter((d) => d.length >= 7);

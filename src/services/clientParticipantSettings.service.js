@@ -73,9 +73,10 @@ const get = async (clientId, rawEventId) => {
     if (!isOwner) {
         // Verify caller is a participant of this event
         const client = await WebsiteClient.findByPk(clientId, { attributes: ['id', 'mobile'] });
-        const mobileCandidates = client?.mobile
-            ? [client.mobile, client.mobile.replace(/\D/g, '')].filter(Boolean)
-            : [];
+        const clientDigits = client?.mobile ? String(client.mobile).replace(/\D/g, '') : '';
+        const mobileCandidates = clientDigits
+            ? [...new Set([client?.mobile, clientDigits, clientDigits.slice(-10)])].filter(Boolean)
+            : (client?.mobile ? [client.mobile] : []);
 
         const participantCondition = mobileCandidates.length > 0
             ? {
