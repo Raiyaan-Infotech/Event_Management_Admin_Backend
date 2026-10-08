@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const multer = require('multer');
 const router = express.Router();
 const controller = require('../controllers/clientPortal.controller');
@@ -17,6 +17,7 @@ const splashController = require('../controllers/clientSplashScreen.controller')
 const galleryController = require('../controllers/clientGallery.controller');
 const galleryService = require('../services/clientGallery.service');
 const agendaController = require('../controllers/clientAgenda.controller');
+const organizerContactController = require('../controllers/clientOrganizerContact.controller');
 const agendaService = require('../services/clientAgenda.service');
 const guestRegistrationController = require('../controllers/guestRegistration.controller');
 const eventNotificationTemplateController = require('../controllers/clientEventNotificationTemplate.controller');
@@ -288,6 +289,11 @@ router.post('/events', eventController.create);
 router.get('/events/:id', eventController.getById);
 router.put('/events/:id', eventController.update);
 router.delete('/events/:id', eventController.remove);
+
+// Organizer Contact — GET and PUT scoped to the caller's event.
+// Declared AFTER /events/:id DELETE to respect Express ordering.
+router.get('/events/:id/organizer-contact', organizerContactController.getContact);
+router.put('/events/:id/organizer-contact', organizerContactController.updateContact);
 
 router.get('/events/:id/notification-templates', eventNotificationTemplateController.listApplicable);
 router.patch('/events/:id/notification-templates/:templateId', eventNotificationTemplateController.toggle);

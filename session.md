@@ -15150,3 +15150,122 @@ Jamal: Participant Settings screen (Edit Event → Participants) missing Save bu
     - Reads `participantSettingsProvider(selectedEventId)`.
     - If `profileScreen` is disabled, displays "Profile Unavailable" card.
     - Gated avatar photo, relationship info, and RSVP status card based on `profilePhoto`, `relationship`, and `attendanceStatus`.
+
+### 726. Backend & App — Participant Title / Salutation Persistence, Form Pre-population & Display Fix (2026-10-08)
+Jamal: Participant title / salutation was not being saved / displayed properly.
+- **Root Cause**:
+  1. `EventGuest` in mobile was missing the `title` field entirely and did not parse `title` in `fromJson()`.
+  2. `GuestFormBodyState.initState` never assigned `_title = g.title`, so opening the edit form or picking a guest left Title/Salutation blank; submitting subsequently sent `title: null`, actively erasing saved titles in the DB on edit.
+  3. `guest_form_screen.dart` strictly checked `_titles.contains(text('title'))`, dropping any custom or variant salutations to `null`.
+  4. Backend `guestRegistration.service.js`'s `join()` method had omitted `take('title')`, and `familyDirectory()` / `participantsDirectory()` omitted `'title'` from their `attributes` list.
+  5. Participant list rows, cards, confirmation dialogues, and details views only rendered bare `name` instead of `displayName` ("Mr. Rahul Sharma").
+  6. Participant self-registration (`RegistrationScreen`) and `InviteRepository.join()` did not provide Title / Salutation selection.
+- **Backend Fixes**:
+  - `src/services/guestRegistration.service.js`:
+    - Added `if (take('title')) fields.title = payload.title ? String(payload.title).slice(0, 30) : (existing?.title ?? null);` in `join()`.
+    - Added `'title'` attribute to `EventParticipant.findAll` in `familyDirectory()` and `participantsDirectory()`, mapping `title: g.title`.
+  - `src/services/clientParticipant.service.js`:
+    - In `createParticipant()`, added inheritance: `if (!person.title && guest?.title) person.title = guest.title;` so participants selected from the phone book retain the guest's title if not overridden.
+- **Mobile App Fixes (`Event_Invite_Mobile_App`)**:
+  - `lib/data/repositories/guest_repository.dart`:
+    - Added `this.title` to `EventGuest` constructor, `final String? title;` field, and `String get displayName => (title != null && title!.trim().isNotEmpty) ? '$title $name' : name;`.
+    - Added `title: str(j['title'])` in `EventGuest.fromJson()`.
+  - `lib/data/repositories/invite_repository.dart`:
+    - Added `String? title` parameter to `join()` and added `'title': title.trim()` to the request payload.
+  - `lib/features/organizer/guests/guest_form_body.dart`:
+    - In `initState()`, pre-populates `_title = g.title;` so the dropdown correctly pre-selects the existing title when editing or picking a guest.
+    - Updated `items` in `AppDropdown<String>` to include `_title` if it's not in the default list `_titles` to prevent any runtime dropdown mismatch.
+  - `lib/features/organizer/guests/guest_form_screen.dart`:
+    - Allowed any non-empty title on load: `_title = text('title').isNotEmpty ? text('title') : null;`.
+    - Dynamic dropdown items to prevent dropping custom titles.
+  - `lib/features/participant/join/registration_screen.dart`:
+    - Added `String? _title;` state.
+    - Added `AppDropdown<String>` for Title / Salutation (Mr., Mrs., Ms., Dr., Prof.) in `_participantDetails()`.
+    - Included Title / Salutation in review step (`_review()`) and passed `title: _title` in `_confirm()`.
+  - `lib/features/organizer/participants/organizer_participants_screen.dart`:
+    - Updated `_ParticipantRow` to render `p.displayName`.
+  - `lib/features/participant/participants/participants_screen.dart`:
+    - Updated `_ParticipantRow` to render `participant.displayName`.
+  - `lib/features/organizer/participants/organizer_participant_details_screen.dart`:
+    - Updated header to display `_p?.displayName`.
+    - Added `Title / Salutation` info row to `_personalInfoCard` when `_p?.title` is present.
+  - `lib/features/participant/participants/participant_details_screen.dart`:
+    - Updated header to display `_p?.displayName`.
+    - Added `Title / Salutation` info row to `_personalInfoCard` when `_p?.title` is present.
+  - `lib/features/organizer/participants/participant_manage_screens.dart`:
+    - `_Person.of(p)` uses `p.displayName`.
+    - `_ParticipantFormScreenState._save` uses `saved.displayName`.
+    - `_ParticipantDetailsScreen` header and card show `p.displayName` and `Title / Salutation`.
+    - `_guestPicker` renders `g.displayName`.
+    - `ParticipantBlockScreen` and `ParticipantDeleteScreen` use `p.displayName`.
+- **Validation**:
+  - `flutter analyze`: Ran across all affected files with 0 issues / 0 warnings found.
+
+
+### 727. Mobile App — Participant Settings Save Overlay Loader (2026-10-08)
+Jamal: Participant Settings screen (Edit Event → Participants) save action did not display the loading overlay.
+- **Root Cause**:
+  `participant_settings_screen.dart` was missing `AppSaveLoader.run()`, which is standard across all organizer save screens (enforcing a minimum duration modal dialog with spinner and status message). Because saving settings over fast network completes in milliseconds, button loading alone did not provide adequate visual feedback before the screen dismissed.
+- **Fixes**:
+  - `lib/features/organizer/participants/participant_settings_screen.dart`:
+    - Imported `api_exception.dart`.
+    - Wrapped `saveSettings` inside `await AppSaveLoader.run(context, message: 'Saving settings…', action: ...)`.
+    - Added `on ApiException catch (e) { if (mounted) AppToast.error(context, e.message); }` for structured error reporting.
+    - Updated `AppButton` to disable taps while saving: `onPressed: _saving ? null : _save`.
+- **Validation**:
+  - `flutter analyze lib/features/organizer/participants/participant_settings_screen.dart`: 0 errors, 0 warnings.
+
+### 728. Mobile App — Splash Screen Module Template Selection Modernization (2026-10-08)
+Jamal: Recently updated template flow (categories, types, and custom photo flow) was not reflected in the splash screen module (`SplashEditorFlow`); asked to check the app's template flow and modernize the outdated splash screen template section.
+- **Audit Findings**:
+  1. `_templatesTab` in `splash_editor_flow.dart` was outdated: it lumped all templates together without category or background type filtering, and hardcoded `take(4)` with a "View More Templates" button.
+  2. Custom templates require host image binding (`withCustomImage(...)`). `splash_editor_flow.dart` had no custom image upload tile, did not inherit `e.customImage`, and passed un-augmented `t.design` to `InvitationArt`, causing custom templates to display sample photos rather than the host's photo in both selection grid and captured splash image.
+  3. No pagination or filter chips: lacked the standard category and type tabs (`All Types`, `Color`, `Image`, `Gradient`, `Custom`).
+- **Fixes**:
+  - `lib/features/organizer/splash/splash_editor_flow.dart`:
+    - Imported `AppConfig`.
+    - Added state variables: `_categoryTab`, `_typeTab`, `_customImageUrl`, and `_templatePage`.
+    - Auto-seeded `_customImageUrl` from `event?.customImage` when opening an event with an existing photo.
+    - Added `_pickCustomImage()` using `AppImagePickCrop` (9:16 aspect ratio) and `AppSaveLoader.run()` uploading via `splashRepositoryProvider.uploadMedia`.
+    - Replaced `_templatesTab` with:
+      - Category filter chips (`All`, plus dynamic categories from available templates).
+      - Type filter chips (`All Types`, `Color`, `Image`, `Gradient`, `Custom`).
+      - When on `Custom` type: first tile is `_customImageCard()` with "Upload Image" / "Change Image" states and camera badge.
+      - Standard 6-per-page grid pagination matching `create_event_screen.dart`.
+      - Tile stack with template name bottom label and selection indicator.
+      - Rendered each tile with `t.design?.withCustomImage(customUrl)` for custom templates.
+    - Updated `_choose(template: t)`: if custom template is picked without an image, prompts and launches image picker.
+    - Updated `_customize`:
+      - Passed `withCustomImage(customUrl)` into `InvitationArt` inside `RepaintBoundary(key: _artKey)` so the saved/uploaded splash PNG captures the user's custom photo in the custom template shape.
+      - Added "Change Custom Image" button when customizing a custom template.
+    - Added reusable `_Chip` component for filtering chips.
+- **Validation**:
+  - `flutter analyze lib/features/organizer/splash/splash_editor_flow.dart`: 0 errors, 0 warnings.
+
+### 729. Mobile App — Organizer Flow Contact / Organizer Section & Screens (Design Only) (2026-10-08)
+Jamal: Edit Event in organizer flow list of sections add option 'Contact / Organizer'. Clicking it opens the Organizer Contact flow (screens 6–9: Contact Details, Contact Action Menu, Edit Organizer Contact, and Contact Updated Successfully). Requested design only first.
+- **Edit Event List Entry** (`edit_event_screen.dart`):
+  - Added `Contact / Organizer` option with `Icons.contact_phone_outlined` and subtitle `'Update organizer contact details'` routing to `/event/organizer-contact?id=$eventId`.
+- **Router Configuration** (`app_router.dart`):
+  - Added `/event/organizer-contact` to `_organizerOnlyRoutes`.
+  - Added `GoRoute(path: '/event/organizer-contact', builder: ...) -> OrganizerContactScreen`.
+- **New Module** (`lib/features/organizer/contact/organizer_contact_screens.dart`):
+  - **Screen 6 (Contact Details)**:
+    - Profile avatar with active online green indicator badge.
+    - Organizer Name and Role pill capsule.
+    - Quick actions: Call, WhatsApp, Email circular action buttons with deep-link launchers.
+    - Contact Info card: Mobile, WhatsApp, Email, Address / Location, Office Hours, Description / Note.
+    - Bottom persistent actions: `Edit Contact` (outline) and `More Actions` (solid primary).
+  - **Screen 7 (Contact Action Menu)**:
+    - Bottom modal sheet with header title and close icon.
+    - Options: `View Contact`, highlighted `Edit Contact` (blush background with primary border), `Change Photo` (integrated with `AppImagePickCrop`), and `Change Order` (display order dialog).
+  - **Screen 8 (Edit Organizer Contact)**:
+    - Form matching design with Avatar + Change Photo / Delete buttons.
+    - Form fields: `Role *` dropdown, `Name *`, `Mobile Number *` with country flag/dial code selector (`🇧🇩 +880 ⌄`), `Alternate Number (Optional)`, `Email (Optional)`, `WhatsApp Number` with country selector, `Address / Location (Optional)`, `Description / Note` multi-line, `Display Order`, and `Show in App` switch toggle.
+    - `Update Contact` primary button: updates local provider and transitions to Screen 9.
+  - **Screen 9 (Contact Updated Successfully)**:
+    - Celebratory confirmation screen with festive checkmark badge, confirmation title/message.
+    - Summary card with updated Avatar, Name, Role, Mobile, Email, and Address.
+    - `View Updated Contact` button: returns back to Screen 6 displaying updated values.
+- **Validation**:
+  - `flutter analyze` on all affected files: 0 errors, 0 warnings.
