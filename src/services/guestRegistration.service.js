@@ -533,6 +533,9 @@ const join = async (client, payload = {}) => {
             ? String(payload.special_request).slice(0, 500)
             : null;
     }
+    if (take('photo')) {
+        fields.photo = payload.photo ? String(payload.photo).slice(0, 500) : existing?.photo ?? null;
+    }
     if (take('message')) fields.notes = payload.message ? String(payload.message).slice(0, 500) : null;
     if (writeAnswer) {
         Object.assign(fields, {
@@ -581,8 +584,15 @@ const join = async (client, payload = {}) => {
     // Fill a placeholder account name once a real one exists, but never rename
     // an account that already has one — a guest form is not a profile editor.
     const accountName = String(client.name || '').trim();
+    const clientUpdates = {};
     if (fields.name && (!accountName || accountName === clientDigits)) {
-        await WebsiteClient.update({ name: fields.name }, { where: { id: client.id }, hooks: false });
+        clientUpdates.name = fields.name;
+    }
+    if (fields.photo && !client.avatar_url) {
+        clientUpdates.avatar_url = fields.photo;
+    }
+    if (Object.keys(clientUpdates).length > 0) {
+        await WebsiteClient.update(clientUpdates, { where: { id: client.id }, hooks: false });
     }
 
     if (writeAnswer && fields.response_type !== 'none') {
@@ -602,6 +612,22 @@ const join = async (client, payload = {}) => {
     return { event: publicEvent(event), guest, created: !existing };
 };
 
+/** Helper to match participant by participant_client_id OR mobile number */
+const participantWhereForClient = async (clientId, eventId = null) => {
+    const client = await WebsiteClient.findByPk(clientId, { attributes: ['id', 'mobile'] });
+    const clientDigits = digitsOnly(client?.mobile);
+    const candidates = clientDigits ? [...new Set([clientDigits, clientDigits.slice(-10)])].filter((d) => d.length >= 7) : [];
+    const condition = candidates.length > 0
+        ? {
+            [Op.or]: [
+                { participant_client_id: clientId },
+                { mobile: { [Op.in]: candidates } },
+            ],
+        }
+        : { participant_client_id: clientId };
+    return eventId ? { event_id: eventId, ...condition } : condition;
+};
+
 /**
  * The events this person is a participant of — the app's My Events for a guest.
  *
@@ -609,8 +635,9 @@ const join = async (client, payload = {}) => {
  * host who also scanned somebody else's invitation legitimately appears in both.
  */
 const myEvents = async (clientId) => {
+    const where = await participantWhereForClient(clientId);
     const rows = await EventParticipant.findAll({
-        where: { participant_client_id: clientId },
+        where,
         attributes: ['id', 'event_id', 'response_type', 'rsvp_status', 'party_size'],
         include: [{
             model: Event,
@@ -719,10 +746,9 @@ const eventIdOf = (raw) => {
  */
 const getMyRsvp = async (clientId, rawEventId) => {
     const eventId = eventIdOf(rawEventId);
+    const where = await participantWhereForClient(clientId, eventId);
 
-    const guest = await EventParticipant.findOne({
-        where: { event_id: eventId, participant_client_id: clientId },
-    });
+    const guest = await EventParticipant.findOne({ where });
     if (!guest) {
         const owned = await Event.findOne({
             where: { id: eventId, website_client_id: clientId },
@@ -782,11 +808,12 @@ const getMyRsvp = async (clientId, rawEventId) => {
  */
 const familyDirectory = async (clientId, rawEventId) => {
     const eventId = eventIdOf(rawEventId);
+    const where = await participantWhereForClient(clientId, eventId);
 
     const [event, membership] = await Promise.all([
         Event.findOne({ where: { id: eventId }, attributes: ['id', 'website_client_id'] }),
         EventParticipant.findOne({
-            where: { event_id: eventId, participant_client_id: clientId },
+            where,
             attributes: ['id', 'relationship'],
             include: [{ model: GuestGroup, as: 'group', attributes: ['name'], required: false }],
         }),
@@ -844,11 +871,12 @@ const familyDirectory = async (clientId, rawEventId) => {
  */
 const participantsDirectory = async (clientId, rawEventId) => {
     const eventId = eventIdOf(rawEventId);
+    const where = await participantWhereForClient(clientId, eventId);
 
     const [event, membership] = await Promise.all([
         Event.findOne({ where: { id: eventId }, attributes: ['id', 'website_client_id'] }),
         EventParticipant.findOne({
-            where: { event_id: eventId, participant_client_id: clientId },
+            where,
             attributes: ['id'],
         }),
     ]);
@@ -894,10 +922,9 @@ const participantsDirectory = async (clientId, rawEventId) => {
  */
 const submitMyRsvp = async (clientId, rawEventId, body = {}) => {
     const eventId = eventIdOf(rawEventId);
+    const where = await participantWhereForClient(clientId, eventId);
 
-    const guest = await EventParticipant.findOne({
-        where: { event_id: eventId, participant_client_id: clientId },
-    });
+    const guest = await EventParticipant.findOne({ where });
     if (!guest) {
         const owned = await Event.findOne({
             where: { id: eventId, website_client_id: clientId },
@@ -938,6 +965,7 @@ const submitMyRsvp = async (clientId, rawEventId, body = {}) => {
 
     const before = snapshotAnswer(guest);
     const data = {
+        participant_client_id: clientId,
         response_type: response,
         rsvp_status: RESPONSE_TO_STATUS[response],
         responded_at: new Date(),

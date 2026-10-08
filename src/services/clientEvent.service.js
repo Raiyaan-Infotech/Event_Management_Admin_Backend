@@ -614,10 +614,24 @@ const getEventForViewer = async (clientId, eventId, opts = {}) => {
       `website_client_id` — that column names the HOST, and reading it here would
       let every guest read every event of their own host.
     */
+    const client = await WebsiteClient.findByPk(clientId, { attributes: ['id', 'mobile'] });
+    const mobileDigits = String(client?.mobile || '').replace(/\D/g, '');
+    const candidates = mobileDigits ? [...new Set([mobileDigits, mobileDigits.slice(-10)])].filter((d) => d.length >= 7) : [];
+
+    const participantWhere = candidates.length > 0
+        ? {
+            event_id: eventId,
+            [Op.or]: [
+                { participant_client_id: clientId },
+                { mobile: { [Op.in]: candidates } },
+            ],
+        }
+        : { event_id: eventId, participant_client_id: clientId };
+
     const [event, membership] = await Promise.all([
         Event.findOne({ where: { id: eventId }, include: EVENT_INCLUDE }),
         EventParticipant.findOne({
-            where: { event_id: eventId, participant_client_id: clientId },
+            where: participantWhere,
             // relationship / group: only to decide viewerIsFamily below — never
             // sent to the client. See `familyCategoryOf`.
             attributes: ['id', 'relationship'],

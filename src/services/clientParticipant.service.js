@@ -5,6 +5,7 @@ const {
     EventParticipant,
     GuestGroup,
     Guest,
+    WebsiteClient,
 } = require('../models');
 const { Op } = Sequelize;
 const ApiError = require('../utils/apiError');
@@ -259,6 +260,18 @@ const createParticipant = async (clientId, companyId, body = {}) => {
 
         const guest = await guests.guestForMobile(clientId, person.mobile, transaction);
 
+        const digits = String(person.mobile || '').replace(/\D/g, '');
+        const candidates = [...new Set([digits, digits.slice(-10)])].filter((d) => d.length >= 7);
+        const existingClient = candidates.length > 0 ? await WebsiteClient.findOne({
+            where: { mobile: { [Op.in]: candidates } },
+            attributes: ['id', 'name', 'avatar_url'],
+            transaction,
+        }) : null;
+
+        if (existingClient && !existingClient.avatar_url && person.photo) {
+            await existingClient.update({ avatar_url: person.photo }, { transaction });
+        }
+
         return EventParticipant.create({
             invite_source: 'manual',
             ...person,
@@ -267,6 +280,7 @@ const createParticipant = async (clientId, companyId, body = {}) => {
             website_client_id: clientId,
             company_id: companyId ?? event.company_id ?? null,
             guest_id: guest?.id ?? null,
+            participant_client_id: existingClient?.id ?? null,
         }, { transaction });
     });
 
@@ -317,6 +331,20 @@ const updateParticipant = async (clientId, id, body = {}) => {
         if (data.mobile) {
             const guest = await guests.guestForMobile(clientId, data.mobile, transaction);
             data.guest_id = guest?.id ?? null;
+
+            const digits = String(data.mobile).replace(/\D/g, '');
+            const candidates = [...new Set([digits, digits.slice(-10)])].filter((d) => d.length >= 7);
+            const clientMatch = candidates.length > 0 ? await WebsiteClient.findOne({
+                where: { mobile: { [Op.in]: candidates } },
+                attributes: ['id', 'avatar_url'],
+                transaction,
+            }) : null;
+            if (clientMatch) {
+                data.participant_client_id = clientMatch.id;
+                if (!clientMatch.avatar_url && (data.photo || guest?.photo)) {
+                    await clientMatch.update({ avatar_url: data.photo || guest?.photo }, { transaction });
+                }
+            }
         }
         await guest.update(data, { transaction });
     });

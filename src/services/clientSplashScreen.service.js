@@ -1,4 +1,4 @@
-const { Sequelize, SplashScreen, Event, EventParticipant } = require('../models');
+const { Sequelize, SplashScreen, Event, EventParticipant, WebsiteClient } = require('../models');
 const { Op } = Sequelize;
 const mediaService = require('./media.service');
 const ApiError = require('../utils/apiError');
@@ -259,8 +259,21 @@ const getActiveSplashForEvent = async (clientId, rawEventId) => {
 
     const isOwner = Number(event.website_client_id) === Number(clientId);
     if (!isOwner) {
+        const client = await WebsiteClient.findByPk(clientId, { attributes: ['id', 'mobile'] });
+        const mobileDigits = String(client?.mobile || '').replace(/\D/g, '');
+        const candidates = mobileDigits ? [...new Set([mobileDigits, mobileDigits.slice(-10)])].filter((d) => d.length >= 7) : [];
+        const participantWhere = candidates.length > 0
+            ? {
+                event_id: event.id,
+                [Op.or]: [
+                    { participant_client_id: clientId },
+                    { mobile: { [Op.in]: candidates } },
+                ],
+            }
+            : { event_id: event.id, participant_client_id: clientId };
+
         const membership = await EventParticipant.findOne({
-            where: { event_id: event.id, participant_client_id: clientId },
+            where: participantWhere,
             attributes: ['id'],
         });
         if (!membership) return null;

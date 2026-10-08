@@ -1,6 +1,6 @@
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
-const { Sequelize, WebsiteClient, Vendor, Event } = require('../models');
+const { Sequelize, WebsiteClient, Vendor, Event, EventParticipant } = require('../models');
 const { Op } = Sequelize;
 const baseService = require('./base.service');
 const ApiError = require('../utils/apiError');
@@ -498,7 +498,7 @@ const getStats = async (companyId = undefined) => {
 // See the note on `verifyLoginOtp`.
 
 /** Finds the ONE active client a number belongs to, within a tenant. */
-const findClientByMobile = async (mobile, vendorId) => {
+const findClientByMobile = async (mobile, vendorId, { allowParticipant = true } = {}) => {
     const digits = digitsOnly(mobile);
     if (digits.length < 7 || digits.length > 15) {
         throw ApiError.badRequest('Please enter a valid mobile number.');
@@ -536,10 +536,41 @@ const findClientByMobile = async (mobile, vendorId) => {
      */
     const candidates = [...new Set([digits, digits.slice(-10)])];
 
-    const client = await WebsiteClient.unscoped().findOne({
+    let client = await WebsiteClient.unscoped().findOne({
         where: { vendor_id: resolvedVendorId, mobile: { [Op.in]: candidates } },
         attributes: { exclude: ['password'] },
     });
+
+    if (!client && allowParticipant) {
+        // If not found in website_clients, check if the person was registered as a participant under an event
+        const participant = await EventParticipant.findOne({
+            where: { mobile: { [Op.in]: candidates } },
+            order: [['id', 'DESC']],
+        });
+
+        if (participant) {
+            const nationalMobile = digits.length > 10 ? digits.slice(-10) : digits;
+            client = await WebsiteClient.create({
+                name: participant.name || 'Participant',
+                dial_code: participant.dial_code || '+91',
+                mobile: nationalMobile,
+                vendor_id: resolvedVendorId,
+                source: 'website',
+                is_active: 1,
+                avatar_url: participant.photo || null,
+            });
+
+            // Link existing participant records for this mobile to the new client account
+            await EventParticipant.update(
+                { participant_client_id: client.id },
+                { where: { mobile: { [Op.in]: candidates }, participant_client_id: null } }
+            );
+
+            client = await WebsiteClient.unscoped().findByPk(client.id, {
+                attributes: { exclude: ['password'] },
+            });
+        }
+    }
 
     /**
      * ⚠ THIS ANSWER REVEALS WHETHER A NUMBER IS REGISTERED.
@@ -572,7 +603,8 @@ const findClientByMobile = async (mobile, vendorId) => {
  * possession of the number is what is being tested, in place of the password.
  */
 const requestLoginOtp = async (data = {}, vendorId = DEFAULT_VENDOR_ID) => {
-    const client = await findClientByMobile(data.mobile, vendorId);
+    const isOrganizer = data.login_as === 'organizer';
+    const client = await findClientByMobile(data.mobile, vendorId, { allowParticipant: !isOrganizer });
 
     // The app's "Event Organizer" button sends `login_as: 'organizer'`. There is
     // no organizer flag on the account, so owning a live event is the test —
@@ -703,6 +735,34 @@ const verifyLoginOtp = async (data = {}, vendorId = DEFAULT_VENDOR_ID) => {
         { otp_hash: null, otp_expires_at: null, otp_attempts: 0, last_login_at: new Date() },
         { hooks: false }
     );
+
+    // Link any unlinked participant rows for this mobile to this client
+    const mobileDigits = digitsOnly(client.mobile);
+    const candidates = [...new Set([mobileDigits, mobileDigits.slice(-10)])].filter((d) => d.length >= 7);
+    if (candidates.length > 0) {
+        await EventParticipant.update(
+            { participant_client_id: client.id },
+            { where: { mobile: { [Op.in]: candidates }, participant_client_id: null } }
+        );
+
+        // Synchronize avatar and name from participant if client is missing them
+        const latestParticipant = await EventParticipant.findOne({
+            where: { mobile: { [Op.in]: candidates } },
+            order: [['id', 'DESC']],
+        });
+        if (latestParticipant) {
+            const clientUpdates = {};
+            if (latestParticipant.photo && !client.avatar_url) {
+                clientUpdates.avatar_url = latestParticipant.photo;
+            }
+            if (latestParticipant.name && (!client.name || client.name === 'Participant' || client.name === client.mobile)) {
+                clientUpdates.name = latestParticipant.name;
+            }
+            if (Object.keys(clientUpdates).length > 0) {
+                await client.update(clientUpdates, { hooks: false });
+            }
+        }
+    }
 
     // Re-read through the default scope so the caller never holds otp_hash.
     return WebsiteClient.findByPk(client.id);
