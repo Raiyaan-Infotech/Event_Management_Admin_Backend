@@ -173,6 +173,13 @@ module.exports = (sequelize) => {
              * Added by apply-rsvp-settings.js.
              */
             rsvp_settings: { type: DataTypes.JSON, allowNull: true },
+
+            /**
+             * The organizer's participant settings (the app's Edit Event →
+             * Participants screen). NULL = never configured = the defaults (all on).
+             * Added by apply-participant-settings.js.
+             */
+            participant_settings: { type: DataTypes.JSON, allowNull: true },
         },
         {
             tableName: 'events',

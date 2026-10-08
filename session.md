@@ -15110,3 +15110,43 @@ Jamal sent the config screen he meant in §722: PARTICIPANTS SETTINGS (Participa
 - `flutter analyze` no errors or warnings, `flutter test` 38/38. Not seen on a phone; needs a rebuild. Not committed.
 - Still unanswered from §722: what "add in guest form" means.
 - **§723 correction — I added a switch he did not ask for** (2026-10-07). "Show RSVP in App" was never meant as a NEW row: he meant the EXISTING **Enable RSVP** switch should be shown as the default. Done: the "Show RSVP in App" row is removed; **Enable RSVP is drawn switched on, greyed and locked**. The screen always sends `enabled: true`, so an event saved earlier with it off is switched back on by the next Save. The backend still honours a stored `enabled: false` until then. `flutter analyze` no errors or warnings. Not seen on a phone.
+
+### 724. App — Participant RSVP form replaced with single-page form matching RSVP Preview (2026-10-08)
+Jamal: organizer RSVP preview form must show on the participant RSVP screen; the old multi-step form was still showing and needed to be updated to match the preview and save responses properly.
+- Replaced the old 4-step wizard in `lib/features/participant/rsvp/rsvp_screen.dart` with the clean single-page form matching `RsvpPreviewScreen`:
+  - **Event Header Card** on top.
+  - **"Will you be attending?"** radio options for the configured response choices (Attending, Not Attending, Maybe).
+  - **Number of Guests** (`− [count] +` stepper) shown only when `allow_guest_count` is true and response is not 'no'.
+  - **Groom or Bride side** radio tiles and **Relationship** dropdown (filtered by side) shown only when `allow_relationship` is true.
+  - **Special Requests** multiline text field shown only when `allow_special_requests` is true.
+  - **Submit RSVP** button submitting `response_type`, `party_size`, `special_requirements`, `rsvp_side`, and `relationship_option_id` to `POST /client/events/:id/my-rsvp`.
+  - Shows success Lottie animation and confirmation card on submit (`_thankYou`), and `_alreadyResponded` with event header and submitted details when already answered.
+- Test participant #559 on event #29 (client #39 Jamal) reset in database (`response_type = 'none'`, `rsvp_status = 'pending'`, `responded_at = null`) so the fresh form opens immediately.
+- `flutter analyze lib/features/participant/rsvp/rsvp_screen.dart`: no issues found (0 errors, 0 warnings).
+
+### 725. Backend & App — Participant Settings Persistence & Dynamic Participant UI Gating (2026-10-08)
+Jamal: Participant Settings screen (Edit Event → Participants) missing Save button; asked if config is saved in DB and to gate participant section (profile photo, relationship, attendance status, profile page) based on the saved settings.
+- **Database**: Added `participant_settings` JSON column (`NULL = defaults`) to `events` table via `apply-participant-settings.js` on both local and production databases.
+- **Backend Model & API**:
+  - `src/models/Event.js`: Added `participant_settings: { type: DataTypes.JSON, allowNull: true }`.
+  - `src/services/clientParticipantSettings.service.js`: Defaults (`profile_screen: true`, `profile_photo: true`, `name: true`, `relationship: true`, `attendance_status: true`). `get` allows owner or joined event participant; `update` owner only.
+  - `src/controllers/clientParticipantSettings.controller.js`: Handlers for `getSettings` and `updateSettings`.
+  - `src/routes/clientPortal.routes.js`: Added `GET` and `PUT /client/events/:id/participant-settings`.
+- **Mobile App**:
+  - `lib/core/network/api_endpoints.dart`: Added `participantSettings(eventId)` endpoint.
+  - `lib/data/repositories/participant_settings_repository.dart`: Added `ParticipantSettings` model, `ParticipantSettingsRepository`, and `participantSettingsProvider(eventId)` family.
+  - `lib/features/organizer/participants/participant_settings_screen.dart`:
+    - Loaded existing settings via `participantSettingsProvider(widget.eventId)`.
+    - Added `AppButton(label: 'Save', loading: _saving, onPressed: _save)`.
+    - Saves settings to backend via `PUT /client/events/:id/participant-settings`, notifies with `AppToast.success`, invalidates provider, and navigates back.
+  - `lib/features/participant/participants/participants_screen.dart`:
+    - Reads `participantSettingsProvider(selectedEventId)`.
+    - Gated `_ParticipantRow`:
+      - `Profile Photo` (`settings.profilePhoto`): Shows/hides avatar.
+      - `Relationship` (`settings.relationship`): Shows/hides subtitle.
+      - `Attendance Status` (`settings.attendanceStatus`): Shows/hides `StatusPill`.
+      - `Participants Profile Screen` (`settings.profileScreen`): Enables/disables tapping row to navigate to details screen (`onTap` and trailing action).
+  - `lib/features/participant/participants/participant_details_screen.dart`:
+    - Reads `participantSettingsProvider(selectedEventId)`.
+    - If `profileScreen` is disabled, displays "Profile Unavailable" card.
+    - Gated avatar photo, relationship info, and RSVP status card based on `profilePhoto`, `relationship`, and `attendanceStatus`.

@@ -9,6 +9,7 @@ const preferencesController = require('../controllers/clientPreferences.controll
 const messageController = require('../controllers/clientMessage.controller');
 const rsvpController = require('../controllers/clientRsvp.controller');
 const participantController = require('../controllers/clientParticipant.controller');
+const participantSettingsController = require('../controllers/clientParticipantSettings.controller');
 const guestProfileController = require('../controllers/clientGuestProfile.controller');
 const securityController = require('../controllers/clientSecurity.controller');
 const deviceController = require('../controllers/clientDevice.controller');
@@ -258,6 +259,9 @@ router.get('/events/:id/my-rsvp', guestRegistrationController.myRsvp);
 // only — the service looks the event up under the caller's own account.
 router.get('/events/:id/rsvp-settings', rsvpController.getSettings);
 router.put('/events/:id/rsvp-settings', rsvpController.updateSettings);
+// Participant Settings (Edit Event → Participants) — GET, PUT
+router.get('/events/:id/participant-settings', participantSettingsController.getSettings);
+router.put('/events/:id/participant-settings', participantSettingsController.updateSettings);
 router.post('/events/:id/my-rsvp', guestRegistrationController.submitMyRsvp);
 // The family directory — a guest-safe read beside my-rsvp, NOT /guests (that is
 // the host's register, scoped to the host's account). See familyDirectory.
