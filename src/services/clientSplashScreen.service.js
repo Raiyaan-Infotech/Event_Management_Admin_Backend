@@ -323,38 +323,22 @@ const uploadMedia = async (companyId, file) => {
 
 
 const getDecorationsAndFrames = async (companyId = null) => {
-    const [decorations, frames] = await Promise.all([
-        Decoration.findAll({
-            where: {
-                is_active: 1,
-                ...(companyId ? { company_id: companyId } : {}),
-            },
-            attributes: ['id', 'name', 'type', 'file_url', 'file_format'],
-            order: [['sort_order', 'ASC'], ['id', 'ASC']],
-            raw: true,
-        }),
-        FrameStyle.findAll({
-            where: {
-                is_active: 1,
-                ...(companyId ? { company_id: companyId } : {}),
-            },
-            attributes: ['id', 'name', 'file_url'],
-            order: [['sort_order', 'ASC'], ['id', 'ASC']],
-            raw: true,
-        }),
-    ]);
+    const where = { is_active: 1 };
+    if (companyId) {
+        where[Op.or] = [{ company_id: companyId }, { company_id: null }];
+    }
 
-    const frameItems = frames.map((f) => ({
-        id: f.id,
-        name: f.name,
-        type: 'frame',
-        file_url: f.file_url,
-    }));
+    const decorations = await Decoration.findAll({
+        where,
+        attributes: ['id', 'name', 'type', 'file_url', 'file_format'],
+        order: [['sort_order', 'ASC'], ['id', 'ASC']],
+        raw: true,
+    });
 
     return {
         decorations,
-        frames: frameItems,
-        all: [...frameItems, ...decorations],
+        frames: [],
+        all: decorations,
     };
 };
 

@@ -15454,6 +15454,10 @@ Jamal: splash screen show use evevnt photo option show cover img okay to put tha
     - `decoration_url VARCHAR(500) NULL` (URL of selected decoration or frame)
     - `show_decoration TINYINT(1) NOT NULL DEFAULT 1` (toggle to show/hide decoration)
   - Updated Sequelize model `SplashScreen.js` to define all 4 fields.
+  - Applied & verified migration on LIVE production DB (`mysql-cbe9f33-jamaludheen779-4e61.k.aivencloud.com`):
+    - `primary_color`, `bg_color`, `decoration_url`, `show_decoration` are active and confirmed on live `splash_screens`.
+    - Saved permanent migration tool: `src/database/tools/apply-splash-screen-decorations.js`.
+
 - **Backend API & Service** (`src/services/clientSplashScreen.service.js`, `src/controllers/clientSplashScreen.controller.js`, `src/routes/clientPortal.routes.js`):
   - In `clientSplashScreen.service.js`:
     - Added normalization and persistence for `primary_color`, `bg_color`, `decoration_url`, `show_decoration`.
@@ -15493,3 +15497,25 @@ Jamal: splash screen show use evevnt photo option show cover img okay to put tha
   - `flutter analyze lib/features/organizer/splash/splash_editor_flow.dart`: No issues found! (0 errors, 0 warnings).
   - `flutter analyze lib/features/common/event/event_splash_screen.dart`: 0 errors.
   - `flutter analyze lib/data/repositories/splash_repository.dart`: 0 errors.
+
+### 743. Mobile App — Splash Screen Couple Name & Date Made Read-Only From Event (2026-10-09)
+Jamal: splash screen couple name and date unabelt to edit like do that now.
+- **Clarification & Intent**:
+  - Confirmed with Jamal that Couple Name and Date on the Splash Screen must be read-only and locked to the event details (no text edit inputs), faithfully matching the mockup layout.
+- **Implementation** (`lib/features/organizer/splash/splash_editor_flow.dart`):
+  - Removed the `Couple Names / Title` and `Event Date` text input fields from the editor body.
+  - Automatically binds Couple Names (`main_title`) directly from the event details: `event.hostLine` (or `event.name`).
+  - Automatically binds Event Date (`date_text`) directly from the event date: `event.dateLabel` (or `event.startDate`).
+  - Toggles (`Show Title`, `Show Date`, `Show Decoration`) directly follow the "Choose Frame" carousel, exactly mirroring the mockup UI.
+  - On save, persists the official event host names and date to `splash_screens` with zero drift.
+- **Validation**:
+  - `flutter analyze lib/features/organizer/splash/splash_editor_flow.dart`: No issues found! (0 errors, 0 warnings, ran in 17.5s).
+
+### 744. Mobile App — Splash Screen Layout: Move Background Color Below Choose Frame & Label Styling (2026-10-09)
+Jamal: line 840 backgorund color field move below that choose frame and choose frame text show as like label like okay do that now.
+- **Layout & Styling Updates** (`lib/features/organizer/splash/splash_editor_flow.dart`):
+  - Changed the "Choose Frame" title from an oversized primary header (`h3.copyWith(color: AppColors.primary)`) to standard form section label styling (`AppTypography.bodyMedium.copyWith(fontWeight: FontWeight.w600, color: AppColors.textPrimary)`).
+  - Moved the **Background Color** option directly below the "Choose Frame" carousel, so frame selection and background color tinting sit grouped together at the top.
+  - Followed by the toggles (`Show Title`, `Show Date`, `Show Decoration`) and the `Primary Color (Title)` chooser.
+- **Validation**:
+  - `flutter analyze lib/features/organizer/splash/splash_editor_flow.dart`: No issues found! (0 errors, 0 warnings, ran in 3.8s).
