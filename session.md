@@ -15394,3 +15394,102 @@ Jamal: D:\Jamal\Event_Invite_Mobile_App\lib\features\organizer\contact\organizer
   - Retained `Mobile Number *` and `isRequired: true` as mandatory.
 - **Validation**:
   - `flutter analyze`: No issues found! (0 errors, 0 warnings).
+
+### 739. Database — Applied `events.secondary_color` Migration to Live Production DB (2026-10-09)
+Jamal: original: Error: Unknown column 'Event.secondary_color' in 'field list' apply migration for secodnary color now live db do that now.
+- **Root Cause**:
+  - The Sequelize `Event` model and `clientEvent.service.js` include `secondary_color` in queries and writable fields, but `events.secondary_color` had not yet been executed on the live production database (`mysql-cbe9f33-jamaludheen779-4e61.k.aivencloud.com`), throwing `Unknown column 'Event.secondary_color' in 'field list'`.
+- **Action**:
+  - Executed migration tool: `node src/database/tools/apply-event-secondary-color.js --prod --apply`.
+  - Added column: `ALTER TABLE events ADD COLUMN secondary_color VARCHAR(9) NULL COMMENT 'Hex, #RRGGBB or #RRGGBBAA. Accents and secondary details on invitation' AFTER primary_color`.
+- **Verification**:
+  - Re-ran verification dry-run against live DB: confirmed `secondary_color already present`.
+
+### 740. Template & Event `secondary_color` Alignment Across Admin Portal & Mobile App (2026-10-09)
+Jamal: check admin portal template creation secondary how was apply in template, and what are you done in app check that fix it now.
+- **Admin Portal Investigation** (`Event_Management_Admin_Frontend`):
+  - In `template-wizard-content.tsx`, `secondary_color` is configured as the template's **Secondary Color** (Color background) or **Accent Color** (Gradient, Image, Custom backgrounds).
+  - In `template-preview.tsx` & web client `invitation-card.tsx`, `secondary_color` is used as the **Accent Color**:
+    1. **`event_title`** ("You're invited to" / occasion / tagline) is drawn in `accentInk` (secondary color adjusted for contrast).
+    2. **Host Names `&`** ampersand is drawn in `accentInk` (secondary color).
+    3. **Host Names** are drawn in `primary_color` (falling back to `ink` / text color, NOT secondary color).
+    4. **`event_qr_code`** border is drawn in `accentLine` (secondary color).
+    5. **`date_time`** calendar icon is drawn in `accent`.
+- **Issues Identified in Mobile App (`Event_Invite_Mobile_App`)**:
+  1. `create_event_screen.dart`: `_body()` was sending `primary_color` but never sent `secondary_color`, leaving `events.secondary_color` null upon event creation/edit.
+  2. `create_event_screen.dart` & `invitation_card_screen.dart`: Selecting a new template only pre-selected `_color`, but did not pre-select `_secondaryColor = t?.design?.secondaryColor`.
+  3. `invitation_card.dart`: `event_title` was using neutral `soft` ink instead of `accent` (`secondary_color`), hiding the template's accent color on the title.
+  4. `invitation_card.dart`: `host_names` was falling back to `nameColor ?? accent`, which erroneously colored host names with the secondary color instead of `ink` when primary color was not explicitly chosen.
+- **Fixes Applied**:
+  - In `lib/features/organizer/create/create_event_screen.dart`:
+    - Updated `_selectTemplate()`: initializes `_secondaryColor = t?.design?.secondaryColor ?? t?.accent ?? _secondaryColor`.
+    - Updated `_body()`: persists `if (_secondaryColor != null) 'secondary_color': _hexOf(_secondaryColor!)`.
+  - In `lib/features/common/event/invite/invitation_card.dart`:
+    - Styled `event_title` with `color: accent` (`secondary_color`).
+    - Styled host names with `nameColor ?? ink` and ampersand with `secondaryColor ?? accent`.
+  - In `lib/features/organizer/invite/invitation_card_screen.dart`:
+    - Updated template selection to also pre-select `_secondaryColor` from the chosen template.
+- **Validation**:
+  - `flutter analyze`: 0 errors.
+
+### 741. Mobile App — Apply Secondary Color to All Non-Primary Invitation Sections (2026-10-09)
+Jamal: secondary color apply other primary color section still you did not understand make that now quickly fast asap.
+- **Color Domain Split**:
+  - **Primary Colour Section**: Host Names (`host_names`) and QR Code modules (`event_qr_code`).
+  - **All Other Sections (Secondary Colour)**: Date & Time, Venue Name & Address, Event Title / Tagline, Invitation Message, Organizer, Footer Note, Divider ornament, and Ampersand `&`.
+- **Implementation** (`lib/features/common/event/invite/invitation_card.dart`):
+  - Updated `InvitationCard.build()` to resolve `effectiveSecondary = secondaryColor ?? event.secondaryColor ?? design?.secondaryColor`.
+  - Computes `ink = readableTint(effectiveSecondary, backdrop, 4.5)` and `soft = ink.withValues(alpha: 0.85)`.
+  - All non-primary blocks (`event_title`, `date_time`, `venue`, `organizer`, `invitation_message`, `footer_note`, `decoration_elements`, `&`, and QR border/caption) now dynamically follow the selected Secondary Colour with WCAG readability against the card backdrop.
+  - Host Names specifically bind to `nameColor ?? ink` (Primary Colour section) and QR modules to `qrColor`.
+- **Validation**:
+  - `flutter analyze`: 0 errors, 0 warnings.
+
+### 742. Splash Screen — Redesigned Editor Flow with Cover Photo, Admin Decorations & Customization (2026-10-09)
+Jamal: splash screen show use evevnt photo option show cover img okay to put that show decoration list from admin portal we already save that oaky with bg color option and design look like this that img is mockup img below show list of decoration like that then show title and date and show decoration on and off toglle below show primary color chooser okay we have to update schame i think do as well. 1. photo show that cover img not upload option use that decoration okay with bgcolor option. 2. frame list means admin portal template under that decoration list okay. 3. show floral theme name replace with show decoration with control that. 4. yes do that.
+- **Database Schema Migration** (`splash_screens` table):
+  - Migrated `splash_screens` table in database with new dedicated columns:
+    - `primary_color VARCHAR(9) NULL` (hex color for title script font and accents)
+    - `bg_color VARCHAR(9) NULL` (hex color for splash background)
+    - `decoration_url VARCHAR(500) NULL` (URL of selected decoration or frame)
+    - `show_decoration TINYINT(1) NOT NULL DEFAULT 1` (toggle to show/hide decoration)
+  - Updated Sequelize model `SplashScreen.js` to define all 4 fields.
+- **Backend API & Service** (`src/services/clientSplashScreen.service.js`, `src/controllers/clientSplashScreen.controller.js`, `src/routes/clientPortal.routes.js`):
+  - In `clientSplashScreen.service.js`:
+    - Added normalization and persistence for `primary_color`, `bg_color`, `decoration_url`, `show_decoration`.
+    - Added `getDecorationsAndFrames(companyId)` querying active `Decoration` items and `FrameStyle` items from Admin Portal templates.
+  - In `clientPortal.routes.js` and controller:
+    - Added `GET /client/splash-screens/decorations` returning all 73 active items (frames + decorations) from the Admin Portal.
+- **Mobile App Data & Repository** (`lib/core/network/api_endpoints.dart`, `lib/data/repositories/splash_repository.dart`):
+  - In `api_endpoints.dart`: added `splashDecorations = '/client/splash-screens/decorations'`.
+  - In `splash_repository.dart`:
+    - Added `SplashDecorationItem` model.
+    - Updated `EventSplash` model to parse `primaryColor`, `bgColor`, `decorationUrl`, and `showDecoration`.
+    - Added `fetchDecorations()` and `splashDecorationsProvider`.
+- **Mobile Splash Editor Screen** (`lib/features/organizer/splash/splash_editor_flow.dart`):
+  - Rebuilt the editor to faithfully reproduce the user's mockup:
+    1. **Top Phone Preview Card**:
+       - Uses event cover image (`event.coverImage` fallback, no manual upload option).
+       - Backed by selectable Background Color (`_bgColor`).
+       - Overlaid with the chosen Admin Portal decoration/frame (if `_showDecoration` is on).
+       - Couple Names rendered in elegant cursive script font (`GoogleFonts.greatVibes`) using the chosen Primary Color.
+       - Event Date with an ornamental flourish divider beneath it.
+    2. **"Choose Frame" Section**:
+       - Red header **"Choose Frame"** matching mockup.
+       - Horizontally scrollable row of decoration boxes (None + 73 frames and decorations from Admin Portal).
+       - Live interactive preview updates instantly when a box is tapped.
+    3. **Toggles**:
+       - `Show Title` (toggle switch)
+       - `Show Date` (toggle switch)
+       - `Show Decoration` (toggle switch, replacing "Show Floral Frame" per instruction #3).
+    4. **Color Choosers**:
+       - `Primary Color (Title)` chooser with preset swatches (maroon, red, rose, gold, navy, emerald, purple, black) + custom color picker.
+       - `Background Color` chooser with preset swatches (white, ivory, cream, blush, grey, dark) + custom color picker.
+    5. **Bottom Action Bar**:
+       - Rounded "Back" (outline) and "Next →" (primary filled) buttons.
+- **Mobile Event Splash Player** (`lib/features/common/event/event_splash_screen.dart`):
+  - Updated to render `decorationUrl`, `primaryColor` script font, flourish divider, and `bgColor` for guests opening the event.
+- **Validation**:
+  - `flutter analyze lib/features/organizer/splash/splash_editor_flow.dart`: No issues found! (0 errors, 0 warnings).
+  - `flutter analyze lib/features/common/event/event_splash_screen.dart`: 0 errors.
+  - `flutter analyze lib/data/repositories/splash_repository.dart`: 0 errors.

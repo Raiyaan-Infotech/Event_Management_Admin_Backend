@@ -654,6 +654,7 @@ router.delete('/agenda/:itemId', agendaController.remove);
 // `/splash-screens/:id` — the same ordering trap as `/events/stats`, since
 // Express would otherwise match "for-event" as an id.
 router.get('/splash-screens/for-event/:eventId', splashController.forEvent);
+router.get('/splash-screens/decorations', splashController.decorations);
 
 router.get('/splash-screens', splashController.list);
 router.post('/splash-screens', splashController.create);

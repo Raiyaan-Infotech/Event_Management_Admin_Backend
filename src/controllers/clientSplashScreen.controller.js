@@ -68,4 +68,10 @@ const forEvent = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, { splash_screen: splash ?? null }, 'Splash screen retrieved');
 });
 
-module.exports = { list, getOne, create, update, remove, uploadMedia, forEvent };
+
+const decorations = asyncHandler(async (req, res) => {
+    const result = await service.getDecorationsAndFrames(req.websiteClient?.company_id);
+    return ApiResponse.success(res, result, 'Decorations retrieved');
+});
+
+module.exports = { list, getOne, create, update, remove, uploadMedia, forEvent, decorations };

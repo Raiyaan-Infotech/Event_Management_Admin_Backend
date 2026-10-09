@@ -1,4 +1,4 @@
-const { Sequelize, SplashScreen, Event, EventParticipant, WebsiteClient } = require('../models');
+const { Sequelize, SplashScreen, Event, EventParticipant, WebsiteClient, Decoration, FrameStyle } = require('../models');
 const { Op } = Sequelize;
 const mediaService = require('./media.service');
 const ApiError = require('../utils/apiError');
@@ -321,12 +321,49 @@ const uploadMedia = async (companyId, file) => {
     return { url: result.url };
 };
 
+
+const getDecorationsAndFrames = async (companyId = null) => {
+    const [decorations, frames] = await Promise.all([
+        Decoration.findAll({
+            where: {
+                is_active: 1,
+                ...(companyId ? { company_id: companyId } : {}),
+            },
+            attributes: ['id', 'name', 'type', 'file_url', 'file_format'],
+            order: [['sort_order', 'ASC'], ['id', 'ASC']],
+            raw: true,
+        }),
+        FrameStyle.findAll({
+            where: {
+                is_active: 1,
+                ...(companyId ? { company_id: companyId } : {}),
+            },
+            attributes: ['id', 'name', 'file_url'],
+            order: [['sort_order', 'ASC'], ['id', 'ASC']],
+            raw: true,
+        }),
+    ]);
+
+    const frameItems = frames.map((f) => ({
+        id: f.id,
+        name: f.name,
+        type: 'frame',
+        file_url: f.file_url,
+    }));
+
+    return {
+        decorations,
+        frames: frameItems,
+        all: [...frameItems, ...decorations],
+    };
+};
+
 module.exports = {
     BACKGROUND_TYPES,
     BUTTON_STYLES,
     listSplashScreens,
     getSplashScreenById,
-    getActiveSplashForEvent,
+    getActiveSplashForEvent, getDecorationsAndFrames,
     createSplashScreen,
     updateSplashScreen,
     deleteSplashScreen,

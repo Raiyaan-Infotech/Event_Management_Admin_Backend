@@ -97,6 +97,11 @@ module.exports = (sequelize) => {
         },
         button_color: { type: DataTypes.STRING(9), allowNull: true },
 
+        primary_color: { type: DataTypes.STRING(9), allowNull: true },
+        bg_color: { type: DataTypes.STRING(9), allowNull: true },
+        decoration_url: { type: DataTypes.STRING(500), allowNull: true },
+        show_decoration: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+
         show_couple_name: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
         show_event_date: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
         show_tagline: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
