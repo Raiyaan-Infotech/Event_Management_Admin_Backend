@@ -15269,3 +15269,128 @@ Jamal: Edit Event in organizer flow list of sections add option 'Contact / Organ
     - `View Updated Contact` button: returns back to Screen 6 displaying updated values.
 - **Validation**:
   - `flutter analyze` on all affected files: 0 errors, 0 warnings.
+
+### 730. Mobile App — Exit Create Event Dialog "Keep Editing" Button Variant (2026-10-08)
+Jamal: in mobile app event creation middle exit popup, show "Keep Editing" button like a secondary button.
+- Updated `_ExitConfirmDialog` in `lib/features/organizer/create/create_event_screen.dart`:
+  - Changed `AppButton` for "Keep Editing" from `variant: AppButtonVariant.text` to `variant: AppButtonVariant.outline` (secondary button style with outline border and primary accent color matching the style guide).
+- Validation: `flutter analyze lib/features/organizer/create/create_event_screen.dart` passed with 0 errors.
+
+### 731. Mobile App — Create Event "Organizer Settings" Step & Safe Non-Null Organizer Image Validation (2026-10-09)
+Jamal: in event mobile app has some bugs appear we have to fix that - Organizer Img Not null in create event form and that page has invitation setting replace by organizer settings.
+- **Wizard Step & Section Renaming** (`lib/features/organizer/create/create_event_screen.dart`):
+  - Updated wizard step 7 in `_kSteps` from `'Invitation'` to `'Organizer Settings'`.
+  - Renamed step constant `_kInvitationStep` to `_kOrganizerStep = 7`.
+  - Renamed step builder `_invitationStep()` to `_organizerStep()`.
+  - Renamed section headers in create wizard and edit privacy section from `'Invitation Details'` to `'Organizer Settings'`.
+  - Renamed review card title from `'Invitation Details'` to `'Organizer Settings'` with edit button redirecting to `_kOrganizerStep`.
+- **Organizer Image Mandatory Validation & Safe Non-Null Handling**:
+  - Renamed validation getter `_invitationProblem` to `_organizerProblem`.
+  - Hardened organizer image null-check: validates `_organizerImageUrl != null`, `_organizerImageUrl!.trim().isNotEmpty`, and `_organizerImageUrl!.trim() != 'null'` preventing proceed when image is empty or null.
+  - Safe image rendering in `_CoverPicker` and `_ReviewCard`: eliminated forced `url!` / `image!` unwrap crashes.
+  - Added support for local file paths (`Image.file`) and remote server media URLs (`AppNetworkImage`) with fallback placeholder instead of throwing URI/null assertion errors.
+  - Cleaned up obsolete `backgroundType` parameter in `InvitationCardSettings` call.
+- **Validation**:
+  - `flutter analyze lib/features/organizer/create/create_event_screen.dart`: No issues found! (0 errors, 0 warnings).
+
+### 732. Mobile App & Backend — Secondary Color Chooser on Event Invitation Edit (2026-10-09)
+Jamal: in mobile app has event invitan edit page primary color choooser we put same like secondary color chooser also edit optiopn do that now.
+- **Backend & Database**:
+  - `src/models/Event.js`: Added `secondary_color: { type: DataTypes.STRING(9), allowNull: true }`.
+  - `src/services/clientEvent.service.js`: Added `secondary_color` to `ALLOWED_UPDATE_FIELDS` and hex validation in `extractUpdateData`.
+  - `src/database/tools/apply-event-secondary-color.js`: Created runnable migration script adding `secondary_color VARCHAR(9) NULL AFTER primary_color` to `events` table (tested and applied on local DB).
+  - `initial_setup.sql`: Updated `events` table schema definition with `secondary_color`.
+- **Mobile Models & Invitation Card Rendering**:
+  - `lib/data/repositories/event_repository.dart`: Added `secondaryColor` to `ClientEventDetail` (constructor, `copyWith`, and `fromJson` reading `secondary_color`).
+  - `lib/features/common/event/invite/invitation_card.dart`: Added `secondaryColor` parameter, wired it into accent color resolution, ampersand `&`, and calendar date icons.
+  - `lib/features/common/event/invite/invite_shared.dart`: Added `nameColor` and `secondaryColor` pass-through to `InvitationPreviewCard`.
+- **Mobile Edit & Preview Screens**:
+  - `lib/features/organizer/invite/invitation_card_screen.dart`: Added `_secondaryColor` state, secondary swatches palette, custom color picker modal (`_pickColor(false)`), live preview, and persistence via `_saveDesign`.
+  - `lib/features/organizer/create/create_event_screen.dart`: Added `_kSecondarySwatches`, `_secondaryColor` state, seeded in `_seed`, saved in `_body` payload, passed in `_draftEvent`, added `colorRow` for "Secondary Colour" • Accents & Details with swatches + custom `_pickCustomSecondaryColor` dialog alongside Primary Colour.
+- **Validation**:
+  - `flutter analyze`: 0 errors.
+
+### 733. Mobile App — Venue Image Optional & Default "Search on Map" Tab (2026-10-09)
+Jamal: create_event_screen.dart venue img make that optional and always show search on map tile show first okay.
+- **Venue Image Made Optional** (`lib/features/organizer/create/create_event_screen.dart`):
+  - Removed `_venueImageUrl == null` requirement from `_venueProblem` getter so users can proceed without uploading a venue image.
+  - In `_venueStep`, removed `required: true` (removes mandatory asterisk), added subtitle `Optional photo of the venue.`.
+  - Added a "Remove Photo" button allowing users to clear an uploaded venue image if they change their mind.
+- **Default to "Search on Map" First**:
+  - Changed default state variable `int _venueTab = 0;` (was previously `1` which defaulted to "Enter Manually").
+  - In `_seed`, reset `_venueTab = 0;` when prefilling event details on edit mode.
+  - Result: The venue step opens directly to the "Search on Map" tab first instead of "Enter Manually".
+- **Validation**:
+  - `flutter analyze lib/features/organizer/create/create_event_screen.dart`: 0 errors.
+### 734. Mobile App — Organizer Home Dashboard Replace "Create Event" with "Edit Event" (2026-10-09)
+Jamal: in organizer home screen replace "Create Event" action with "Edit Event" with which event selection, then navigate to that event's edit page.
+- **Organizer Dashboard Quick Actions** (`lib/features/organizer/home/organizer_home_screen.dart`):
+  - Replaced the primary Quick Action slot from `'Create Event'` to `'Edit Event'` with `Icons.edit_calendar_rounded`.
+  - Added `alwaysPick: true` support to `_forEvent` / `go` helper so that tapping "Edit Event" consistently presents the "Choose an event" modal bottom sheet (listing all owned events sorted newest first).
+  - Tapping an event in the picker sets `selectedEventIdProvider` and navigates directly to `/event/edit?id=$id` (`EditEventScreen`).
+  - Updated button styling rule (`filled: label == 'Edit Event'`) so "Edit Event" retains the primary accent filled circle highlight in the Quick Actions grid.
+  - Cleaned up now-unused `organizer_bottom_nav.dart` import.
+- **Validation**:
+  - `flutter analyze lib/features/organizer/home/organizer_home_screen.dart`: No issues found! (0 errors, 0 warnings).
+
+### 735. Mobile App & Backend — Worldwide Timezones Searchable Dropdown & Event Time Preserved (2026-10-09)
+Jamal: create_event_screen.dart timezone show all timezones search with dropdown, and check if any api has all timezones and how event time is shown with timezone.
+- **Backend Timezones API**:
+  - `GET /api/v1/timezones`: Existing public endpoint returning all global timezones.
+  - `src/services/clientPortal.service.js`: Expanded `EVENT_TIME_ZONES` in `eventOptions` from 4 hardcoded items to the comprehensive list of 33 international timezones with clean `(GMT +/-HH:MM)` formatting and major city/region names.
+- **Timezone Storage & Event Time Safety**:
+  - In `events` table, `start_time` / `end_time` are literal `TIME` values and `start_date` / `end_date` are `DATEONLY`.
+  - Timezone is stored in `events.timezone` as a descriptive label (up to 80 chars).
+  - Changing the timezone does NOT alter or shift the wall-clock event time typed by the organizer, preventing unexpected time drift bugs.
+- **Mobile Searchable Timezone Dropdown** (`lib/features/organizer/create/create_event_screen.dart`):
+  - Added `_kDefaultTimezones` (33 global timezones covering all offsets from GMT-11 to GMT+13).
+  - Replaced basic `AppDropdown` with a custom searchable selector `_timezoneField(EventOptions o)` and `_TimezonePickerSheet`.
+  - Interactive bottom sheet (75% height) with real-time text search by country, city, continent, or GMT offset ("London", "Kolkata", "Dubai", "New York", "+5:30", etc.).
+  - Shows checkmark on the currently selected timezone, dismisses on selection, and updates state immediately.
+  - Pre-selects device local timezone via `DateTime.now().timeZoneOffset` if no timezone was chosen yet.
+- **Validation**:
+  - `flutter analyze lib/features/organizer/create/create_event_screen.dart`: No issues found! (0 errors, 0 warnings).
+
+### 736. Database — Clean Up & Soft-Delete 21 Old Templates on Live DB (2026-10-09)
+Jamal: Old Template Remove check that live db create at we recently uploaded 20 template other old template are remove that okay ? -> soft dlt that now.
+- **Investigation on Live DB** (`mysql-cbe9f33-jamaludheen779-4e61.k.aivencloud.com`):
+  - Confirmed 20 newly uploaded templates (IDs 42–61) created on Oct 06, 2026, across the 5 design styles (Classic, Royal, Elegant, Minimal, Traditional) and 4 types (Color, Image, Gradient, Custom).
+  - Identified 21 legacy/sample templates (IDs 1–21 and ID 25) with `deleted_at: NULL`.
+- **Action**:
+  - Soft-deleted all 21 old templates (`UPDATE event_templates SET deleted_at = NOW(), is_active = 0 WHERE id < 42 AND deleted_at IS NULL`).
+  - Verified in live production DB: Exactly the 20 newly uploaded templates (IDs 42–61) remain active and selectable (`deleted_at IS NULL`).
+  - Synced local DB to match.
+
+### 737. Mobile App — Draft Event Orange Tag, Three-Dot Menu "Continue Event" & Saved Sections Preview Screen (2026-10-09)
+Jamal: in event list page when event has draft upcoming show replace draft show orange color tag, that three dot click show continue event and remove share event option fully, when continue event click show preview form save section (e.g. 3 forms saved then show 3 filled forms preview page), with next click to go to next step.
+- **Event Models & Draft Detection** (`lib/features/common/event/event_data.dart`, `lib/data/repositories/event_repository.dart`):
+  - Added `final bool isDraft;` flag to `EventItem`.
+  - Parsed `isDraft: (row['derived_status'] == 'draft' || row['status'] == 'draft')` in `_toItem()` in `event_repository.dart`.
+- **Orange Draft Tag on Event Card** (`lib/features/organizer/events/organizer_event_card.dart`):
+  - In `_badge` getter, when `event.isDraft` is true, returns `('Draft', AppColors.orange)`, replacing the previous "Upcoming" blue/primary tag on draft events with an orange tag.
+- **Three-Dot Menu & Card Action Updates**:
+  - Removed the `Share Event` popup menu option completely from `OrganizerEventCard`.
+  - When `event.isDraft` is true, the popup menu presents `Continue Event` (`Icons.play_circle_outline_rounded`) and `Edit Event`.
+  - Tapping the draft card directly or choosing "Continue Event" triggers `onContinue` callback.
+- **Draft Event Resume & Preview Screen** (`lib/features/organizer/events/draft_event_preview_screen.dart`):
+  - Created `DraftEventPreviewScreen(eventId: eventId)` mapped to route `/event/draft-preview?id=$id`.
+  - Loads draft event's raw state via `createEventRepository.raw(eventId)` and options via `eventOptionsProvider`.
+  - Evaluates all 8 wizard steps (Event Type, Basic Details, Date & Time, Venue, Design, Menus, Settings, Organizer Settings) to determine which were completed and saved.
+  - Renders top progress summary card with orange "Draft" badge, completed count, and progress bar (`N / 8 completed`).
+  - Highlights next step callout card with icon and description.
+  - Lists beautiful preview cards for every saved section with details, photos, and direct "Edit" shortcuts.
+  - Sticky bottom action bar with primary button: `Continue to [Next Step Name]` which pushes `/event/edit?id=$id&step=$nextStepIndex`, picking up immediately where the organizer left off in the creation wizard.
+- **Router & Event List Wiring** (`lib/core/router/app_router.dart`, `lib/features/organizer/events/organizer_events_screen.dart`):
+  - Registered `/event/draft-preview` in `_organizerOnlyRoutes` and added `GoRoute`.
+  - Wired `OrganizerEventsScreen` to push `/event/draft-preview?id=${e.id}` on draft tap and "Continue Event" selection.
+- **Validation**:
+  - `flutter analyze` on all modified and new files: No issues found! (0 errors, 0 warnings).
+
+### 738. Mobile App — Remove Mandatory Constraint for Photo in Organizer Contact Screens (2026-10-09)
+Jamal: D:\Jamal\Event_Invite_Mobile_App\lib\features\organizer\contact\organizer_contact_screens.dart has pht has mandatory remove from mandatory oaky.
+- **Removed Photo Mandatory Constraint** (`lib/features/organizer/contact/organizer_contact_screens.dart`):
+  - Removed `required` modifier from `_ContactPhotoAvatar({this.photo, ...})` constructor.
+  - Added explicit section label `const AppFieldLabel('Profile Photo (Optional)')` above the avatar photo row in `EditOrganizerContactScreen`.
+  - Retained `Mobile Number *` and `isRequired: true` as mandatory.
+- **Validation**:
+  - `flutter analyze`: No issues found! (0 errors, 0 warnings).

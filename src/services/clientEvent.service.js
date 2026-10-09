@@ -58,7 +58,7 @@ const WRITABLE_FIELDS = [
     'organizer', 'organizer_image', 'contact_phone', 'contact_email', 'footer_note',
     'privacy', 'status',
     'menu_ids', 'disabled_app_menu_ids',
-    'theme_id', 'primary_color',
+    'theme_id', 'primary_color', 'secondary_color',
     'cover_image', 'custom_image',
     'components', 'component_order',
     'qr_style',
@@ -391,6 +391,14 @@ const normalise = async (clientId, body, { partial = false } = {}) => {
             throw ApiError.badRequest('Primary colour must be a hex value like #2457D6.');
         }
         data.primary_color = value;
+    }
+
+    if (has('secondary_color')) {
+        const value = str(picked.secondary_color, 9);
+        if (value && !HEX_COLOR.test(value)) {
+            throw ApiError.badRequest('Secondary colour must be a hex value like #F59E0B.');
+        }
+        data.secondary_color = value;
     }
 
     // The event's own photo — a URL `uploadCoverImage` returned. Only a stored

@@ -111,6 +111,7 @@ module.exports = (sequelize) => {
             // ── Step 4 — design ─────────────────────────────────────────────
             theme_id: { type: DataTypes.STRING(64), allowNull: true },
             primary_color: { type: DataTypes.STRING(9), allowNull: true },
+            secondary_color: { type: DataTypes.STRING(9), allowNull: true },
 
             /**
              * The event's own photo, uploaded in the wizard. Shown on the mobile
