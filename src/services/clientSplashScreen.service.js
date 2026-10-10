@@ -50,6 +50,19 @@ const asConfig = (value) => {
 };
 
 /**
+ * Organizer & Contact never appear on a splash — the host cannot switch them on.
+ * Forced OFF on every write and on every read, so neither an older app build
+ * nor a hand-made request can turn them on.
+ */
+const ORGANIZER_KEYS = ['organizer', 'contact_details'];
+const withoutOrganizer = (components) => {
+    if (!components || typeof components !== 'object') return components;
+    const out = { ...components };
+    for (const key of ORGANIZER_KEYS) out[key] = false;
+    return out;
+};
+
+/**
  * The chosen event, checked to be one of this client's own.
  *
  * A scoped `findOne`, not `findByPk` — the same guard `clientGuest.service`
@@ -125,7 +138,14 @@ const normalise = async (clientId, body, { partial = false, existing = null } = 
         data.background_type = type;
     }
     if (has('background_url')) data.background_url = str(body.background_url, 500);
-    if (has('background_config')) data.background_config = asConfig(body.background_config);
+    if (has('background_config')) {
+        const config = asConfig(body.background_config);
+        // The app mirrors `components` inside this blob; keep that copy honest too.
+        if (config && config.components && typeof config.components === 'object') {
+            config.components = withoutOrganizer(config.components);
+        }
+        data.background_config = config;
+    }
 
     if (has('loader_enabled')) data.loader_enabled = !!body.loader_enabled;
     if (has('loader_config')) data.loader_config = asConfig(body.loader_config);
@@ -148,7 +168,7 @@ const normalise = async (clientId, body, { partial = false, existing = null } = 
     }
     if (has('decoration_url')) data.decoration_url = str(body.decoration_url, 500);
     if (has('show_decoration')) data.show_decoration = !!body.show_decoration;
-    if (has('components')) data.components = asConfig(body.components);
+    if (has('components')) data.components = withoutOrganizer(asConfig(body.components));
     if (has('component_order')) {
         if (body.component_order === null) data.component_order = null;
         else if (Array.isArray(body.component_order)) data.component_order = body.component_order;
@@ -283,6 +303,10 @@ const getActiveSplashForEvent = async (clientId, rawEventId) => {
 
     const presented = splash.toJSON();
     for (const field of HOST_ONLY_FIELDS) delete presented[field];
+    presented.components = withoutOrganizer(presented.components) ?? null;
+    if (presented.background_config && presented.background_config.components) {
+        presented.background_config.components = withoutOrganizer(presented.background_config.components);
+    }
 
     // The splash picks its OWN template (`theme_id`), which need not be the
     // event's. Ship that template's design with it — the same block an event
