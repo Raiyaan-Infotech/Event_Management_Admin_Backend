@@ -15,18 +15,18 @@ const { DataTypes } = require('sequelize');
  * names match no real event, so they were left unlinked rather than guessed
  * into one. See `apply-splash-screen-event-link.js` for the full reasoning.
  *
- * ── background_config / sound_config / loader_config / animation_config ────
+ * ── background_config / loader_config ──────────────────────────────────────
  * `background_type` picks ONE of six shapes; `background_config` holds
  * whichever shape applies (overlay %, video start/volume, gradient
- * colors/direction, logo size/position, photo fit, solid colour hex). Sound,
- * loader and animation are independent add-ons layered on ANY background
- * type, which is why each gets its own JSON blob rather than being folded
- * into `background_config`.
+ * colors/direction, logo size/position, photo fit, solid colour hex). The
+ * loader is an independent add-on layered on ANY background type, which is
+ * why it gets its own JSON blob.
  *
- * ── ⚠ animation_enabled / animation_config are SAVED, NOT DELIVERED ─────────
- * The design's own copy says "Animations will be visible in the mobile app
- * only," and that app has no splash-rendering screen to read this yet — same
- * pattern as this project's email/notification consent flags.
+ * ── Drawn from the invitation card ─────────────────────────────────────────
+ * `theme_id` (template code), the three colours, `components` and
+ * `component_order` mirror the invitation design. The organizer / contact
+ * sections default OFF — the app applies that when `components` is empty.
+ * The legacy sound / animation / button / show_* columns were dropped.
  */
 module.exports = (sequelize) => {
     const SplashScreen = sequelize.define('SplashScreen', {

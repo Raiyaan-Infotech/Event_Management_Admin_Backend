@@ -1,6 +1,7 @@
-const { Sequelize, SplashScreen, Event, EventParticipant, WebsiteClient, Decoration, FrameStyle } = require('../models');
+const { Sequelize, SplashScreen, Event, EventParticipant, WebsiteClient, Decoration } = require('../models');
 const { Op } = Sequelize;
 const mediaService = require('./media.service');
+const clientEventService = require('./clientEvent.service');
 const ApiError = require('../utils/apiError');
 
 /**
@@ -245,7 +246,7 @@ const getActiveSplashForEvent = async (clientId, rawEventId) => {
 
     const event = await Event.findOne({
         where: { id: eventId },
-        attributes: ['id', 'website_client_id'],
+        attributes: ['id', 'website_client_id', 'company_id'],
     });
     if (!event) return null;
 
@@ -282,6 +283,12 @@ const getActiveSplashForEvent = async (clientId, rawEventId) => {
 
     const presented = splash.toJSON();
     for (const field of HOST_ONLY_FIELDS) delete presented[field];
+
+    // The splash picks its OWN template (`theme_id`), which need not be the
+    // event's. Ship that template's design with it — the same block an event
+    // carries — so the app draws the splash in the template that was chosen
+    // instead of falling back to the event's.
+    await clientEventService.attachDesign([presented], event.company_id ?? null);
     return presented;
 };
 

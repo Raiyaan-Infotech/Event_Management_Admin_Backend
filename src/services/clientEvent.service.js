@@ -1630,4 +1630,5 @@ module.exports = {
     getWishlist,
     setWishlisted,
     readWishlistIds,
+    attachDesign,
 };

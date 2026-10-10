@@ -10955,28 +10955,21 @@ CREATE TABLE IF NOT EXISTS `push_notification_configs` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------
--- Splash Screens — a standalone module, not yet tied to an event
+-- Splash Screens — one per event, drawn from the invitation design
 --
--- ⚠ NOT PER-EVENT YET, DELIBERATELY. The supplied design's breadcrumb reads
--- like a step of creating one event; it isn't, on purpose. This round builds
--- the module and its CRUD on their own — `event_name` is plain text a client
--- types, not a foreign key. Linking a saved splash to a real `events` row is
--- an explicitly later phase; adding that FK later is a normal migration.
+-- This is the MOBILE APP's own splash screen, shown when a guest opens an
+-- event inside the Flutter app — not a web page. `event_id` is UNIQUE: one
+-- event has at most one splash. `event_name` is copied from the event on save.
 --
--- This is the MOBILE APP's own splash/loading screen, shown when a guest
--- opens an event inside the Flutter app — not a web page. No public web
--- route exists for this, and none is added here.
+-- The splash reuses the invitation card: `theme_id` is the template code,
+-- `primary_color` / `secondary_color` / `bg_color` its colours, and
+-- `components` / `component_order` its section toggles and order (organizer
+-- and contact are OFF by default — the app applies that when `components` is
+-- empty). `decoration_url` / `show_decoration` are the frame chosen from the
+-- admin portal's decorations.
 --
--- `background_type` picks ONE of six shapes (image / video / solid_color /
--- gradient / logo / couple_photo); `background_config` holds whichever shape
--- applies. Sound, loader and animation are independent JSON add-ons layered
--- on top of ANY background type, not variants of it — mirrors `events`.
--- `components` / `component_order` already in this schema.
---
--- ⚠ `animation_enabled` / `animation_config` are SAVED, NOT DELIVERED. The
--- mock's own copy says "Animations will be visible in the mobile app only,"
--- and that app has no splash-rendering screen to read this yet — same
--- pattern as this project's email/notification consent flags.
+-- The legacy sound / animation / button / show_* columns were dropped — see
+-- src/database/tools/remove-old-splash-screen-columns.js.
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS `splash_screens` (
@@ -10986,26 +10979,22 @@ CREATE TABLE IF NOT EXISTS `splash_screens` (
   `name` varchar(150) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Internal label — identifies one saved splash among several',
   `main_title` varchar(60) COLLATE utf8mb4_unicode_ci NOT NULL,
   `sub_title` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `event_name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Plain text today — see header. Not a foreign key until events are wired up.',
+  `event_name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Copied from the chosen event on save',
   `event_id` int unsigned DEFAULT NULL,
   `tagline` varchar(150) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `background_type` enum('image','video','solid_color','gradient','logo','couple_photo') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'image',
   `background_url` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'The uploaded image / video / logo / couple photo, per background_type',
-  `fallback_image_url` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Video background only',
   `background_config` json DEFAULT NULL COMMENT 'Type-specific knobs: overlay %, video start/volume, gradient colors/direction, logo size/position, photo fit/dark-overlay, solid colour hex',
-  `sound_enabled` tinyint(1) NOT NULL DEFAULT '0',
-  `sound_url` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `sound_config` json DEFAULT NULL COMMENT 'auto_play, loop, volume',
   `loader_enabled` tinyint(1) NOT NULL DEFAULT '1',
   `loader_config` json DEFAULT NULL COMMENT 'style, color, size, background color',
-  `animation_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'SAVED, NOT DELIVERED — see header',
-  `animation_config` json DEFAULT NULL COMMENT 'style, speed, particle density, overlay color/opacity, loop — mobile-app-only, unread until the app has a splash screen',
-  `button_text` varchar(25) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'Enter Invitation',
-  `button_style` enum('filled','outline','text') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'filled',
-  `button_color` varchar(9) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `show_couple_name` tinyint(1) NOT NULL DEFAULT '1',
-  `show_event_date` tinyint(1) NOT NULL DEFAULT '1',
-  `show_tagline` tinyint(1) NOT NULL DEFAULT '1',
+  `theme_id` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Template code of the invitation style this splash mirrors',
+  `primary_color` varchar(9) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Hex — host names and QR',
+  `secondary_color` varchar(9) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Hex — every other section',
+  `bg_color` varchar(9) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `decoration_url` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `show_decoration` tinyint(1) NOT NULL DEFAULT '1',
+  `components` json DEFAULT NULL COMMENT 'Section visibility toggles; organizer / contact default OFF',
+  `component_order` json DEFAULT NULL COMMENT 'Display order of the sections',
   `status` enum('draft','active') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'draft',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

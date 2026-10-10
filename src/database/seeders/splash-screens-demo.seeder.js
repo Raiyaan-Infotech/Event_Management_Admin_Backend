@@ -31,7 +31,7 @@
  * the video background type has something that actually demonstrates video
  * playback rather than a static frame — it is a generic clip, not a wedding
  * video, chosen for being a stable, always-reachable URL rather than for
- * thematic fit. Its `fallback_image_url` IS thematically chosen.
+ * thematic fit.
  */
 require('dotenv').config();
 const path = require('path');
@@ -87,16 +87,8 @@ const ROWS = (clientId, companyId) => [
         tagline: 'Together with their families',
         background_type: 'gradient',
         background_config: { gradient_type: 'linear', direction: 'diagonal', color_1: '#6A11CB', color_2: '#FF2575' },
-        sound_enabled: false,
         loader_enabled: true,
         loader_config: { style: 'dots', color: '#FFFFFF', size: 60, background_color: '#6A11CB' },
-        animation_enabled: false,
-        button_text: 'Enter Invitation',
-        button_style: 'filled',
-        button_color: '#FFFFFF',
-        show_couple_name: true,
-        show_event_date: true,
-        show_tagline: true,
         status: 'active',
     },
     {
@@ -112,17 +104,8 @@ const ROWS = (clientId, companyId) => [
         // picking it, not guessed from the URL. See file header.
         background_url: 'https://images.unsplash.com/photo-1519167758481-83f550bb49b3?w=1080&q=70',
         background_config: { overlay: 35 },
-        sound_enabled: true,
-        sound_config: { auto_play: true, loop: true, volume: 60 },
         loader_enabled: true,
         loader_config: { style: 'ring', color: '#FBBF24', size: 55, background_color: '#0F766E' },
-        animation_enabled: false,
-        button_text: 'Enter Invitation',
-        button_style: 'outline',
-        button_color: '#FBBF24',
-        show_couple_name: true,
-        show_event_date: true,
-        show_tagline: true,
         status: 'active',
     },
     {
@@ -138,21 +121,8 @@ const ROWS = (clientId, companyId) => [
         // picking it, not guessed from the URL. See file header.
         background_url: 'https://images.unsplash.com/photo-1530103862676-de8c9debad1d?w=1080&q=70',
         background_config: { overlay: 45 },
-        sound_enabled: true,
-        sound_config: { auto_play: false, loop: true, volume: 80 },
         loader_enabled: true,
         loader_config: { style: 'pulse', color: '#F97316', size: 60, background_color: '#111827' },
-        animation_enabled: true,
-        animation_config: {
-            style: 'lights_sparkles', speed: 'fast', density: 70,
-            overlay_color: '#000000', overlay_opacity: 20, loop: true,
-        },
-        button_text: "Let's Party",
-        button_style: 'filled',
-        button_color: '#F97316',
-        show_couple_name: false,
-        show_event_date: true,
-        show_tagline: true,
         status: 'draft',
     },
     {
@@ -167,20 +137,9 @@ const ROWS = (clientId, companyId) => [
         // A real, playable clip — generic, not wedding footage, chosen for
         // being a stable always-reachable URL. See file header.
         background_url: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
-        // The fallback IS thematically chosen: bride and groom with a
-        // bouquet, verified by downloading and viewing it first.
-        fallback_image_url: 'https://images.unsplash.com/photo-1519741497674-611481863552?w=1080&q=70',
         background_config: { video_start: 'from_beginning', volume: 80, overlay: 40 },
-        sound_enabled: false,
         loader_enabled: true,
         loader_config: { style: 'spinner', color: '#E91E63', size: 60, background_color: '#000000' },
-        animation_enabled: false,
-        button_text: 'Enter Invitation',
-        button_style: 'filled',
-        button_color: '#E91E63',
-        show_couple_name: true,
-        show_event_date: true,
-        show_tagline: true,
         status: 'draft',
     },
     {
@@ -196,15 +155,7 @@ const ROWS = (clientId, companyId) => [
         // a stand-in for an uploaded monogram/logo, verified before picking.
         background_url: 'https://images.unsplash.com/photo-1465495976277-4387d4b0b4c6?w=600&h=600&fit=crop&q=70',
         background_config: { size: 55, position: 'top-center' },
-        sound_enabled: false,
         loader_enabled: false,
-        animation_enabled: false,
-        button_text: 'Enter Invitation',
-        button_style: 'text',
-        button_color: '#111827',
-        show_couple_name: true,
-        show_event_date: false,
-        show_tagline: false,
         status: 'active',
     },
     {
@@ -220,16 +171,8 @@ const ROWS = (clientId, companyId) => [
         // by downloading and viewing it before picking it. See file header.
         background_url: 'https://images.unsplash.com/photo-1522673607200-164d1b6ce486?w=1080&q=70',
         background_config: { fit: 'cover', overlay: 40, dark_overlay: true },
-        sound_enabled: false,
         loader_enabled: true,
         loader_config: { style: 'bars', color: '#E91E63', size: 60, background_color: '#1F2937' },
-        animation_enabled: false,
-        button_text: 'Enter Invitation',
-        button_style: 'filled',
-        button_color: '#E91E63',
-        show_couple_name: true,
-        show_event_date: true,
-        show_tagline: true,
         status: 'draft',
     },
 ];
