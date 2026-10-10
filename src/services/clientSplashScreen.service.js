@@ -23,6 +23,11 @@ const ApiError = require('../utils/apiError');
  */
 
 const BACKGROUND_TYPES = ['image', 'video', 'solid_color', 'gradient', 'logo', 'couple_photo'];
+/** An invitation template's `background_type` → this table's `background_type`. */
+const TEMPLATE_TYPE_TO_BACKGROUND = {
+    color: 'solid_color',
+    custom: 'image',
+};
 const STATUSES = ['draft', 'active'];
 const HEX = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 
@@ -133,7 +138,11 @@ const normalise = async (clientId, body, { partial = false, existing = null } = 
     if (has('tagline')) data.tagline = str(body.tagline, 150);
 
     if (required('background_type')) {
-        const type = String(body.background_type || '').toLowerCase();
+        const raw = String(body.background_type || '').toLowerCase();
+        // The splash is built from an invitation template, so the app may send
+        // the TEMPLATE's type (color | image | gradient | custom). Map it onto
+        // the column's own values instead of refusing the save.
+        const type = TEMPLATE_TYPE_TO_BACKGROUND[raw] || raw;
         if (!BACKGROUND_TYPES.includes(type)) throw ApiError.badRequest('Invalid background type.');
         data.background_type = type;
     }
