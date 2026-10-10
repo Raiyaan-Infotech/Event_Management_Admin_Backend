@@ -15593,3 +15593,94 @@ Jamal: what about admin panel how it shows ? intitially that admin know how it s
     - Added helper subtitle under Step 3's "Organizer & Contact" switch: *"Highlighted Contact Us box with organizer name & phone"*.
 - **Validation**:
   - Live preview in Admin Panel Template Wizard, Template Edit, and Template Details page (`/admin/templates/[id]`) now identically mirrors the Mobile App design.
+
+### 749. Mobile App — Edit Event Hub: Menu Renames & Removed Invitation / Privacy Rows (2026-10-10)
+Jamal: rename Photos → Photo Gallery; keep Agenda, remove Schedule; Contact / Organizer → Organizer Contact; remove the Privacy & Invitation page and their options.
+- **Edit Event hub** (`lib/features/organizer/edit/edit_event_screen.dart`):
+  - `Photos` → `Photo Gallery`; `Agenda / Schedule` → `Agenda`; `Contact / Organizer` → `Organizer Contact` (screen title in `organizer_contact_screens.dart` renamed too).
+  - Removed the `Invitation Card` and `Privacy & Invitation` rows from the hub. The `EditSection.design/privacy` enum values and wizard screens are left in place because Create Event still uses them.
+- **Validation**: `flutter analyze edit_event_screen.dart`: No issues found.
+
+
+## Session 57 (continued) — splash back to the mockup page, offline, plan config, page fixes (2026-10-10)
+
+### 750. Splash screen — the invitation-wizard version REVERTED; the splash is the mockup page again (2026-10-10) — ⚠ SUPERSEDED by §756, the mockup page was not what Jamal meant either
+Jamal: "I understood the requirement wrongly — the splash does NOT choose an invitation (that is already in Invitation). The splash shows only the config from the mockup, with the colour option after the toggles, on the same page."
+- **Restored from HEAD (`bd66048`)** in the app: `splash_editor_flow.dart` (the single page), `event_splash_screen.dart` (the guest's splash), `invitation_card_settings.dart`. The 4-page wizard (Category → Templates → Card Settings → Preview) and its `InvitationCard`-based guest splash are gone. Copies of the wizard versions were kept outside the repo (session scratchpad), not committed.
+- **The page, top to bottom:** phone preview (event cover photo when "Use Event Photo" is on, the chosen frame over it, names in the script font, date + flourish) · **Choose Frame** (admin decorations list) · toggles: Use Event Photo, Show Title, Show Date, Show Decoration, **Show Organizer Details — shown, OFF and locked** · **Primary Colour** (after the toggles, same page) · Back / Next.
+- **Patched on top of HEAD** (the splash table no longer has the old columns):
+  - Show Title / Show Date are read and saved in `background_config` (`show_title`, `show_date`); the editor no longer sends `show_couple_name` / `show_event_date` / `show_organizer`.
+  - `background_type` saved as `solid_color` / `image` (a template-style `color` was refused by the server — "Invalid background type").
+  - Organizer Details never shown: the switch is locked off and the guest's organizer block was removed.
+  - Result page: success Lottie + the app's rounded `AppButton`s.
+  - Guest splash: the flat background uses the saved `bg_color` — it used `EventSplash.defaultAccent` (brand pink), which painted splashes ROSE; the event photo is drawn at full strength like the editor's preview (was 25%); the loader shows only while the event is still being fetched and no longer in the old pink.
+- **Left in place but unused by this page:** the columns `theme_id`, `secondary_color`, `components`, `component_order` and the guest read's `design` block. The Background colour chooser stays out (§746) — the chosen frame maps the background.
+- `flutter analyze` clean on the touched files. Not seen on a phone; needs a full restart. Not committed.
+- **Open:** Jamal attached the 12-screen **Organizer QR Code Management** mockup (Create / Regenerate / Share Event QR Code). Nothing built or audited yet.
+
+### 751. Backend — splash fixes made during the wizard attempt that still stand (2026-10-10)
+- `clientSplashScreen.service.js`: a stale `BUTTON_STYLES` export (its definition had been deleted) threw at require time and would have stopped the server — removed. Template types map onto the table's values (`color` → `solid_color`, `custom` → `image`). `components` / `background_config.components` are forced to `organizer: false, contact_details: false` on write and on the guest read. The guest read also carries the splash template's `design` (`clientEvent.service.attachDesign` is now exported).
+- `initial_setup.sql` `splash_screens`, the model header and the demo seeder describe the current columns (8 new, 12 legacy removed).
+- **Production:** a dry run of `remove-old-splash-screen-columns.js --prod` showed all 12 legacy columns ALREADY absent. Whether the 4 new ones (`theme_id`, `secondary_color`, `components`, `component_order`) exist was NOT confirmed — the dry run of `apply-splash-screen-components.js --prod` was refused by the session's permission layer. Jamal to run it before deploying.
+
+### 752. Offline — organizer sections, the sync button, and the splash's pictures (2026-10-10)
+- The organizer's event card had no offline button (only the participant's did). New shared `OfflineSyncButton` (`lib/shared/widgets/offline_sync_button.dart`): download when not saved / edited since, a green cloud tick when saved (organizer card only, `showSynced`).
+- Now saved for offline, read-only: RSVP responses + RSVP settings (organizer), Participant Settings (both roles), Organizer Contact, Agenda, Gallery list (photos cached as viewed). All fetched by the Home sweep and the card's button for owned events; cleared on sign-out with the rest of the offline cache.
+- The splash's own pictures (background, decoration, frame, the template's artwork) are downloaded every time a splash loads and by the sweep.
+- Still true: no queued writes — every add / edit / delete / upload / RSVP answer needs a connection; Create / Edit Event options are not cached.
+
+### 753. Plan configuration applied on production (2026-10-10)
+Jamal ran `apply-plan-config.js --prod --apply` himself (the session was refused). Test numbers, to be replaced with real ones later:
+| Plan | Events | Photos | Videos | Storage | Guests / event |
+|---|---|---|---|---|---|
+| Free #12 | 1 | 5 | 1 | 15 MB | 5 (unchanged) |
+| Basic #9 | 50→2 | 10→7 | 2 | 60→25 MB | 10 |
+| Standard #10 | 5→3 | 20→9 | 5→3 | 1 GB→50 MB | 20→15 |
+| Premium #11 | 10→5 | 50→15 | 10→5 | 2 GB→100 MB | 50→25 |
+- Backup of the old values: `D:\Jamal\prod-backups\prod-plan-config-1791626190607.json`.
+- Storage is configured (plan form: number + MB/GB; `subscription_plans.storage_limit` / `storage_unit`) and enforced in the **gallery upload only**; the total counts gallery items only — cover, invitation, splash, agenda and contact photos are not counted. Photo / video counts use the event's plan, storage the account's current plan. Per-file caps are fixed: image 2 MB, video 5 MB.
+
+### 754. Screens audited and fixed — Oct 8–9 pages (2026-10-10)
+- **Past events:** the ⋮ menu offers View Event only (no Edit).
+- **Organizer Contact:** default country India (+91, first in the list, was +880); digits-only mobile (6–15), email format check; the fake "online" dot removed; success Lottie; own photo upload route `POST /client/events/organizer-photo` (own folder; the app falls back to the cover upload on a 404 until deployed). Not done by choice: only 6 countries in the picker.
+- **Draft Preview:** empty privacy / timezone no longer crashes; Back falls back to Home when there is nothing to pop. "Review & Publish" → step 8 is valid (`_kSteps` has 9 entries).
+- **Participant Settings:** Save disabled while the load failed (it would have overwritten the real settings with defaults); a late Retry no longer overwrites the host's own toggles.
+- **Found, NOT changed:** `clientOrganizerContact.controller.js` writes the contact's "address" into `events.venue_address` and "description" into `events.description` — editing the contact changes the event's venue and description.
+
+### 755. Create Event — a draft stores only the steps the host reached (2026-10-10)
+- Picking the event type makes the wizard pre-select the first template, switch on every menu and set a timezone; "Save as Draft" sent those too, so the Draft Preview showed Design / Menus / Settings as saved.
+- A NEW event saved as a draft now sends the template + colours + QR style + card sections only after the host went past Design, menus only past Menus, timezone only past Settings (`_maxStep`). Publishing and editing send everything as before.
+- Not applied to drafts saved earlier (their values are already stored).
+- A pick made on the current step and saved as a draft without pressing Next is not stored.
+
+### 750. Mobile App — Home Quick Actions: Edit Event Shows Plain Pencil Icon (2026-10-10)
+Jamal: home page edit event show only pencil icon.
+- `lib/features/organizer/home/organizer_home_screen.dart`: Edit Event quick action icon `edit_calendar_rounded` → `edit_outlined` (pencil only, no calendar).
+- `flutter analyze`: no issues.
+
+### 756. Splash screen — the splash IS the invitation already chosen; only colours and switches here (2026-10-10)
+Jamal, after §750: "the splash does not choose an invitation — that is already done in Invitation. It shows that invitation, and BELOW it the Primary and Secondary colour pickers, and below those the toggles only. Remove the old things."
+- **`splash_editor_flow.dart` rewritten** — one page, top to bottom: the event's invitation (its own design, drawn with the splash's colours / switches) · **Primary Colour** (+ Reset to the invitation's own) · **Secondary Colour** (+ Reset) · the section switches only (`InvitationCardSettings`, no QR-style row; **Organizer & Contact shown OFF and locked**) · Back / Save. Removed: Choose Frame, background colour, Use Event Photo, templates / category pages, decorations.
+- **Saved to `splash_screens`** (own table): `theme_id` (the invitation's template code), `primary_color`, `secondary_color`, `components` (organizer + contact forced false), `component_order`, `background_type = solid_color`; `bg_color` and `decoration_url` are written as NULL so an old pink background / floral frame cannot come back.
+- **Guest splash** (`event_splash_screen.dart`): the invitation scaled to fit the screen (full design backdrop behind it), drawn from the EVENT's design, the splash's colours + switches on top; nothing forced over the design; the loader only while the event is still loading.
+- `InvitationCardSettings` got `lockedOffKeys` and an optional QR-style row (`onQrStyle` null = none). `invitation_card_settings.dart` is otherwise unchanged for Create Event / Invitation Card.
+- ⚠ **Needs the backend deployed AND the production migration `apply-splash-screen-components.js --prod --apply`**: this page writes `theme_id`, `secondary_color`, `components`, `component_order`. The currently deployed backend ignores those fields, so until then a splash saves without colours or switches. (Whether the columns exist on production is still unconfirmed — §751.)
+- `flutter analyze` clean on the touched files. Not seen on a phone; needs a full restart. Not committed.
+
+### 751. Gallery — Built-in "Gallery" Category & Direct Photo Upload (2026-10-10)
+Jamal: a default "Gallery" category is always present; photos can be uploaded directly with no category and land in it. Confirmed: Gallery is locked (no rename / delete), and existing uncategorised photos move into it.
+- **Schema**: `event_gallery_categories.is_default` tinyint(1) NULL (1 = the built-in Gallery) + UNIQUE `(event_id, is_default)` — NULLs repeat, so one default per event. Tool `apply-gallery-default-category.js` (column, key, then 3 set-based statements: adopt an existing "Gallery", create one per live event, move photos with no category into it). Model + `initial_setup.sql` updated. **LOCAL applied (19 events, idempotent re-run clean). PRODUCTION NOT MIGRATED** — run `--prod --apply` BEFORE pushing the backend (the model now selects `is_default`).
+- **Backend** (`clientGallery.service.js`): `ensureDefaultCategory(eventId)` creates the row lazily (list / upload / delete paths), so events made later need nothing, and it adopts any legacy uncategorised photos. Upload with no / unknown category → Gallery. Deleting a category moves its photos to Gallery. Default cannot be renamed or deleted (400). `?category_id=0` now means the default Gallery. The default always leads the category list; categories return `is_default`.
+- **App**: `GalleryCategory.isDefault`; Gallery Categories screen has an **Upload Photos** button beside Add Category (quota checks, then the existing upload screen with no category); delete note says "move to Gallery"; Move-to-Category sheet no longer offers "Others".
+- **Checked**: service script — Gallery first + `is_default`, delete / rename default refused, duplicate "Gallery" name refused, deleted category's photo moved to Gallery, `category_id=0` list works. `flutter analyze` on the gallery folder: 0 new issues (3 pre-existing infos). Not seen on a device; local server needs a restart.
+
+### 752. Mobile App — Edit Event: Invitation Card Row Restored (2026-10-10)
+Jamal: "Privacy & Invitation" was ONE section (EditSection.privacy); only that was to be removed, not the Invitation Card menu. Restored the `Invitation Card` row (after Splash Screen, before Basic Details) in `edit_event_screen.dart`; `Privacy & Invitation` stays removed. `flutter analyze`: no issues.
+- **§756 follow-up — page trimmed to Jamal's wording (2026-10-10).**
+  - The top-bar **delete** button is removed, and with it the whole delete flow on this screen (confirm / deleting / deleted). A splash can no longer be removed from the app; the backend `DELETE /client/splash-screens/:id` still exists.
+  - Colour labels are just **Primary Colour** and **Secondary Colour** (the "(Names & QR Code)" / "(Accents & Details)" bracket text is gone).
+  - **Switches** (its own list, no longer `InvitationCardSettings`): Show Title · Show Names (the old "Title & Names" split in two) · Show Invitation Message · Show Date & Time · Show Venue · Show Footer Note. **Show QR Code and Organizer & Contact are not shown** — the QR keeps whatever the invitation has, organizer + contact are saved as false.
+  - **Colour rows:** five round swatches each + the colour-picker circle (it shows the colour, ticked, when the chosen one is not among the five); the selected circle carries a tick and a border; **Reset** is red, text and icon. Primary: maroon, rose, blue, green, amber. Secondary: amber, purple, pink, cyan, emerald.
+  - `invitation_card_settings.dart` is back to the committed version (the `lockedOffKeys` / optional-QR edits were no longer needed).
+  - `flutter analyze` clean on the splash files. Not seen on a phone.
+- **§756 follow-up 2 — the QR code is never on the splash (2026-10-10).** The Syed Fathima wedding splash showed the QR code because the invitation has one and the splash saved/inherited `event_qr_code: true` — with the switch removed there was no way to turn it off. Now `event_qr_code`, `organizer` and `contact_details` are forced OFF: in the editor's seed and save, in the guest splash (`EventSplash.effectiveComponents`, so splashes already saved show no QR without re-saving), and in the backend on write and on the guest read. The invitation itself is unchanged.

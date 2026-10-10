@@ -55,11 +55,11 @@ const asConfig = (value) => {
 };
 
 /**
- * Organizer & Contact never appear on a splash — the host cannot switch them on.
- * Forced OFF on every write and on every read, so neither an older app build
- * nor a hand-made request can turn them on.
+ * The QR code and Organizer & Contact never appear on a splash — it has no
+ * switch for them and the host cannot turn them on. Forced OFF on every write
+ * and on every read, so neither an older app build nor a hand-made request can.
  */
-const ORGANIZER_KEYS = ['organizer', 'contact_details'];
+const ORGANIZER_KEYS = ['event_qr_code', 'organizer', 'contact_details'];
 const withoutOrganizer = (components) => {
     if (!components || typeof components !== 'object') return components;
     const out = { ...components };

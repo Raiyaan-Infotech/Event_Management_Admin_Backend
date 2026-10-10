@@ -88,6 +88,62 @@ const resolveEventForView = async (clientId, rawId) => {
     return { event, isOwner: false };
 };
 
+/** The name of the built-in category every event always has. */
+const DEFAULT_CATEGORY_NAME = 'Gallery';
+
+/**
+ * The event's built-in "Gallery" category, created the first time it is needed.
+ *
+ * Every photo lives in a category: an upload that names none lands here, and
+ * a deleted category's photos fall back here. Lazy rather than created with
+ * the event so events that already exist need no special path, and so no event
+ * creation code can forget it. The unique (event_id, is_default) key makes a
+ * concurrent first call safe — the loser re-reads the winner's row.
+ */
+const ensureDefaultCategory = async (eventId) => {
+    const find = () => EventGalleryCategory.findOne({
+        where: { event_id: eventId, is_default: true },
+    });
+    let row = await find();
+    if (row) return row;
+
+    const event = await Event.findByPk(eventId, {
+        attributes: ['id', 'website_client_id', 'company_id'],
+    });
+    if (!event) throw ApiError.notFound('That event was not found.');
+
+    // A host-made category already called "Gallery" becomes the default
+    // rather than leaving two with the same name.
+    const named = await EventGalleryCategory.findOne({
+        where: { event_id: eventId, name: DEFAULT_CATEGORY_NAME },
+    });
+    if (named) {
+        named.is_default = true;
+        await named.save();
+        row = named;
+    } else {
+        try {
+            row = await EventGalleryCategory.create({
+                event_id: eventId,
+                website_client_id: event.website_client_id,
+                name: DEFAULT_CATEGORY_NAME,
+                sort_order: 0,
+                is_default: true,
+                company_id: event.company_id ?? null,
+            });
+        } catch (e) {
+            row = await find();
+            if (!row) throw e;
+        }
+    }
+
+    // Anything filed under no category before this existed belongs here.
+    await EventGalleryItem.update(
+        { category_id: row.id }, { where: { event_id: eventId, category_id: null } }
+    );
+    return row;
+};
+
 const present = (row) => {
     const item = row.toJSON ? row.toJSON() : row;
     return {
@@ -163,12 +219,13 @@ const listItems = async (clientId, eventId, query = {}) => {
     const { event, isOwner } = await resolveEventForView(clientId, eventId);
 
     const where = { event_id: event.id };
+    const defaultCategory = await ensureDefaultCategory(event.id);
     if (query.type === 'image' || query.type === 'video') where.type = query.type;
-    // `?category_id=0` means Uncategorised, which is a real filter — an absent
-    // parameter means "everything" and must not be confused with it.
+    // `?category_id=0` is the default Gallery — an absent parameter means
+    // "everything" and must not be confused with it.
     if (query.category_id !== undefined && query.category_id !== '') {
         const catId = Number(query.category_id);
-        where.category_id = catId > 0 ? catId : null;
+        where.category_id = catId > 0 ? catId : defaultCategory.id;
     }
     // "Show in Event App" off = the host still manages it, a guest never
     // receives it.
@@ -196,9 +253,14 @@ const listItems = async (clientId, eventId, query = {}) => {
  * time an item is deleted by any other path.
  */
 const listCategories = async (clientId, eventId, { visibleOnly = false } = {}) => {
+    await ensureDefaultCategory(eventId);
+    // The default Gallery always leads the list.
     const rows = await EventGalleryCategory.findAll({
         where: { event_id: eventId },
-        order: [['sort_order', 'ASC'], ['id', 'ASC']],
+        order: [
+            [Sequelize.literal('is_default IS NULL'), 'ASC'],
+            ['sort_order', 'ASC'], ['id', 'ASC'],
+        ],
     });
 
     // A guest's counts and covers leave out what the host has hidden, so a
@@ -248,6 +310,8 @@ const presentCategory = (r, itemCount = 0, firstPhotoUrl = null) => ({
     cover_url: r.cover_image || firstPhotoUrl || null,
     icon: r.icon,
     sort_order: r.sort_order,
+    /** The built-in Gallery: cannot be renamed or deleted. */
+    is_default: r.is_default === true || r.is_default === 1,
     item_count: itemCount,
 });
 
@@ -324,7 +388,12 @@ const updateCategory = async (clientId, categoryId, body = {}) => {
     });
     if (!row) throw ApiError.notFound('That category was not found.');
 
-    if (body.name !== undefined) {
+    const isDefault = row.is_default === true || row.is_default === 1;
+    if (isDefault && body.name !== undefined
+        && String(body.name).trim() !== row.name) {
+        throw ApiError.badRequest('The Gallery category cannot be renamed.');
+    }
+    if (body.name !== undefined && !isDefault) {
         const name = String(body.name || '').trim().slice(0, 120);
         if (!name) throw ApiError.badRequest('Please enter a category name.');
 
@@ -339,7 +408,10 @@ const updateCategory = async (clientId, categoryId, body = {}) => {
     if (body.cover_image !== undefined) row.cover_image = cleanText(body.cover_image, 500);
     await row.save();
 
-    if (hasPosition(body)) await placeCategory(row.event_id, row.id, body.position);
+    // The default always leads, so it has no position to change.
+    if (hasPosition(body) && !isDefault) {
+        await placeCategory(row.event_id, row.id, body.position);
+    }
 
     const categories = await listCategories(clientId, row.event_id);
     return { category: categories.find((c) => c.id === row.id), categories };
@@ -373,9 +445,9 @@ const uploadCategoryCover = async (clientId, eventId, file) => {
 };
 
 /**
- * Delete a category. Its items are NOT deleted — the FK is ON DELETE SET NULL,
- * so they fall back to Uncategorised. Removing a label must never remove the
- * photos filed under it.
+ * Delete a category. Its items are NOT deleted — they move to the default
+ * Gallery. Removing a label must never remove the photos filed under it. The
+ * default Gallery itself cannot be deleted.
  */
 const removeCategory = async (clientId, categoryId) => {
     const row = await EventGalleryCategory.findOne({
@@ -383,9 +455,15 @@ const removeCategory = async (clientId, categoryId) => {
     });
     if (!row) throw ApiError.notFound('That category was not found.');
 
+    if (row.is_default === true || row.is_default === 1) {
+        throw ApiError.badRequest('The Gallery category cannot be deleted.');
+    }
+
     const eventId = row.event_id;
+    // Its photos fall back to the default Gallery, never to nowhere.
+    const fallback = await ensureDefaultCategory(eventId);
     await EventGalleryItem.update(
-        { category_id: null }, { where: { category_id: row.id } }
+        { category_id: fallback.id }, { where: { category_id: row.id } }
     );
     await row.destroy({ force: true });
 
@@ -397,7 +475,7 @@ const removeCategory = async (clientId, categoryId) => {
  *
  * A stray id is dropped rather than refused: it cannot leak another event's
  * photos into this gallery (the item's own event_id decides that), so the
- * worst case is an uncategorised photo, not a failed upload.
+ * worst case is a photo in the default Gallery, not a failed upload.
  */
 const resolveCategoryId = async (eventId, raw) => {
     const id = Number(raw);
@@ -407,6 +485,10 @@ const resolveCategoryId = async (eventId, raw) => {
     });
     return row ? row.id : null;
 };
+
+/** As [resolveCategoryId], but nothing chosen = the default Gallery. */
+const categoryIdOrDefault = async (eventId, raw) =>
+    (await resolveCategoryId(eventId, raw)) || (await ensureDefaultCategory(eventId)).id;
 
 /**
  * Store one file, but only if all three limits allow it.
@@ -484,7 +566,7 @@ const uploadItem = async (clientId, eventId, file, body = {}) => {
         // The stored size, not the incoming one: images are compressed on the
         // way in, and charging for the pre-compression bytes would be wrong.
         size_bytes: Number(stored.size || size),
-        category_id: await resolveCategoryId(event.id, body.category_id),
+        category_id: await categoryIdOrDefault(event.id, body.category_id),
         caption: typeof body.caption === 'string' ? body.caption.slice(0, 300) : null,
         sort_order: Number.isFinite(Number(last)) ? Number(last) + 1 : 0,
         uploaded_by: clientId,
@@ -542,7 +624,7 @@ const updateItem = async (clientId, itemId, body = {}) => {
             if (!categoryId) throw ApiError.notFound('That category was not found.');
             item.category_id = categoryId;
         } else {
-            item.category_id = null;
+            item.category_id = (await ensureDefaultCategory(item.event_id)).id;
         }
     }
     await item.save();

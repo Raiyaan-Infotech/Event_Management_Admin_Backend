@@ -19,6 +19,12 @@ module.exports = (sequelize) => {
         icon: { type: DataTypes.STRING(100), allowNull: true },
         sort_order: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
         company_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+        /**
+         * TRUE for the event's one built-in "Gallery" category, NULL for every
+         * other. NULL (not 0) so the unique (event_id, is_default) key allows
+         * many ordinary categories but only one default.
+         */
+        is_default: { type: DataTypes.BOOLEAN, allowNull: true, defaultValue: null },
     }, {
         tableName: 'event_gallery_categories',
         timestamps: true,

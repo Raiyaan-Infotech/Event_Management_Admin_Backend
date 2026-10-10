@@ -1813,11 +1813,13 @@ CREATE TABLE IF NOT EXISTS `event_gallery_categories` (
   `icon` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `sort_order` int NOT NULL DEFAULT '0',
   `company_id` int unsigned DEFAULT NULL,
+  `is_default` tinyint(1) DEFAULT NULL COMMENT '1 = the built-in Gallery category; NULL for every other',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `deleted_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_gallery_cat_event` (`event_id`,`deleted_at`,`sort_order`),
+  UNIQUE KEY `uq_gallery_cat_default` (`event_id`,`is_default`),
   CONSTRAINT `fk_gallery_cat_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
