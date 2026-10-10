@@ -191,3 +191,5 @@ local-*.json
 # Seeder artwork (frames, sample photographs) — large binaries, kept on disk
 # for the seeders that upload them, not in the repository.
 src/database/seeders/assets/
+
+scratch/

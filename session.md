@@ -15519,3 +15519,77 @@ Jamal: line 840 backgorund color field move below that choose frame and choose f
   - Followed by the toggles (`Show Title`, `Show Date`, `Show Decoration`) and the `Primary Color (Title)` chooser.
 - **Validation**:
   - `flutter analyze lib/features/organizer/splash/splash_editor_flow.dart`: No issues found! (0 errors, 0 warnings, ran in 3.8s).
+
+### 745. Mobile App — Splash Screen: Frame-to-Background Color Dynamic Mapping (2026-10-09)
+Jamal: bg color for that frame we map that so based on fram choose bg color based change that do that functionality now / look this page have that data.
+- **Frontend-Only Implementation** (`lib/features/organizer/splash/splash_editor_flow.dart`):
+  - Kept 100% self-contained inside `splash_editor_flow.dart` without backend modifications.
+  - Added `_mappedBgForFrame(SplashDecorationItem item)` directly in the state widget:
+    - Automatically maps each template frame (Midnight Wine, Dutch Bloom, Blush Veil, Morning Mist, Couple Portrait, Aubergine, Sindoor, Maroon & Gold, Royal Plum, Elegant Portrait, Ivory Poppy, Traditional Portrait, Royal Navy, Crimson Damask, Night Garden, Paper White, Royal Portrait, Chintz Garden) to its default background color.
+  - In `_chooseDecorationSection`:
+    - Changed title label to **Choose Frame**.
+    - When a frame tile is tapped, it immediately sets `_selectedDecoration`, enables `_showDecoration = true`, and auto-switches `_bgColor` to that frame's mapped default background color.
+  - In the **Background Color** row (positioned directly below Choose Frame):
+    - Added matching theme background presets (Pure White, Warm Ivory, Champagne, Soft Blush, Midnight Wine, Royal Navy, Crimson Damask, Maroon, Royal Plum, Vintage Wood, Night Garden, Dark Velvet).
+    - Selecting any background color swatch or custom color picker dynamically updates `_bgColor` while preserving the selected frame overlay.
+- **Validation**:
+  - `flutter analyze lib/features/organizer/splash/splash_editor_flow.dart`: No issues found! (0 errors, 0 warnings, ran in 3.6s).
+
+- **Follow-up Correction (Jamal alignment)**:
+  - Removed `Opacity(opacity: 0.25)` on the cover image in `_phonePreview`: the photo now renders at 100% full opacity, crisp and clear, exactly matching the user mockup.
+  - The frame's own default background color is applied on frame selection.
+  - Selecting any background color from the Background Color swatches/picker below properly overrides that frame's background color without washing out the photo.
+  - `flutter analyze lib/features/organizer/splash/splash_editor_flow.dart`: No issues found! (0 errors, 0 warnings, ran in 3.5s).
+
+- **Final Background & Photo Display Fix**:
+  - Mapped all active decorations & frames from Admin Portal (IDs 4–21 and 94–125) in `_mappedBgForFrame` to distinct background colors (Pink Floral -> Soft Blush, Green Leaves -> Sage Mint, Purple Watercolor -> Royal Plum, Marigold Toran -> Sindoor Red, Gold Scroll -> Midnight Wine, Paisley -> Royal Navy, Mandala -> Vintage Wood, Classic Laurel -> Dutch Charcoal, etc.).
+  - Added `Use Event Photo` toggle: when off, the card displays the background color cleanly under the frame; when on, it shows the event cover photo.
+  - Verified with `flutter analyze lib/features/organizer/splash/splash_editor_flow.dart`: No issues found! (0 errors, 0 warnings).
+
+### 746. Mobile App — Splash Screen: Removed Background Color Chooser (2026-10-10)
+Jamal: remove that decoration bg color chooser now we dont need anymore okay.
+- **Removed from UI** (`lib/features/organizer/splash/splash_editor_flow.dart`):
+  - Removed `bgPresets` and the `_colorSwatchRow` for Background Color below "Choose Frame".
+  - The UI now matches the mockup directly:
+    1. Top Phone Card Preview
+    2. "Choose Frame" Carousel
+    3. Toggles (Use Event Photo, Show Title, Show Date, Show Decoration)
+    4. Primary Color Chooser (Title / Accents)
+    5. Action Buttons (Back & Next)
+  - Frames continue to use their mapped default theme backgrounds internally.
+- **Validation**:
+  - `flutter analyze lib/features/organizer/splash/splash_editor_flow.dart`: No issues found! (0 errors, 0 warnings, ran in 66.8s).
+
+### 747. Mobile App — Invitation Card: Highlighted Contact Us Border Box Across All Templates (2026-10-10)
+Jamal: show organizer section show with border like higlight thing that is main in invitaiton okay so do that example data Contact Us (Hardcode Text) - Jamal (name) ,988699435- mobile number oakty do that organizer show with border box inside looks perfect.
+- **Component & Ordering Alignment**:
+  - Aligned with the 7 components offered in both the Admin Portal and Mobile App (`Show Organizer & Contact`).
+  - Added `'organizer'` and `'contact_details'` to `kDefaultOnComponents` in `lib/features/common/event/event_data.dart`: ensures the contact section is enabled by default across all templates (so older templates with 0 in their seeds still display it unless explicitly turned off by the host in Card Settings).
+- **Highlighted Contact Us Border Box** (`lib/features/common/event/invite/invitation_card.dart`):
+  - Created `_contactBox` helper in `InvitationCard`:
+    - Clean border container with subtle background tint (`accent.withValues(alpha: 0.08)`), rounded corners (`AppRadius.md`), prominent accent border (`accent.withValues(alpha: 0.5)`, 1.5px), and delicate shadow elevation.
+    - Header: `Contact Us` in uppercase/small-caps with `accent` color and 1.2 letter spacing.
+    - Organizer Name: e.g. `Jamal` (from `event.organizer`, preview fallback: `Jamal`) in `ink` color and semi-bold typography.
+    - Phone Number: e.g. `988699435` (from `event.contactPhone`, preview fallback: `988699435`) in soft ink color.
+  - Placed under both `organizer` and `contact_details` cases with deduplication so it renders exactly once in the card's order.
+- **Validation**:
+  - `flutter analyze lib/features/common/event/invite/invitation_card.dart lib/features/common/event/event_data.dart lib/features/organizer/create/create_event_screen.dart`: No issues found! (0 errors, 0 warnings).
+
+### 748. Admin Panel — Invitation Template Preview: Highlighted Contact Us Border Box Alignment (2026-10-10)
+Jamal: what about admin panel how it shows ? intitially that admin know how it show or not and how it looks that define that section you did not do that ?
+- **Admin Panel Investigation** (`Event_Management_Admin_Frontend`):
+  - In `template-preview.tsx`, the template preview blocks for `organizer` and `contact_details` were previously rendering as plain unstyled text lines (`{SAMPLE.organizer}` and `{SAMPLE.contact}`), missing the highlighted Contact Us border box designed in the mobile app.
+  - In Step 3 (Content & Components) of the Template Wizard (`template-wizard-content.tsx`), the switch for "Organizer & Contact" had no explanatory hint, so admins had no clear indication of what the section contains or how it renders.
+- **Implementation & Alignment**:
+  - In `src/app/admin/templates/_components/template-preview.tsx`:
+    - Updated `SAMPLE.organizer` to `'Jamal'` and `SAMPLE.contact` to `'988699435'` per requested example data.
+    - Updated `blocks.organizer` and `blocks.contact_details` to render the highlighted **Contact Us** border box:
+      - Container: rounded-lg (`minWidth: 150px`), background tint with `rgba(accent, 0.08)`, border `1.5px solid rgba(accent, 0.45)`, soft shadow.
+      - Header: `Contact Us` in `accentInk` (uppercase, bold, tracking-widest).
+      - Organizer Name: `Jamal` in readable `ink` (font-semibold).
+      - Phone Number: `988699435` in `ink` with 80% opacity.
+    - Updated `on()` and `visible` rendering: deduplicates so that when both `organizer` and `contact_details` are on (which is the default when the switch is active), only one unified Contact Us box is rendered without duplicate spacers.
+  - In `src/app/admin/templates/create/_components/template-wizard-content.tsx`:
+    - Added helper subtitle under Step 3's "Organizer & Contact" switch: *"Highlighted Contact Us box with organizer name & phone"*.
+- **Validation**:
+  - Live preview in Admin Panel Template Wizard, Template Edit, and Template Details page (`/admin/templates/[id]`) now identically mirrors the Mobile App design.
