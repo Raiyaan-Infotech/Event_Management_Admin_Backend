@@ -290,6 +290,26 @@ router.get('/events/:id', eventController.getById);
 router.put('/events/:id', eventController.update);
 router.delete('/events/:id', eventController.remove);
 
+// Organizer Contact photo: images only, 4MB — the avatar filter. A literal path,
+// so it cannot be read as an event id.
+router.post(
+    '/events/organizer-photo',
+    (req, res, next) => {
+        avatarUpload.single('file')(req, res, (err) => {
+            if (err) {
+                return res.status(400).json({
+                    success: false,
+                    message: err.code === 'LIMIT_FILE_SIZE'
+                        ? 'That image is larger than 4MB.'
+                        : err.message || 'That image could not be uploaded.',
+                });
+            }
+            next();
+        });
+    },
+    organizerContactController.uploadPhoto,
+);
+
 // Organizer Contact — GET and PUT scoped to the caller's event.
 // Declared AFTER /events/:id DELETE to respect Express ordering.
 router.get('/events/:id/organizer-contact', organizerContactController.getContact);

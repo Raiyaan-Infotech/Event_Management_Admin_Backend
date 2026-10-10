@@ -2,6 +2,7 @@
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const { Event } = require('../models');
+const mediaService = require('../services/media.service');
 
 /**
  * Organizer Contact - the contact card shown in the mobile app's
@@ -155,4 +156,24 @@ const updateContact = asyncHandler(async (req, res) => {
     );
 });
 
-module.exports = { getContact, updateContact };
+/**
+ * POST /events/organizer-photo
+ * Stores a contact photo (images only, 4MB — filtered by the route) and returns
+ * its URL, which the app then sends as `photo` on the PUT above.
+ *
+ * Its own endpoint and its own folder, so contact photos are not mixed in with
+ * event cover images.
+ */
+const uploadPhoto = asyncHandler(async (req, res) => {
+    const file = req.file;
+    if (!file || !file.buffer) throw ApiError.badRequest('Please choose an image to upload.');
+    const stored = await mediaService.upload(
+        file,
+        { folder: `organizer-contacts/${req.websiteClient.id}` },
+        req.websiteClient.company_id || 1,
+    );
+    if (!stored || !stored.url) throw ApiError.badRequest('That image could not be stored.');
+    return ApiResponse.success(res, { url: stored.url }, 'Photo uploaded');
+});
+
+module.exports = { getContact, updateContact, uploadPhoto };
