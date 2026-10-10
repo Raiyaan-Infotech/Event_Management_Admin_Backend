@@ -336,7 +336,6 @@ const getDecorationsAndFrames = async (companyId = null) => {
 
 module.exports = {
     BACKGROUND_TYPES,
-    BUTTON_STYLES,
     listSplashScreens,
     getSplashScreenById,
     getActiveSplashForEvent, getDecorationsAndFrames,
