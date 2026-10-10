@@ -74,37 +74,19 @@ module.exports = (sequelize) => {
             defaultValue: 'image',
         },
         background_url: { type: DataTypes.STRING(500), allowNull: true },
-        /** Video background only — shown before/if the video cannot play. */
-        fallback_image_url: { type: DataTypes.STRING(500), allowNull: true },
         background_config: { type: DataTypes.JSON, allowNull: true },
-
-        sound_enabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
-        sound_url: { type: DataTypes.STRING(500), allowNull: true },
-        sound_config: { type: DataTypes.JSON, allowNull: true },
 
         loader_enabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
         loader_config: { type: DataTypes.JSON, allowNull: true },
 
-        /** ⚠ Saved, not delivered — see the model header. */
-        animation_enabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
-        animation_config: { type: DataTypes.JSON, allowNull: true },
-
-        button_text: { type: DataTypes.STRING(25), allowNull: false, defaultValue: 'Enter Invitation' },
-        button_style: {
-            type: DataTypes.ENUM('filled', 'outline', 'text'),
-            allowNull: false,
-            defaultValue: 'filled',
-        },
-        button_color: { type: DataTypes.STRING(9), allowNull: true },
-
+        theme_id: { type: DataTypes.STRING(50), allowNull: true },
         primary_color: { type: DataTypes.STRING(9), allowNull: true },
+        secondary_color: { type: DataTypes.STRING(9), allowNull: true },
         bg_color: { type: DataTypes.STRING(9), allowNull: true },
         decoration_url: { type: DataTypes.STRING(500), allowNull: true },
         show_decoration: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
-
-        show_couple_name: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
-        show_event_date: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
-        show_tagline: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+        components: { type: DataTypes.JSON, allowNull: true },
+        component_order: { type: DataTypes.JSON, allowNull: true },
 
         /** Save as Draft vs Save & Continue. */
         status: {

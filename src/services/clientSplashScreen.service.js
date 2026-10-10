@@ -22,7 +22,6 @@ const ApiError = require('../utils/apiError');
  */
 
 const BACKGROUND_TYPES = ['image', 'video', 'solid_color', 'gradient', 'logo', 'couple_photo'];
-const BUTTON_STYLES = ['filled', 'outline', 'text'];
 const STATUSES = ['draft', 'active'];
 const HEX = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 
@@ -125,41 +124,34 @@ const normalise = async (clientId, body, { partial = false, existing = null } = 
         data.background_type = type;
     }
     if (has('background_url')) data.background_url = str(body.background_url, 500);
-    if (has('fallback_image_url')) data.fallback_image_url = str(body.fallback_image_url, 500);
     if (has('background_config')) data.background_config = asConfig(body.background_config);
-
-    if (has('sound_enabled')) data.sound_enabled = !!body.sound_enabled;
-    if (has('sound_url')) data.sound_url = str(body.sound_url, 500);
-    if (has('sound_config')) data.sound_config = asConfig(body.sound_config);
 
     if (has('loader_enabled')) data.loader_enabled = !!body.loader_enabled;
     if (has('loader_config')) data.loader_config = asConfig(body.loader_config);
 
-    // ⚠ Saved, not delivered — see the model header. Accepted here exactly
-    // like any other field; the "not delivered yet" honesty lives in the API
-    // response and the UI, not in a refusal to store the choice.
-    if (has('animation_enabled')) data.animation_enabled = !!body.animation_enabled;
-    if (has('animation_config')) data.animation_config = asConfig(body.animation_config);
-
-    if (has('button_text')) {
-        const buttonText = str(body.button_text, 25);
-        if (!buttonText) throw ApiError.badRequest('Please enter button text.');
-        data.button_text = buttonText;
+    if (has('theme_id')) data.theme_id = str(body.theme_id, 50);
+    if (has('primary_color')) {
+        const color = str(body.primary_color, 9);
+        if (color && !HEX.test(color)) throw ApiError.badRequest('Primary colour must be a hex value like #E91E63.');
+        data.primary_color = color;
     }
-    if (has('button_style')) {
-        const style = String(body.button_style || '').toLowerCase();
-        if (!BUTTON_STYLES.includes(style)) throw ApiError.badRequest('Invalid button style.');
-        data.button_style = style;
+    if (has('secondary_color')) {
+        const color = str(body.secondary_color, 9);
+        if (color && !HEX.test(color)) throw ApiError.badRequest('Secondary colour must be a hex value like #E91E63.');
+        data.secondary_color = color;
     }
-    if (has('button_color')) {
-        const color = str(body.button_color, 9);
-        if (color && !HEX.test(color)) throw ApiError.badRequest('Button colour must be a hex value like #E91E63.');
-        data.button_color = color;
+    if (has('bg_color')) {
+        const color = str(body.bg_color, 9);
+        if (color && !HEX.test(color)) throw ApiError.badRequest('Background colour must be a hex value like #FFFFFF.');
+        data.bg_color = color;
     }
-
-    if (has('show_couple_name')) data.show_couple_name = !!body.show_couple_name;
-    if (has('show_event_date')) data.show_event_date = !!body.show_event_date;
-    if (has('show_tagline')) data.show_tagline = !!body.show_tagline;
+    if (has('decoration_url')) data.decoration_url = str(body.decoration_url, 500);
+    if (has('show_decoration')) data.show_decoration = !!body.show_decoration;
+    if (has('components')) data.components = asConfig(body.components);
+    if (has('component_order')) {
+        if (body.component_order === null) data.component_order = null;
+        else if (Array.isArray(body.component_order)) data.component_order = body.component_order;
+    }
 
     if (has('status')) {
         const status = String(body.status || '').toLowerCase();
