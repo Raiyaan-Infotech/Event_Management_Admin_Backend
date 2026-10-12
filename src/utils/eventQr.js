@@ -148,8 +148,8 @@ const decrypt = (token) => {
  * encrypted rather than a bare id, because a bare id can be guessed and tried
  * against every event.
  *
- * `ts` is when this code was issued. It matters only for Regenerate — see
- * [isRevoked].
+ * `ts` is when the code was made. It is informational only: there is no
+ * Regenerate (Jamal, 2026-10-12) — the code is made once and stays.
  */
 const buildPayload = (event, issuedAt = new Date()) => ({
     v: QR_VERSION,
@@ -180,31 +180,9 @@ const issuedNow = () => new Date(Math.floor(Date.now() / 1000) * 1000);
 /** Encrypt an event straight into its token. */
 const issueToken = (event, issuedAt = issuedNow()) => encrypt(buildPayload(event, issuedAt));
 
-/**
- * `events.qr_version` for a code made under THIS scheme (stable, revocable).
- * Older events hold 1: their codes were reissued on every save and every one of
- * them keeps working until the host presses Regenerate.
- */
-const SCHEME = 2;
-
-/**
- * Whether a scanned code has been replaced by Regenerate.
- *
- * Only events on [SCHEME] can have been — their current code's issue time is
- * `qr_issued_at`, so a code stamped earlier than that is an old one. An event
- * still on version 1 has never been regenerated, so nothing about it is revoked.
- */
-const isRevoked = (event, payload) => {
-    if (Number(event.qr_version) < SCHEME || !event.qr_issued_at) return false;
-    const current = Math.floor(new Date(event.qr_issued_at).getTime() / 1000);
-    return !Number.isFinite(payload.ts) || payload.ts < current;
-};
-
 module.exports = {
     QR_VERSION,
-    SCHEME,
     issuedNow,
-    isRevoked,
     encrypt,
     decrypt,
     buildPayload,

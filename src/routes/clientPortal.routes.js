@@ -286,8 +286,6 @@ router.delete('/events/:id/wishlist', eventController.removeFromWishlist);
 router.get('/events', eventController.list);
 router.post('/events', eventController.create);
 router.get('/events/:id', eventController.getById);
-// Replace the event's QR code (the old one stops working). Owner only.
-router.post('/events/:id/qr/regenerate', eventController.regenerateQr);
 router.put('/events/:id', eventController.update);
 router.delete('/events/:id', eventController.remove);
 

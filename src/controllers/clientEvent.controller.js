@@ -175,15 +175,5 @@ const removeFromWishlist = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, data, 'Removed from wishlist');
 });
 
-/**
- * Regenerate the event's QR code. Owner only. The old code stops working — see
- * clientEvent.service.regenerateQr — so the portal asks for confirmation first.
- */
-const regenerateQr = asyncHandler(async (req, res) => {
-    const event = await clientEventService.regenerateQr(req.websiteClient.id, req.params.id);
-    if (!event) throw ApiError.notFound('Event not found.');
-    return ApiResponse.success(res, { event }, 'QR code regenerated. The old code no longer works.');
-});
-
-module.exports = { list, stats, analytics, getById, create, update, remove, decodeQr, regenerateQr, uploadCover, uploadInvitationImage,
+module.exports = { list, stats, analytics, getById, create, update, remove, decodeQr, uploadCover, uploadInvitationImage,
     wishlist, addToWishlist, removeFromWishlist };

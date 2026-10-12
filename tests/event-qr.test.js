@@ -1,12 +1,12 @@
 /*
- * The event QR — bound to the event id, stable, and replaceable.
+ * The event QR — bound to the encrypted event id, made once, read live.
  *
  * ── WHAT THIS FILE IS GUARDING ──────────────────────────────────────────────
  *   · the code carries the event id and nothing else, and is short
  *   · editing the event does NOT change the code
- *   · an event on the old scheme (version 1) keeps every old code working
- *   · Regenerate gives a new code and kills the old one; only the owner can
- *   · a scan reads the LIVE event
+ *   · a scan (what the app's scan page calls) reads the LIVE event
+ *   · an old, longer code from before this change still works
+ *   · a tampered or foreign code is refused
  *
  * Works on one real local event and puts its QR columns and tagline back.
  *   node tests/event-qr.test.js
@@ -24,7 +24,7 @@ const ok = (label, cond, extra = '') => {
 const refused = async (fn) => { try { await fn(); return null; } catch (e) { return e.message; } };
 
 (async () => {
-    const event = await Event.findOne({ attributes: ['id', 'website_client_id', 'tagline', 'qr_token', 'qr_version', 'qr_issued_at'] });
+    const event = await Event.findOne({ attributes: ['id', 'name', 'website_client_id', 'tagline', 'qr_token', 'qr_version', 'qr_issued_at'] });
     if (!event) { console.log('SKIP  no event on this database'); process.exit(0); }
     const id = event.id;
     const owner = event.website_client_id;
@@ -34,45 +34,46 @@ const refused = async (fn) => { try { await fn(); return null; } catch (e) { ret
 
     try {
         // ── The code itself ───────────────────────────────────────────────
-        const sample = eventQr.issueToken({ id });
-        const payload = eventQr.decrypt(sample);
+        const code = eventQr.issueToken({ id });
+        const payload = eventQr.decrypt(code);
         ok('the code carries the event id', payload.eid === id);
         ok('and nothing about the event', Object.keys(payload).sort().join() === 'eid,ts,v', JSON.stringify(payload));
-        ok('so it is short', sample.length < 120, `${sample.length} chars`);
+        ok('so it is short', code.length < 120, `${code.length} chars`);
+        ok('and is not a bare id', !/^\d+$/.test(code) && code.startsWith('EVQ'));
 
-        // ── An older event: every old code keeps working ──────────────────
-        const past = new Date(Date.now() - 3 * 24 * 3600 * 1000);
-        const legacy = eventQr.issueToken({ id }, past);
-        await Event.update({ qr_token: legacy, qr_version: 1, qr_issued_at: new Date() }, { where: { id } });
-        ok('an old-scheme event still accepts an old code', (await registration.eventFromToken(legacy)).id === id);
+        await Event.update({ qr_token: code, qr_version: eventQr.QR_VERSION, qr_issued_at: eventQr.issuedNow() }, { where: { id } });
+
+        // ── The scan page's call: resolve reads the LIVE event ────────────
+        const first = await registration.resolveInvite(code);
+        ok('a scan resolves to the event', first.event && first.event.id === id);
+        await Event.update({ tagline: 'Live tagline one' }, { where: { id } });
+        const afterEdit = await registration.resolveInvite(code);
+        ok('and shows the current details, not a snapshot', afterEdit.event.tagline === 'Live tagline one',
+            String(afterEdit.event.tagline));
 
         // ── Editing does not change the code ──────────────────────────────
-        const before = (await Event.findByPk(id)).qr_token;
-        await eventService.updateEvent(owner, id, { tagline: 'QR test tagline' });
-        const after = (await Event.findByPk(id)).qr_token;
-        ok('editing the event leaves the QR code alone', before === after);
+        await eventService.updateEvent(owner, id, { tagline: 'Live tagline two' });
+        ok('editing the event leaves the QR code alone', (await Event.findByPk(id)).qr_token === code);
+        ok('the same code still resolves after an edit', (await registration.resolveInvite(code)).event.tagline === 'Live tagline two');
 
-        // ── Regenerate ────────────────────────────────────────────────────
-        ok('a stranger cannot regenerate', (await eventService.regenerateQr(999999999, id)) === null);
-        const regenerated = await eventService.regenerateQr(owner, id);
-        const fresh = regenerated.qr_token;
-        ok('regenerate gives a different code', fresh !== legacy && fresh !== before);
-        ok('the event moves to the stable scheme', Number((await Event.findByPk(id)).qr_version) === eventQr.SCHEME);
-        ok('the new code admits', (await registration.eventFromToken(fresh)).id === id);
-        const oldMsg = await refused(() => registration.eventFromToken(legacy));
-        ok('the OLD code no longer admits', !!oldMsg && /no longer valid/i.test(oldMsg), String(oldMsg));
-        ok('the host decode refuses the old code too', (await eventService.resolveQrToken(legacy)) === null);
-        const decoded = await eventService.resolveQrToken(fresh);
+        // ── An older, longer code still works ─────────────────────────────
+        const old = eventQr.encrypt({
+            v: 1, eid: id, cid: 1, vid: null, clid: owner, pid: 1, cat: 1, nm: 'Old snapshot name',
+            sd: '2026-01-01', ed: '2026-01-02', st: '10:00', et: '12:00', ts: 1700000000,
+        });
+        ok('a code made before this change still admits', (await registration.eventFromToken(old)).id === id);
+        ok('and still shows the live event, not its old snapshot',
+            (await registration.resolveInvite(old)).event.tagline === 'Live tagline two');
+
+        // ── The host decode reads the live event too ──────────────────────
+        const decoded = await eventService.resolveQrToken(code);
         ok('the host decode reads the live event', decoded && decoded.event && decoded.event.id === id);
 
-        // ── After regenerating, edits still leave it alone ────────────────
-        await eventService.updateEvent(owner, id, { tagline: 'Another change' });
-        ok('an edit after regenerating keeps the new code', (await Event.findByPk(id)).qr_token === fresh);
-        ok('and the new code still admits', (await registration.eventFromToken(fresh)).id === id);
-
-        // ── A scan reads the live event ───────────────────────────────────
-        ok('a scan sees the current tagline', (await registration.eventFromToken(fresh)).tagline === 'Another change');
-        ok('a tampered code is refused', !!(await refused(() => registration.eventFromToken(`${fresh.slice(0, -2)}xx`))));
+        // ── Bad codes ─────────────────────────────────────────────────────
+        ok('a tampered code is refused', !!(await refused(() => registration.eventFromToken(`${code.slice(0, -2)}xx`))));
+        ok('a plain event id is refused', !!(await refused(() => registration.eventFromToken(String(id)))));
+        ok('an unknown event id inside a valid code is refused',
+            !!(await refused(() => registration.eventFromToken(eventQr.encrypt({ v: 1, eid: 2147483000, ts: 1 })))));
     } finally {
         await Event.update(original, { where: { id } });
         await sequelize.close();

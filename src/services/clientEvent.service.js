@@ -543,12 +543,12 @@ const createEvent = async (clientId, body) => {
         );
 
         // The QR is bound to the event id and made ONCE — editing the event never
-        // changes it (only Regenerate does). See utils/eventQr.js.
+        // changes it. See utils/eventQr.js.
         const issuedAt = eventQr.issuedNow();
         await event.update(
             {
                 qr_token: eventQr.issueToken(event, issuedAt),
-                qr_version: eventQr.SCHEME,
+                qr_version: eventQr.QR_VERSION,
                 qr_issued_at: issuedAt,
             },
             { transaction }
@@ -1357,15 +1357,15 @@ const updateEvent = async (clientId, eventId, body) => {
 
     const { data } = await normalise(clientId, body, { partial: true });
 
-    // Editing does NOT reissue the QR any more: it is bound to the event id, a
-    // scan reads the live event, and a code already printed or shared must keep
-    // matching. Only an event that somehow has no code yet is given one.
+    // Editing does NOT reissue the QR: it is bound to the event id, a scan reads
+    // the live event, and a code already printed or shared must keep matching.
+    // Only an event that somehow has no code yet is given one.
     await event.update(data);
     if (!event.qr_token) {
         const issuedAt = eventQr.issuedNow();
         await event.update({
             qr_token: eventQr.issueToken(event, issuedAt),
-            qr_version: eventQr.SCHEME,
+            qr_version: eventQr.QR_VERSION,
             qr_issued_at: issuedAt,
         });
     }
@@ -1374,33 +1374,11 @@ const updateEvent = async (clientId, eventId, body) => {
 };
 
 /**
- * Regenerate the event's QR code — owner only.
- *
- * The one thing that changes a code. The new one is stamped now, and every code
- * stamped before it stops working: a leaked or wrongly shared QR can be
- * replaced. Returns the event, carrying the new `qr_token`.
- */
-const regenerateQr = async (clientId, eventId) => {
-    const event = await Event.findOne({ where: { id: eventId, website_client_id: clientId } });
-    if (!event) return null;
-
-    const issuedAt = eventQr.issuedNow();
-    await event.update({
-        qr_token: eventQr.issueToken(event, issuedAt),
-        qr_version: eventQr.SCHEME,
-        qr_issued_at: issuedAt,
-    });
-
-    return getEventById(clientId, eventId);
-};
-
-/**
  * Decrypt a scanned QR string.
  *
  * The token carries only the event id (and when it was issued); the event itself
- * is read LIVE, so a scanner always sees the current details. A code replaced by
- * Regenerate comes back null, like an unreadable one. `payload` and `event` are
- * returned side by side.
+ * is read LIVE, so a scanner always sees the current details. `payload` and
+ * `event` are returned side by side.
  */
 const resolveQrToken = async (token) => {
     const payload = eventQr.decrypt(token);
@@ -1413,9 +1391,6 @@ const resolveQrToken = async (token) => {
         where: { id: expanded.event_id },
         include: EVENT_INCLUDE,
     });
-
-    // A code replaced by Regenerate is "not valid", same as an unreadable one.
-    if (event && eventQr.isRevoked(event, payload)) return null;
 
     return { payload: expanded, event: event ? present(event) : null };
 };
@@ -1597,7 +1572,6 @@ module.exports = {
     updateEvent,
     deleteEvent,
     resolveQrToken,
-    regenerateQr,
     getWishlist,
     setWishlisted,
     readWishlistIds,
