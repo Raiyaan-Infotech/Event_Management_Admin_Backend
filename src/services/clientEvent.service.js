@@ -5,7 +5,6 @@ const {
     WebsiteClient,
     SubscriptionPlan,
     EventParticipant,
-    GuestGroup,
     EventCategory,
     EventMenu,
     EventTemplate,
@@ -640,10 +639,7 @@ const getEventForViewer = async (clientId, eventId, opts = {}) => {
         Event.findOne({ where: { id: eventId }, include: EVENT_INCLUDE }),
         EventParticipant.findOne({
             where: participantWhere,
-            // relationship / group: only to decide viewerIsFamily below — never
-            // sent to the client. See `familyCategoryOf`.
-            attributes: ['id', 'relationship'],
-            include: [{ model: GuestGroup, as: 'group', attributes: ['name'], required: false }],
+            attributes: ['id'],
         }),
     ]);
 
@@ -651,9 +647,8 @@ const getEventForViewer = async (clientId, eventId, opts = {}) => {
 
     const isOwner = Number(event.website_client_id) === Number(clientId);
     if (!isOwner && !membership) return null;
-    const viewerIsFamily = !isOwner && isFamilyCategory(membership.relationship, membership.group?.name);
 
-    const presented = await presentOne(event, { ...opts, isOwner, viewerIsFamily });
+    const presented = await presentOne(event, { ...opts, isOwner });
     if (!isOwner) {
         for (const field of HOST_ONLY_FIELDS) delete presented[field];
     }
@@ -703,59 +698,18 @@ const getEventForViewer = async (clientId, eventId, opts = {}) => {
  * should be able to toggle per menu in Menu Management.
  */
 // The host's private guest register — mobiles, emails, notes included.
-// `family` and `participants` used to be here too; both now have their own
-// guest-safe directory (familyDirectory / participantsDirectory) and their
-// own gate in the loop below, because "may see the tile" differs per slug —
-// family needs the viewer's own row to be family-tagged, participants needs
-// only that the viewer is a guest at all (reaching this function as a
-// non-owner already proves that — see getEventForViewer).
+// `participants` has its own guest-safe directory (participantsDirectory) and
+// `family` is the event's own family list (clientFamily.service) — neither
+// needs hiding from a participant, which only ever READS them. Reaching this
+// function as a non-owner already proves the viewer joined the event.
 const HOST_ONLY_MENU_SLUGS = new Set(['guests']);
-
-/**
- * The app's own three Family sub-tabs (Family / Relative / Close Friend),
- * mirrored EXACTLY from `EventParticipant.familyCategory` in
- * `lib/data/repositories/guest_repository.dart` — same keyword lists, same
- * fallback order. Kept in lock step on purpose: this is what decides whether
- * a GUEST (not the host) gets the Family tile at all (see `presentOne`), and
- * a mismatch would mean a guest sees a tile the app's own tabs then can't
- * place them in, or the reverse — a family member denied the tile.
- *
- * `relationship` is admin-authored free text ("Bride's Mother", "Best Man");
- * `groupName` is the client's own guest group name. Neither is sensitive —
- * both are already shown on the row itself.
- */
-const familyCategoryOf = (relationship, groupName) => {
-    const categoryOf = (label) => {
-        const text = String(label || '').toLowerCase();
-        if (!text) return 'other';
-        if (text.includes('friend')) return 'closeFriend';
-        if (text.includes('relative')) return 'relative';
-        if (['family', 'father', 'mother', 'brother', 'sister', 'grand', 'uncle', 'aunt', 'cousin']
-            .some((k) => text.includes(k))) return 'family';
-        return 'other';
-    };
-    const fromText = categoryOf(relationship || groupName);
-    if (fromText === 'other' && String(groupName || '').trim().toLowerCase() === 'family') {
-        return 'family';
-    }
-    return fromText;
-};
-
-const isFamilyCategory = (relationship, groupName) =>
-    familyCategoryOf(relationship, groupName) !== 'other';
 
 /**
  * `isOwner` — whether the CALLER hosts this event. Defaults to true because
  * the two owner-scoped readers (`getEventById`, the portal) cannot be anything
  * else; `getEventForViewer` and the wishlist pass the real answer.
- *
- * `viewerIsFamily` — whether a non-owner CALLER's own guest row is itself
- * tagged Family / Relative / Close Friend. Gates the `family` tile only: a
- * guest with no such tag has no more business reading who else is family than
- * reading the full guest register does (`HOST_ONLY_MENU_SLUGS`). Irrelevant
- * when `isOwner` is true.
  */
-const presentOne = async (event, { platform = 'website', isOwner = true, viewerIsFamily = false } = {}) => {
+const presentOne = async (event, { platform = 'website', isOwner = true } = {}) => {
     const presented = present(event);
 
     const grantedIds = await clientPortalService.ownerGrantedMenuIds(presented.website_client_id);
@@ -813,10 +767,7 @@ const presentOne = async (event, { platform = 'website', isOwner = true, viewerI
             // See HOST_ONLY_MENU_SLUGS: this opens the host's guest register,
             // which answers a participant with an empty list.
             if (HOST_ONLY_MENU_SLUGS.has(row.slug)) continue;
-            // Family opens a directory of OTHER family members, which only
-            // makes sense to somebody who is one.
-            if (row.slug === 'family' && !viewerIsFamily) continue;
-            // `participants` needs no extra check: reaching this function as a
+            // `family` and `participants` need no extra check: reaching this function as a
             // non-owner already proves the viewer joined the event.
         }
         // `is_default` goes out as a boolean: the organizer's event page files
@@ -1535,10 +1486,7 @@ const getWishlist = async (clientId, { platform = 'website' } = {}) => {
         Event.findAll({ where: { id: { [Op.in]: ids } }, include: EVENT_INCLUDE }),
         EventParticipant.findAll({
             where: { event_id: { [Op.in]: ids }, participant_client_id: clientId },
-            // relationship / group: only to decide viewerIsFamily below, same
-            // as getEventForViewer — see `familyCategoryOf`.
-            attributes: ['event_id', 'relationship'],
-            include: [{ model: GuestGroup, as: 'group', attributes: ['name'], required: false }],
+            attributes: ['event_id'],
         }),
     ]);
 
@@ -1557,10 +1505,7 @@ const getWishlist = async (clientId, { platform = 'website' } = {}) => {
 
     return Promise.all(visible.map(async (event) => {
         const isOwner = Number(event.website_client_id) === Number(clientId);
-        const membership = membershipByEvent.get(Number(event.id));
-        const viewerIsFamily = !isOwner && !!membership
-            && isFamilyCategory(membership.relationship, membership.group?.name);
-        const presented = await presentOne(event, { platform, isOwner, viewerIsFamily });
+        const presented = await presentOne(event, { platform, isOwner });
         if (!isOwner) {
             for (const field of HOST_ONLY_FIELDS) delete presented[field];
         }
@@ -1617,7 +1562,6 @@ module.exports = {
     uploadCoverImage,
     uploadInvitationImage,
     deriveStatus,
-    isFamilyCategory,
     createEvent,
     getEventById,
     getEventForViewer,

@@ -92,15 +92,6 @@ const submitMyRsvp = asyncHandler(async (req, res) => {
 });
 
 /**
- * The event's family directory — name, photo, relationship only. Open to the
- * host and to guests who are themselves family-tagged; see the service.
- */
-const familyDirectory = asyncHandler(async (req, res) => {
-    const members = await service.familyDirectory(req.websiteClient.id, req.params.id);
-    return ApiResponse.success(res, members, 'Family retrieved');
-});
-
-/**
  * The event's participants directory — name, photo, relationship, RSVP
  * status. Open to the host and to any guest who joined; see the service.
  */
@@ -111,5 +102,5 @@ const participantsDirectory = asyncHandler(async (req, res) => {
 
 module.exports = {
     resolve, requestOtp, verifyOtp, join, myEvents, myRsvp, submitMyRsvp,
-    familyDirectory, participantsDirectory,
+    participantsDirectory,
 };

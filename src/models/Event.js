@@ -181,6 +181,13 @@ module.exports = (sequelize) => {
              * Added by apply-participant-settings.js.
              */
             participant_settings: { type: DataTypes.JSON, allowNull: true },
+
+            /**
+             * The organizer's family-list settings (the app's Family list → settings
+             * icon): profile_screen, profile_photo, name, relationship. NULL = the
+             * defaults (all on). Added by apply-event-family-members.js.
+             */
+            family_settings: { type: DataTypes.JSON, allowNull: true },
         },
         {
             tableName: 'events',

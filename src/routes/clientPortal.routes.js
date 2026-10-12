@@ -17,6 +17,7 @@ const splashController = require('../controllers/clientSplashScreen.controller')
 const galleryController = require('../controllers/clientGallery.controller');
 const galleryService = require('../services/clientGallery.service');
 const agendaController = require('../controllers/clientAgenda.controller');
+const familyController = require('../controllers/clientFamily.controller');
 const organizerContactController = require('../controllers/clientOrganizerContact.controller');
 const agendaService = require('../services/clientAgenda.service');
 const guestRegistrationController = require('../controllers/guestRegistration.controller');
@@ -264,11 +265,9 @@ router.put('/events/:id/rsvp-settings', rsvpController.updateSettings);
 router.get('/events/:id/participant-settings', participantSettingsController.getSettings);
 router.put('/events/:id/participant-settings', participantSettingsController.updateSettings);
 router.post('/events/:id/my-rsvp', guestRegistrationController.submitMyRsvp);
-// The family directory — a guest-safe read beside my-rsvp, NOT /guests (that is
-// the host's register, scoped to the host's account). See familyDirectory.
-router.get('/events/:id/family', guestRegistrationController.familyDirectory);
-// Same shape as /family, wider audience — any guest who joined, not only a
-// family-tagged one. See participantsDirectory.
+// The participants directory — a guest-safe read beside my-rsvp, NOT /guests
+// (that is the host's register, scoped to the host's account). Any guest who
+// joined. See participantsDirectory. (The Family list is /family-members.)
 router.get('/events/:id/participants', guestRegistrationController.participantsDirectory);
 
 /*
@@ -669,6 +668,23 @@ router.get('/agenda/:itemId', agendaController.getOne);
 router.put('/agenda/:itemId', agendaController.update);
 router.post('/agenda/:itemId/duplicate', agendaController.duplicate);
 router.delete('/agenda/:itemId', agendaController.remove);
+
+/**
+ * Event family list (the app's Edit Event → Family). Reads are open to the host
+ * and the event's participants (view-only, trimmed by the host's family
+ * settings); every write is host-only (enforced in the service). A family member
+ * is a display record — no login, not a guest. "Show in Event App" is the
+ * Family MENU in the event's `menu_ids`, like Agenda. Photos go through the
+ * existing /guests/photo upload.
+ */
+router.get('/events/:id/family-members', familyController.list);
+router.post('/events/:id/family-members', familyController.create);
+router.put('/events/:id/family-members/reorder', familyController.reorder);
+router.get('/events/:id/family-settings', familyController.getSettings);
+router.put('/events/:id/family-settings', familyController.updateSettings);
+router.get('/family-members/:memberId', familyController.getOne);
+router.put('/family-members/:memberId', familyController.update);
+router.delete('/family-members/:memberId', familyController.remove);
 
 // The app's read: the ACTIVE splash for one event, or null. Declared BEFORE
 // `/splash-screens/:id` — the same ordering trap as `/events/stats`, since

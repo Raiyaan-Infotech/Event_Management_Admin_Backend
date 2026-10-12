@@ -1440,6 +1440,32 @@ CREATE TABLE IF NOT EXISTS `event_agenda_items` (
   CONSTRAINT `fk_event_agenda_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Table structure for `event_family_members` — an event's family list (organizer-typed, participants view only; no login, not a guest)
+CREATE TABLE IF NOT EXISTS `event_family_members` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `event_id` int unsigned NOT NULL,
+  `website_client_id` int unsigned NOT NULL COMMENT 'the event owner',
+  `company_id` int unsigned DEFAULT NULL,
+  `title` varchar(30) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `name` varchar(150) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `photo` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `date_of_birth` date DEFAULT NULL,
+  `side` enum('groom','bride') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `relationship` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `relationship_option_id` int unsigned DEFAULT NULL,
+  `dial_code` varchar(8) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `mobile` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `email` varchar(150) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `notes` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `sort_order` int NOT NULL DEFAULT '0',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_family_event` (`event_id`,`sort_order`),
+  KEY `idx_family_client` (`website_client_id`),
+  CONSTRAINT `fk_event_family_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Table structure for `guests` — the client phone book (§581)
 CREATE TABLE IF NOT EXISTS `guests` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
@@ -1920,6 +1946,8 @@ CREATE TABLE IF NOT EXISTS `events` (
   `qr_issued_at` datetime DEFAULT NULL,
   `qr_style` tinyint unsigned NOT NULL DEFAULT '0' COMMENT 'How the invitation draws the QR: 0 classic, 1 rounded, 2 heart',
   `rsvp_settings` json DEFAULT NULL COMMENT 'The organizer''s RSVP form settings; NULL = the defaults. See apply-rsvp-settings.js',
+  `participant_settings` json DEFAULT NULL COMMENT 'The organizer participant settings; NULL = the defaults. See apply-participant-settings.js',
+  `family_settings` json DEFAULT NULL COMMENT 'The organizer family-list settings; NULL = the defaults. See apply-event-family-members.js',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `deleted_at` datetime DEFAULT NULL,
