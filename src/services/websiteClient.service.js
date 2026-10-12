@@ -259,13 +259,19 @@ const login = async (data = {}, vendorId = DEFAULT_VENDOR_ID) => {
     // Deliberately AFTER the password check: reversing them would let anyone
     // test whether a mobile number belongs to a given account without knowing
     // the password.
+    // Compared on the LAST 10 DIGITS: the stored number is the national number
+    // (7010051951) and people type it with the country code too (+91 70100 51951,
+    // 917010051951). Whole-string equality refused those with 'does not match'
+    // although it was their own number. Numbers shorter than 10 digits are
+    // compared whole.
+    const nationalDigits = (value) => digitsOnly(value).slice(-10);
     const suppliedMobile = digitsOnly(data.mobile);
     if (suppliedMobile) {
-        const storedMobile = digitsOnly(client.mobile);
+        const storedMobile = nationalDigits(client.mobile);
         if (!storedMobile) {
             throw ApiError.unauthorized('This account has no mobile number on file.');
         }
-        if (storedMobile !== suppliedMobile) {
+        if (storedMobile !== nationalDigits(suppliedMobile)) {
             throw ApiError.unauthorized('That mobile number does not match this account.');
         }
     }
