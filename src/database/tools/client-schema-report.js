@@ -47,7 +47,6 @@ const EXPECTED = {
         ['event_id', 'per-event guest list and counts'],
         ['rsvp_status', 'the five status tabs'],
         ['invite_source', 'the Imported tab'],
-        ['group_id', 'group member counts'],
         ['responded_at', 'the RSVP trend time series'],
     ],
     event_message_campaigns: [

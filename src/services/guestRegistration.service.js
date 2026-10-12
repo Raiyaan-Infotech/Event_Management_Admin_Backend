@@ -167,6 +167,11 @@ const eventFromToken = async (token) => {
     });
     if (!event) throw ApiError.notFound('That event no longer exists.');
 
+    // The host replaced this code with Regenerate — an old one no longer admits anyone.
+    if (eventQr.isRevoked(event, payload)) {
+        throw ApiError.badRequest('This QR code is no longer valid. Please ask the host for the new one.');
+    }
+
     return event;
 };
 

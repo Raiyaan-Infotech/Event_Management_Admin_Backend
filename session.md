@@ -15749,3 +15749,21 @@ Jamal: remove the participant's group column fully; a participant is placed by G
 - **Portal:** RSVP Group Details pages deleted; "View group", the edit form's Group select, the Group on the RSVP detail and the Group column of the guest profile's linked events removed; hooks cleaned. `tsc` clean (the only error is the dev server's generated `.next` types, which refresh on their own); eslint's one remaining error is the old `set-state-in-effect`.
 - **App:** participant rows, details and the result / action sheets show Side (Groom / Bride) instead of a group; Add / Edit Participant no longer send a group. `dart analyze` clean, `flutter test` 38/38. Not seen on a phone.
 - **Not committed** (backend, portal, app).
+
+### 763. Bug sweep after §762 + the portal's missing event settings (2026-10-12)
+- **Fixed — portal splash left out `event_photos` and `decoration_elements`** in `components`; the app uses a saved map as it stands, so a portal-made splash showed without them. The form now carries all 11 sections (6 switches + the invitation's own photos / decoration; QR, Organizer, Contact forced off).
+- **Fixed — `client-schema-report.js`** still expected an index on the dropped `event_participants.group_id`.
+- **Portal wizard (Design step) now has Secondary Colour (swatches, picker, "Follow template") and QR Code Style (Classic / Rounded / Heart)** — the two the app already set. Saved as `secondary_color` / `qr_style`; the step-5 and review previews draw them; picking a new template resets the secondary to the template's own (as the app does). `tsc` + eslint clean.
+- **Not needed — `disabled_app_menu_ids`:** the backend retired it ("cleared on every menu save"), so the portal has nothing to set.
+- **Checked OK:** add → participants list → RSVP list → edit keeps side and relation; Guest Group detail, guest profile and participants directory run after the column drop; group-message audience works through `guests.group_id`.
+- **Open:** Organizer Contact still writes the event's `venue_address` / `description` (§754) — needs its own columns, Jamal to decide. Each event save reissues the QR token (old codes still scan). Old app builds lose the Family list until the new build ships.
+- **Not committed:** splash fix + wizard + schema-report change.
+
+### 764. The event QR is bound to the encrypted event id — stable, with Regenerate (2026-10-12)
+Jamal: the QR should hold the encrypted event id and the app should call the API for the data.
+- **What the QR is now:** an AES-GCM code of `{ v, eid, ts }` only — the event id and the issue time. 88 characters (it was ~250), so a simpler grid and an easier scan. It is **not** a bare id on purpose: `22` can be guessed and tried against every event; the encrypted code cannot. A scan decrypts it to the id and reads the LIVE event (it already did — `eventFromToken`), so the data is never stale.
+- **Stable:** `createEvent` makes the code once; **`updateEvent` no longer reissues it** (it did on every save, including the Show in Event App switches). Only an event with no code gets one.
+- **Regenerate:** `POST /client/events/:id/qr/regenerate` (owner only) issues a new code and stamps it; any code stamped earlier stops working ("This QR code is no longer valid"). Revocation rides on columns that already exist: `events.qr_version = 2` marks the stable scheme and `qr_issued_at` is the current code's stamp — no migration. **Events made before this keep `qr_version = 1`: every old code of theirs keeps working until the host presses Regenerate.**
+- **Portal:** the event's QR dialog has a "Regenerate QR code" button with a confirm (the old code stops working; download the invitation again); captions on the QR dialog / wizard / events list updated. **App:** unchanged — it already reads `qr_token` from the event. The mockup's "Organizer QR Code Management" screens (Create / Regenerate / Share) are still not built in the app.
+- **Checked:** `tests/event-qr.test.js` 16/16 (id-only payload, short, edits leave it alone, old-scheme events keep old codes, regenerate kills the old and admits the new, stranger cannot regenerate, scan reads the live tagline, tampered code refused). `tsc` clean.
+- **Deploy:** no new column, so no migration. Safe to deploy.

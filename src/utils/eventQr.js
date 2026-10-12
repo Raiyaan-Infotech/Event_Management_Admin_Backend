@@ -137,28 +137,24 @@ const decrypt = (token) => {
 };
 
 /**
- * The payload for one event row.
+ * The payload for one event: its id, and when the code was issued.
  *
- * Carries the ownership triple the feature was asked for — event id, company
- * id, vendor id — plus enough of a summary that a scanner can show something
- * useful without a second lookup. It is a SNAPSHOT: an event renamed later
- * still scans as its old name until the code is reissued, which is correct for
- * a code that may already be printed.
+ * ── THE QR IS BOUND TO THE EVENT ID, NOTHING ELSE (Jamal, 2026-10-12) ─────────
+ * It used to carry a snapshot (name, dates, plan, company…) and was reissued on
+ * every save of the event. Now the encrypted code names the event and nothing
+ * more: a scan decrypts it to the id and the server reads the LIVE event, so the
+ * data is never stale, the code never has to change when the event is edited,
+ * and the QR is smaller (an easier scan, a cleaner print). It is still
+ * encrypted rather than a bare id, because a bare id can be guessed and tried
+ * against every event.
+ *
+ * `ts` is when this code was issued. It matters only for Regenerate — see
+ * [isRevoked].
  */
-const buildPayload = (event) => ({
+const buildPayload = (event, issuedAt = new Date()) => ({
     v: QR_VERSION,
     eid: event.id,
-    cid: event.company_id ?? null,
-    vid: event.vendor_id ?? null,
-    clid: event.website_client_id ?? null,
-    pid: event.subscription_plan_id ?? null,
-    cat: event.event_category_id ?? null,
-    nm: event.name ?? null,
-    sd: event.start_date ?? null,
-    ed: event.end_date ?? null,
-    st: event.start_time ?? null,
-    et: event.end_time ?? null,
-    ts: Math.floor(Date.now() / 1000),
+    ts: Math.floor(issuedAt.getTime() / 1000),
 });
 
 /** The compact payload expanded back into readable field names. */
@@ -178,11 +174,37 @@ const expandPayload = (payload) => ({
     issued_at: payload.ts ? new Date(payload.ts * 1000).toISOString() : null,
 });
 
-/** Encrypt an event row straight into its token. */
-const issueToken = (event) => encrypt(buildPayload(event));
+/** The current time cut to a whole second — what a code is stamped with and stored as. */
+const issuedNow = () => new Date(Math.floor(Date.now() / 1000) * 1000);
+
+/** Encrypt an event straight into its token. */
+const issueToken = (event, issuedAt = issuedNow()) => encrypt(buildPayload(event, issuedAt));
+
+/**
+ * `events.qr_version` for a code made under THIS scheme (stable, revocable).
+ * Older events hold 1: their codes were reissued on every save and every one of
+ * them keeps working until the host presses Regenerate.
+ */
+const SCHEME = 2;
+
+/**
+ * Whether a scanned code has been replaced by Regenerate.
+ *
+ * Only events on [SCHEME] can have been — their current code's issue time is
+ * `qr_issued_at`, so a code stamped earlier than that is an old one. An event
+ * still on version 1 has never been regenerated, so nothing about it is revoked.
+ */
+const isRevoked = (event, payload) => {
+    if (Number(event.qr_version) < SCHEME || !event.qr_issued_at) return false;
+    const current = Math.floor(new Date(event.qr_issued_at).getTime() / 1000);
+    return !Number.isFinite(payload.ts) || payload.ts < current;
+};
 
 module.exports = {
     QR_VERSION,
+    SCHEME,
+    issuedNow,
+    isRevoked,
     encrypt,
     decrypt,
     buildPayload,
