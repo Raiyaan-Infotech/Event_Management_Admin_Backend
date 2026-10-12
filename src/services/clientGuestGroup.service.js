@@ -1,4 +1,4 @@
-const { Sequelize, sequelize, GuestGroup, EventParticipant, Guest } = require('../models');
+const { Sequelize, sequelize, GuestGroup, Guest } = require('../models');
 const { Op } = Sequelize;
 const ApiError = require('../utils/apiError');
 
@@ -44,18 +44,15 @@ const withCounts = async (clientId, groups) => {
         raw: true,
     });
 
-    // Events = DISTINCT events a member of the group has joined — through their
-    // guest, or as a participant filed in the group directly (Add Family
-    // Member). COUNT(DISTINCT), or 400 people at one wedding read as 400 events.
+    // Events = DISTINCT events a member of the group has joined, through the
+    // phone-book guest they are. (A participant has no group of its own — Jamal,
+    // 2026-10-12.) COUNT(DISTINCT), or 400 people at one wedding read as 400 events.
     const events = await sequelize.query(
-        `SELECT grp.group_id, COUNT(DISTINCT grp.event_id) AS events FROM (
-             SELECT g.group_id, g.event_id FROM event_participants g
-              WHERE g.website_client_id = :clientId AND g.deleted_at IS NULL AND g.group_id IN (:ids)
-             UNION
-             SELECT c.group_id, g.event_id FROM event_participants g
-               JOIN guests c ON c.id = g.guest_id AND c.deleted_at IS NULL
-              WHERE g.website_client_id = :clientId AND g.deleted_at IS NULL AND c.group_id IN (:ids)
-         ) grp GROUP BY grp.group_id`,
+        `SELECT c.group_id, COUNT(DISTINCT g.event_id) AS events
+           FROM event_participants g
+           JOIN guests c ON c.id = g.guest_id AND c.deleted_at IS NULL
+          WHERE g.website_client_id = :clientId AND g.deleted_at IS NULL AND c.group_id IN (:ids)
+          GROUP BY c.group_id`,
         { replacements: { clientId, ids }, type: Sequelize.QueryTypes.SELECT },
     );
 
@@ -262,12 +259,8 @@ const deleteGroup = async (clientId, groupId) => {
     await sequelize.transaction(async (transaction) => {
         // Explicit, not relying on the FK: these rows are soft-deleted, and
         // ON DELETE SET NULL only fires on a HARD delete.
-        // Guests AND participants filed in the group (§581).
+        // Guests only — an event participant has no group of its own.
         await Guest.update(
-            { group_id: null },
-            { where: { website_client_id: clientId, group_id: group.id }, transaction }
-        );
-        await EventParticipant.update(
             { group_id: null },
             { where: { website_client_id: clientId, group_id: group.id }, transaction }
         );

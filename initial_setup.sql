@@ -1521,7 +1521,6 @@ CREATE TABLE IF NOT EXISTS `event_participants` (
   `website_client_id` int unsigned NOT NULL,
   `guest_id` int unsigned DEFAULT NULL COMMENT 'The phone-book guest this participant is (§581)',
   `company_id` int DEFAULT NULL,
-  `group_id` int unsigned DEFAULT NULL,
   `name` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
   `first_name` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `last_name` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -1569,7 +1568,6 @@ CREATE TABLE IF NOT EXISTS `event_participants` (
   KEY `idx_event_guests_status` (`rsvp_status`,`deleted_at`),
   KEY `idx_event_guests_source` (`invite_source`,`deleted_at`),
   KEY `idx_event_guests_responded` (`responded_at`),
-  KEY `idx_event_guests_group` (`group_id`,`deleted_at`),
   KEY `fk_event_guests_relationship_option` (`relationship_option_id`),
   KEY `fk_event_guests_food_option` (`food_preference_option_id`),
   KEY `idx_event_guests_participant` (`participant_client_id`,`deleted_at`),
@@ -1577,7 +1575,6 @@ CREATE TABLE IF NOT EXISTS `event_participants` (
   CONSTRAINT `fk_event_guests_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `fk_event_guests_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `fk_event_guests_food_option` FOREIGN KEY (`food_preference_option_id`) REFERENCES `guest_food_preference_options` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
-  CONSTRAINT `fk_event_guests_group` FOREIGN KEY (`group_id`) REFERENCES `guest_groups` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_event_guests_guest` FOREIGN KEY (`guest_id`) REFERENCES `guests` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_event_guests_participant_client` FOREIGN KEY (`participant_client_id`) REFERENCES `website_clients` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_event_guests_relationship_option` FOREIGN KEY (`relationship_option_id`) REFERENCES `guest_relationship_options` (`id`) ON DELETE SET NULL ON UPDATE CASCADE

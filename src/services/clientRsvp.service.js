@@ -1,8 +1,6 @@
 const {
     Sequelize,
-    Event,
     EventParticipant,
-    GuestGroup,
     EventParticipantResponseLog,
     EventMessage,
 } = require('../models');
@@ -83,7 +81,7 @@ const BUCKET = {
 };
 
 const GUEST_ATTRS = [
-    'id', 'event_id', 'group_id', 'name', 'first_name', 'last_name', 'title',
+    'id', 'event_id', 'name', 'first_name', 'last_name', 'title',
     'email', 'dial_code', 'mobile', 'whatsapp', 'company', 'table_number',
     'party_size', 'rsvp_status', 'response_type', 'invite_source',
     'invited_at', 'responded_at', 'notes', 'dietary_preference',
@@ -95,7 +93,6 @@ const GUEST_ATTRS = [
 
 const INCLUDE = [
     { association: 'event', attributes: ['id', 'name', 'start_date', 'start_time', 'venue_name', 'venue_address'], required: false },
-    { association: 'group', attributes: ['id', 'name', 'color'], required: false },
 ];
 
 const shape = (row) => {
@@ -138,7 +135,6 @@ const shape = (row) => {
                 venue_address: j.event.venue_address,
             }
             : null,
-        group: j.group ? { id: j.group.id, name: j.group.name, color: j.group.color } : null,
 
         rsvp_status: j.rsvp_status,
         response_type: j.response_type,
@@ -183,7 +179,13 @@ function buildWhere(clientId, query = {}) {
     const where = { website_client_id: clientId, event_id: { [Op.ne]: null } };
 
     if (query.event_id && query.event_id !== 'all') where.event_id = Number(query.event_id);
-    if (query.group_id && query.group_id !== 'all') where.group_id = Number(query.group_id);
+
+    // Groom / Bride side and the relation (Jamal, 2026-10-12) — a participant is
+    // placed by these, not by a guest group. The relation is matched on its name.
+    if (query.side === 'groom' || query.side === 'bride') where.rsvp_side = query.side;
+    if (query.relationship && query.relationship !== 'all') {
+        where.relationship = String(query.relationship).trim();
+    }
 
     /*
       Filtering by BUCKET, not by stored status — the tabs are the four the
@@ -605,19 +607,6 @@ const update = async (clientId, id, body = {}) => {
         data.party_size = size;
     }
 
-    if (body.group_id !== undefined) {
-        if (body.group_id === null || body.group_id === '') {
-            data.group_id = null;
-        } else {
-            const group = await GuestGroup.findOne({
-                where: { id: Number(body.group_id), website_client_id: clientId },
-                attributes: ['id'],
-            });
-            if (!group) throw ApiError.badRequest('That group is not on your account.');
-            data.group_id = group.id;
-        }
-    }
-
     if (body.dietary_preference !== undefined) {
         data.dietary_preference = body.dietary_preference
             ? String(body.dietary_preference).slice(0, 255) : null;
@@ -727,122 +716,6 @@ const resetResponse = async (clientId, id, reason = null) => {
     return getById(clientId, id);
 };
 
-/* ── Groups ──────────────────────────────────────────────────────────────── */
-
-/**
- * Group Details — the group, its members, and its RSVP breakdown.
- *
- * ⚠ Scoped to ONE event. A group is client-scoped but its members belong to
- * events, so "8 members, 3 accepted" is only a true sentence about a single
- * event — across two it would double-count anybody invited to both.
- */
-const getGroup = async (clientId, groupId, query = {}) => {
-    const numeric = Number(groupId);
-    if (!Number.isInteger(numeric) || numeric <= 0) throw ApiError.notFound('Group not found.');
-
-    const group = await GuestGroup.findOne({
-        where: { id: numeric, website_client_id: clientId },
-    });
-    if (!group) throw ApiError.notFound('Group not found.');
-
-    const where = { website_client_id: clientId, group_id: group.id };
-    let event = null;
-
-    if (query.event_id && query.event_id !== 'all') {
-        where.event_id = Number(query.event_id);
-        event = await Event.findOne({
-            where: { id: Number(query.event_id), website_client_id: clientId },
-            attributes: ['id', 'name', 'start_date', 'start_time', 'venue_name'],
-        });
-    }
-
-    const members = await EventParticipant.findAll({
-        where,
-        attributes: GUEST_ATTRS,
-        include: INCLUDE,
-        order: [
-            [literal('`EventParticipant`.`responded_at` IS NULL'), 'ASC'],
-            ['responded_at', 'DESC'],
-            ['name', 'ASC'],
-        ],
-    });
-
-    const buckets = { accepted: 0, maybe: 0, declined: 0, no_response: 0 };
-    let heads = 0;
-    for (const m of members) {
-        buckets[BUCKET[m.rsvp_status] || 'no_response'] += 1;
-        heads += Number(m.party_size) || 1;
-    }
-    const total = members.length;
-    const pct = (n) => (total > 0 ? Math.round((n / total) * 1000) / 10 : 0);
-
-    /*
-      Group Activity — derived from who answered and when. Only real responses
-      appear, newest first; a group where nobody has replied shows nothing
-      rather than a list of "no response" rows, which is not activity.
-    */
-    const activity = members
-        .filter((m) => m.responded_at)
-        .sort((a, b) => new Date(b.responded_at) - new Date(a.responded_at))
-        .slice(0, 10)
-        .map((m) => ({
-            guest_id: m.id, // the PARTICIPANT id — kept for the portal's existing reads
-            phone_book_guest_id: m.guest_id || null,
-            name: m.name,
-            bucket: BUCKET[m.rsvp_status] || 'no_response',
-            at: m.responded_at,
-        }));
-
-    return {
-        group: {
-            id: group.id,
-            name: group.name,
-            color: group.color,
-            description: group.description,
-            visibility: group.visibility,
-            is_default: Boolean(group.is_default),
-            created_at: group.created_at,
-        },
-        event: event
-            ? { id: event.id, name: event.name, start_date: event.start_date, start_time: event.start_time, venue_name: event.venue_name }
-            : null,
-        stats: {
-            total_members: total,
-            heads,
-            accepted: buckets.accepted, accepted_pct: pct(buckets.accepted),
-            maybe: buckets.maybe, maybe_pct: pct(buckets.maybe),
-            declined: buckets.declined, declined_pct: pct(buckets.declined),
-            no_response: buckets.no_response, no_response_pct: pct(buckets.no_response),
-        },
-        members: members.map(shape),
-        activity,
-    };
-};
-
-/**
- * Move a guest to another group.
- *
- * Their RSVP is untouched — the confirm dialog promises exactly that, and a
- * move that silently reset a response would be the worst kind of surprise.
- */
-const moveToGroup = async (clientId, guestId, targetGroupId) => {
-    const guest = await own(clientId, guestId);
-
-    if (targetGroupId === null || targetGroupId === '' || targetGroupId === undefined) {
-        await guest.update({ group_id: null });
-        return getById(clientId, guestId);
-    }
-
-    const group = await GuestGroup.findOne({
-        where: { id: Number(targetGroupId), website_client_id: clientId },
-        attributes: ['id', 'name'],
-    });
-    if (!group) throw ApiError.badRequest('That group is not on your account.');
-
-    await guest.update({ group_id: group.id });
-    return getById(clientId, guestId);
-};
-
 /* ── Export ──────────────────────────────────────────────────────────────── */
 
 /**
@@ -881,8 +754,6 @@ module.exports = {
     getById,
     update,
     resetResponse,
-    getGroup,
-    moveToGroup,
     exportRows,
     logResponseChange,
     BUCKET,

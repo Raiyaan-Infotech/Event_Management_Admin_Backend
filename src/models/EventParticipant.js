@@ -55,8 +55,9 @@ module.exports = (sequelize) => {
          * `apply-guest-date-of-birth.js`.
          */
         date_of_birth: { type: DataTypes.DATEONLY, allowNull: true },
-        /** Ungrouped when null. Deleting a group SET NULLs this, never the row. */
-        group_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+        // No `group_id`: a participant is placed by Groom / Bride side
+        // (`rsvp_side`) and `relationship`, not by a guest group. The column was
+        // dropped (Jamal, 2026-10-12) — only the phone-book Guest has a group.
         email: { type: DataTypes.STRING(255), allowNull: true },
         dial_code: { type: DataTypes.STRING(8), allowNull: true, defaultValue: '+91' },
         mobile: { type: DataTypes.STRING(20), allowNull: true },
@@ -137,8 +138,7 @@ module.exports = (sequelize) => {
             defaultValue: 'unknown',
         },
         /** Free text. A fixed list would exclude the relationship somebody
-         *  actually has, and this is separate from `group_id` even when the
-         *  two happen to agree. */
+         *  actually has; pairs with `rsvp_side` (groom | bride). */
         relationship: { type: DataTypes.STRING(60), allowNull: true },
         /**
          * Which dropdown row they picked, when they picked one.

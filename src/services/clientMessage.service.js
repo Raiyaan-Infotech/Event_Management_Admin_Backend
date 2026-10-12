@@ -332,7 +332,15 @@ async function resolveAudience(clientId, { eventId, audience, groupIds, guestIds
     if (audience === 'groups') {
         const ids = (groupIds || []).map(Number).filter(Number.isInteger);
         if (!ids.length) throw ApiError.badRequest('Choose at least one group.');
-        where.group_id = { [Op.in]: ids };
+        // A participant has no group of their own (Jamal, 2026-10-12); a Guest
+        // Group reaches them through the phone-book guest they ARE (`guest_id`).
+        // A participant with no phone-book entry is not reached by a group.
+        where.guest_id = {
+            [Op.in]: literal(`(SELECT pg.id FROM guests pg
+                WHERE pg.website_client_id = ${Number(clientId)}
+                  AND pg.deleted_at IS NULL
+                  AND pg.group_id IN (${ids.join(',')}))`),
+        };
     } else if (audience === 'guests') {
         const ids = (guestIds || []).map(Number).filter(Number.isInteger);
         if (!ids.length) throw ApiError.badRequest('Choose at least one guest.');
@@ -354,13 +362,12 @@ async function resolveAudience(clientId, { eventId, audience, groupIds, guestIds
         where,
         attributes: [
             'id', 'name', 'first_name', 'last_name', 'email',
-            'dial_code', 'mobile', 'whatsapp', 'table_number', 'group_id',
+            'dial_code', 'mobile', 'whatsapp', 'table_number', 'rsvp_side',
             'rsvp_status', 'party_size',
             // The guest's own app account — the only route to a device token,
             // and therefore the only thing that makes them push-reachable.
             'participant_client_id',
         ],
-        include: [{ association: 'group', attributes: ['id', 'name'], required: false }],
         order: [['name', 'ASC']],
     });
 
@@ -476,8 +483,10 @@ const getComposer = async (client, { eventId } = {}) => {
             where: { website_client_id: client.id },
             attributes: [
                 'id', 'name', 'color',
+                // Participants of this event whose phone-book guest is in the group.
                 [literal(`(SELECT COUNT(*) FROM event_participants g
-                            WHERE g.group_id = GuestGroup.id
+                            JOIN guests pg ON pg.id = g.guest_id AND pg.deleted_at IS NULL
+                            WHERE pg.group_id = GuestGroup.id
                               AND g.event_id = ${Number(chosen.id)}
                               AND g.deleted_at IS NULL)`), 'guest_count'],
             ],
@@ -537,9 +546,11 @@ const previewAudience = async (client, body = {}) => {
 
     // The design's Recipient Breakdown, from the data rather than assembled in
     // the browser — the percentages have to agree with the total beside them.
+    // By Groom / Bride side now — a participant is placed by side and relation,
+    // not by a group.
     const byGroup = new Map();
     for (const g of eligible) {
-        const key = g.group?.name || 'No group';
+        const key = g.rsvp_side === 'bride' ? "Bride's side" : g.rsvp_side === 'groom' ? "Groom's side" : 'No side';
         byGroup.set(key, (byGroup.get(key) || 0) + 1);
     }
     const total = eligible.length;

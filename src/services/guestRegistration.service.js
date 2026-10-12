@@ -5,7 +5,6 @@ const {
     sequelize,
     Event,
     EventParticipant,
-    GuestGroup,
     EventParticipantResponseLog,
     EventMenu,
     WebsiteClient,
@@ -806,7 +805,7 @@ const getMyRsvp = async (clientId, rawEventId) => {
  * clientFamily.service — not derived from these rows.)
  *
  * ── FIELDS ────────────────────────────────────────────────────────────────
- * Name, photo, relationship, group and `rsvp_status`. The Participants screen is built around it (filter pills, the
+ * Name, photo, relationship, side and `rsvp_status`. The Participants screen is built around it (filter pills, the
  * status badge on every row); leaving it out would make every row read
  * "Pending" regardless of the real answer. Still no mobile, email or notes.
  */
@@ -831,7 +830,6 @@ const participantsDirectory = async (clientId, rawEventId) => {
     const guests = await EventParticipant.findAll({
         where: { event_id: eventId, participant_client_id: { [Op.ne]: null } },
         attributes: ['id', 'name', 'title', 'photo', 'relationship', 'rsvp_status'],
-        include: [{ model: GuestGroup, as: 'group', attributes: ['name', 'color'], required: false }],
         order: [['name', 'ASC']],
     });
 
@@ -843,7 +841,6 @@ const participantsDirectory = async (clientId, rawEventId) => {
         relationship: g.relationship,
         rsvp_status: g.rsvp_status,
         has_joined: true,
-        group: g.group ? { name: g.group.name, color: g.group.color } : null,
     }));
 };
 

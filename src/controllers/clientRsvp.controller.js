@@ -20,7 +20,8 @@ const rsvpSettingsService = require('../services/clientRsvpSettings.service');
 const list = asyncHandler(async (req, res) => {
     const data = await rsvpService.list(req.websiteClient.id, {
         event_id: req.query.event_id,
-        group_id: req.query.group_id,
+        side: req.query.side,
+        relationship: req.query.relationship,
         status: req.query.status,
         search: req.query.search,
         from: req.query.from,
@@ -34,7 +35,8 @@ const list = asyncHandler(async (req, res) => {
 const stats = asyncHandler(async (req, res) => {
     const data = await rsvpService.getStats(req.websiteClient.id, {
         event_id: req.query.event_id,
-        group_id: req.query.group_id,
+        side: req.query.side,
+        relationship: req.query.relationship,
         search: req.query.search,
         from: req.query.from,
         to: req.query.to,
@@ -51,7 +53,8 @@ const stats = asyncHandler(async (req, res) => {
 const exportRows = asyncHandler(async (req, res) => {
     const data = await rsvpService.exportRows(req.websiteClient.id, {
         event_id: req.query.event_id,
-        group_id: req.query.group_id,
+        side: req.query.side,
+        relationship: req.query.relationship,
         status: req.query.status,
         search: req.query.search,
         from: req.query.from,
@@ -86,21 +89,6 @@ const resetResponse = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, data, 'Response cleared — the guest can respond again');
 });
 
-const getGroup = asyncHandler(async (req, res) => {
-    const data = await rsvpService.getGroup(req.websiteClient.id, req.params.id, {
-        event_id: req.query.event_id,
-    });
-    return ApiResponse.success(res, data, 'Group retrieved');
-});
-
-const moveToGroup = asyncHandler(async (req, res) => {
-    const data = await rsvpService.moveToGroup(
-        req.websiteClient.id, req.params.id, req.body?.group_id,
-    );
-    logger.logRequest(req, `Client ${req.websiteClient.id} moved guest ${req.params.id} to a group`);
-    return ApiResponse.success(res, data, 'Guest moved');
-});
-
 /** One event's RSVP form settings — the organizer's Edit Event → RSVP screen. */
 const getSettings = asyncHandler(async (req, res) => {
     const data = await rsvpSettingsService.get(req.websiteClient.id, req.params.id);
@@ -121,6 +109,6 @@ const updateSettings = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
-    list, stats, exportRows, getById, update, resetResponse, getGroup, moveToGroup,
+    list, stats, exportRows, getById, update, resetResponse,
     getSettings, updateSettings,
 };

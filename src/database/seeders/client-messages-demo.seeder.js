@@ -249,7 +249,6 @@ async function seedFor(client) {
             event_id: event.id,
             website_client_id: client.id,
             company_id: client.company_id ?? 1,
-            group_id: pick(groupRows).id,
             name: `${first} ${last}`,
             first_name: first,
             last_name: last,

@@ -75,9 +75,11 @@ const pick = (body, fields) => {
  * Email is OPTIONAL and mobile MANDATORY (§576): an invitation is shared to a
  * phone number, so that is the field a guest cannot be without.
  */
-const normalisePerson = async (clientId, body, { partial = false, existing = null } = {}) => {
+const normalisePerson = async (clientId, body, { partial = false, existing = null, withGroup = true } = {}) => {
     const data = {};
-    const picked = pick(body, PERSON_FIELDS);
+    // `withGroup: false` for an event PARTICIPANT: a participant has no guest
+    // group (Jamal, 2026-10-12) — only the phone-book guest does.
+    const picked = pick(body, withGroup ? PERSON_FIELDS : PERSON_FIELDS.filter((f) => f !== 'group_id'));
     const has = (f) => Object.prototype.hasOwnProperty.call(picked, f);
     const required = (f) => !partial || has(f);
 

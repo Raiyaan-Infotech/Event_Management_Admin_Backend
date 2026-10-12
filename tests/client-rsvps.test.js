@@ -13,7 +13,6 @@
  *     a moment the client has since undone
  *   · the tiles ignore the STATUS filter, or clicking "Accepted" makes every
  *     other tile read zero and the summary becomes a restatement of the tab
- *   · moving a guest between groups must not touch their RSVP
  *
  * ── HOW TO RUN ──────────────────────────────────────────────────────────────
  *   node tests/client-rsvps.test.js
@@ -216,7 +215,7 @@ const call = async (method, path, body) => {
         console.log('\n── clearing a response is NOT deleting a guest ───');
         {
             const before = await sequelize.query(
-                'SELECT group_id, name FROM event_guests WHERE id = ?',
+                'SELECT name FROM event_guests WHERE id = ?',
                 { replacements: [rsvpId], type: sequelize.QueryTypes.SELECT },
             );
 
@@ -240,11 +239,10 @@ const call = async (method, path, body) => {
 
             // The whole point: the guest survives.
             const [row] = await sequelize.query(
-                'SELECT id, group_id, deleted_at FROM event_guests WHERE id = ?',
+                'SELECT id, deleted_at FROM event_guests WHERE id = ?',
                 { replacements: [rsvpId], type: sequelize.QueryTypes.SELECT },
             );
             ok('THE GUEST STILL EXISTS', Boolean(row) && row.deleted_at === null, JSON.stringify(row));
-            ok('and is still in their group', row?.group_id === before[0]?.group_id);
 
             const still = await call('GET', `/client/rsvps?event_id=${eventId}`);
             ok('and is still counted in the tiles',
@@ -255,57 +253,6 @@ const call = async (method, path, body) => {
             const del = await call('DELETE', `/client/rsvps/${rsvpId}`);
             ok('DELETE /rsvps/:id is not a route', del.status === 404 || del.status === 405,
                 `got ${del.status}`);
-        }
-
-        console.log('\n── groups ────────────────────────────────────────');
-        {
-            const [grp] = await sequelize.query(
-                `SELECT g.id, g.name FROM event_guest_groups g
-                  WHERE g.website_client_id = ? AND g.deleted_at IS NULL LIMIT 1`,
-                { replacements: [clientId], type: sequelize.QueryTypes.SELECT },
-            );
-
-            const res = await call('GET', `/client/rsvps/groups/${grp.id}?event_id=${eventId}`);
-            ok('the group loads', res.status === 200, `got ${res.status}`);
-            const s = res.body?.data?.stats;
-            ok('its buckets account for every member',
-                s.accepted + s.maybe + s.declined + s.no_response === s.total_members,
-                JSON.stringify(s));
-            ok('members are returned', (res.body?.data?.members ?? []).length === s.total_members);
-            // Activity is real responses only — a group where nobody replied
-            // shows nothing rather than a list of "no response" rows.
-            ok('activity contains only guests who actually answered',
-                (res.body?.data?.activity ?? []).every((a) => a.at));
-
-            const other = await call('GET', '/client/rsvps/groups/99999999');
-            ok("somebody else's group id -> 404", other.status === 404, `got ${other.status}`);
-        }
-
-        console.log('\n── moving a guest must not touch their RSVP ──────');
-        {
-            await call('PUT', `/client/rsvps/${rsvpId}`, { response_type: 'yes' });
-            const before = (await call('GET', `/client/rsvps/${rsvpId}`)).body?.data?.rsvp;
-
-            const [target] = await sequelize.query(
-                `SELECT id, name FROM event_guest_groups
-                  WHERE website_client_id = ? AND deleted_at IS NULL AND id <> ? LIMIT 1`,
-                { replacements: [clientId, before.group?.id ?? 0], type: sequelize.QueryTypes.SELECT },
-            );
-
-            if (target) {
-                const res = await call('PUT', `/client/rsvps/${rsvpId}/group`, { group_id: target.id });
-                ok('the move succeeds', res.status === 200, `got ${res.status}`);
-                ok('the guest is in the new group', res.body?.data?.rsvp?.group?.id === target.id);
-                // Exactly what the confirm dialog promises.
-                ok('and their RSVP is UNCHANGED',
-                    res.body?.data?.rsvp?.response_type === before.response_type
-                    && res.body?.data?.rsvp?.bucket === before.bucket,
-                    JSON.stringify([res.body?.data?.rsvp?.bucket, before.bucket]));
-                await call('PUT', `/client/rsvps/${rsvpId}/group`, { group_id: before.group?.id ?? null });
-            }
-
-            const bad = await call('PUT', `/client/rsvps/${rsvpId}/group`, { group_id: 99999999 });
-            ok("a group that is not yours -> 400", bad.status === 400, `got ${bad.status}`);
         }
 
         console.log('\n── export ────────────────────────────────────────');

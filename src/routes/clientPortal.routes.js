@@ -413,18 +413,16 @@ router.get('/messages/:id', messageController.getById);
  * Two verbs for two different acts, so a destructive button cannot be wired to
  * the wrong one by reading the route name.
  *
- * `stats`, `export` and `groups` precede `/:id`, or Express matches them as an
+ * `stats` and `export` precede `/:id`, or Express matches them as an
  * id and the handler looks for RSVP number NaN.
  */
 router.get('/rsvps/stats', rsvpController.stats);
 router.get('/rsvps/export', rsvpController.exportRows);
-router.get('/rsvps/groups/:id', rsvpController.getGroup);
 router.get('/rsvps', rsvpController.list);
 router.get('/rsvps/:id', rsvpController.getById);
 router.put('/rsvps/:id', rsvpController.update);
 // Named `reset`, not `delete`. See above.
 router.put('/rsvps/:id/reset', rsvpController.resetResponse);
-router.put('/rsvps/:id/group', rsvpController.moveToGroup);
 
 /**
  * Guest Profile — the PERSON across every event.

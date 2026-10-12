@@ -3,7 +3,6 @@ const {
     sequelize,
     Event,
     EventParticipant,
-    GuestGroup,
     Guest,
     WebsiteClient,
 } = require('../models');
@@ -40,11 +39,6 @@ const INCLUDE = [
     {
         model: Event, as: 'event',
         attributes: ['id', 'name', 'start_date', 'start_time', 'theme_id'],
-        required: false,
-    },
-    {
-        model: GuestGroup, as: 'group',
-        attributes: ['id', 'name', 'color'],
         required: false,
     },
     {
@@ -145,9 +139,9 @@ const listParticipants = async (clientId, query = {}) => {
     else if (tab === 'not_responded') where.rsvp_status = { [Op.in]: ['not_responded', 'invited'] };
     else if (RSVP_STATUSES.includes(tab)) where.rsvp_status = tab;
 
-    const groupId = Number(query.group_id) || null;
-    if (groupId) where.group_id = groupId;
-    else if (String(query.group_id) === '0') where.group_id = null;
+    // Groom / Bride side and the relation — how a participant is placed.
+    if (query.side === 'groom' || query.side === 'bride') where.rsvp_side = query.side;
+    if (query.relationship && query.relationship !== 'all') where.relationship = String(query.relationship).trim();
 
     if (search) {
         where[Op.or] = [
@@ -251,7 +245,7 @@ const clashOnEvent = (eventId, mobile, { excludeId = null, transaction } = {}) =
  * Max RSVP per event, linked to the phone-book guest with the same mobile.
  */
 const createParticipant = async (clientId, companyId, body = {}) => {
-    const person = await normalisePerson(clientId, body, { partial: false });
+    const person = await normalisePerson(clientId, body, { partial: false, withGroup: false });
     const attendance = normaliseAttendance(body);
 
     const guest = await sequelize.transaction(async (transaction) => {
@@ -313,7 +307,7 @@ const updateParticipant = async (clientId, id, body = {}) => {
     const guest = await EventParticipant.findOne({ where: { id: Number(id) || 0, website_client_id: clientId } });
     if (!guest) return null;
 
-    const person = await normalisePerson(clientId, body, { partial: true, existing: guest.toJSON() });
+    const person = await normalisePerson(clientId, body, { partial: true, existing: guest.toJSON(), withGroup: false });
     const attendance = normaliseAttendance(body, { existing: guest.toJSON() });
     const data = { ...person, ...attendance };
 

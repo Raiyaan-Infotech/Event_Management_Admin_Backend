@@ -480,10 +480,9 @@ db.EventMessage.belongsTo(db.Event, { foreignKey: 'event_id', as: 'event' });
 db.EventParticipant.hasMany(db.EventMessage, { foreignKey: 'participant_id', as: 'messages' });
 db.EventMessage.belongsTo(db.EventParticipant, { foreignKey: 'participant_id', as: 'participant' });
 
-// Groups. SET NULL at the DB level, unlike the CASCADEs above — deleting a
-// group must UNGROUP its guests, never delete them.
-db.GuestGroup.hasMany(db.EventParticipant, { foreignKey: 'group_id', as: 'guests' });
-db.EventParticipant.belongsTo(db.GuestGroup, { foreignKey: 'group_id', as: 'group' });
+// Groups belong to the phone-book Guest only (below). An event participant has
+// no group of its own — `event_participants.group_id` was dropped (Jamal,
+// 2026-10-12); apply-drop-participant-group.js.
 
 // The guest profile: notes, tags, reminders and response history.
 //

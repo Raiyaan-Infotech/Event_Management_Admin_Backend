@@ -147,11 +147,10 @@ const getProfile = async (clientId, id) => {
             where: { website_client_id: clientId, id: { [Op.in]: ids } },
             attributes: [
                 'id', 'event_id', 'rsvp_status', 'response_type', 'responded_at',
-                'party_size', 'invited_at', 'group_id', 'accommodation', 'dietary_preference',
+                'party_size', 'invited_at', 'accommodation', 'dietary_preference',
             ],
             include: [
                 { association: 'event', attributes: ['id', 'name', 'start_date', 'start_time', 'venue_name'], required: false },
-                { association: 'group', attributes: ['id', 'name'], required: false },
             ],
             order: [['id', 'DESC']],
             limit: 50,
@@ -305,7 +304,6 @@ const getProfile = async (clientId, id) => {
             party_size: sg.party_size,
             accommodation: sg.accommodation,
             dietary_preference: sg.dietary_preference,
-            group: sg.group ? { id: sg.group.id, name: sg.group.name } : null,
             event: sg.event || null,
         })),
 
