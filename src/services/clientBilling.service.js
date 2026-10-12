@@ -9,6 +9,7 @@ const {
     ClientSubscriptionEvent,
     Event,
     EventParticipant,
+    EventGalleryItem,
     Guest,
 } = require('../models');
 const { Op } = Sequelize;
@@ -422,11 +423,13 @@ const getCurrentSubscription = async (clientId) => {
  * window a plan ceiling actually applies to — on a yearly plan, a monthly count
  * against an annual allowance is a number that means nothing.
  *
- * `messages` and `storage_used` come back null WITH a reason. They are not
- * zeroes: the messaging module is paused by decision, and nothing anywhere
- * measures bytes stored per client. The ceiling for storage IS known, which is
- * exactly the trap — a limit with no measurement invites a progress bar that
- * looks precise and is invented.
+ * `messages` comes back null WITH a reason — the messaging module is paused by
+ * decision, so it is not a zero.
+ *
+ * Storage IS measured now (session 57): the bytes of every gallery item on the
+ * account, the same sum the gallery upload checks against the plan, reported in
+ * the plan's own unit. Cover, invitation, splash, agenda and contact pictures
+ * are not counted — see clientGallery.service.
  */
 const getUsage = async (clientId, subscription) => {
     const periodStart = subscription?.current_period_start
@@ -468,6 +471,12 @@ const getUsage = async (clientId, subscription) => {
     const guestRows = await Guest.count({ where: { website_client_id: clientId } });
     const limits = await resolvePlanLimits(subscription?.subscription_plan_id);
 
+    // Bytes held by this account's gallery, shown in the plan's own unit
+    // (MB unless the plan is set in GB), two decimals.
+    const storageBytes = Number(await EventGalleryItem.sum('size_bytes', { where: { website_client_id: clientId } })) || 0;
+    const storageUnit = limits.storage_unit === 'GB' ? 'GB' : 'MB';
+    const storageUsed = Math.round((storageBytes / (storageUnit === 'GB' ? 1024 ** 3 : 1024 ** 2)) * 100) / 100;
+
     return {
         period_start: periodStart,
         period_end: periodEnd,
@@ -494,13 +503,14 @@ const getUsage = async (clientId, subscription) => {
             reason: 'Messaging is paused — no messages have been sent from this account.',
         },
         storage: {
-            used_gb: null,
+            // In `unit` (the plan's own), so used and limit compare directly.
+            used: storageUsed,
+            used_gb: Math.round((storageBytes / 1024 ** 3) * 100) / 100,
             limit_gb: storageInGb(limits),
             // As the admin set it — what the portal shows ("500 MB", "10 GB").
             limit: limits.storage_limit ?? null,
-            unit: limits.storage_unit ?? null,
-            available: false,
-            reason: 'Storage usage is not measured yet.',
+            unit: storageUnit,
+            available: true,
         },
         // Its own plan field (§571): attendance for one event, counted in
         // people saying yes — a QR scanner never in the guest list included.
