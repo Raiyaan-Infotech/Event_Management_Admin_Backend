@@ -4,10 +4,12 @@ const { DataTypes } = require('sequelize');
  * One participant an organizer's notification (`event_notifications`) was
  * sent to — written when the notification goes out, one row per participant.
  *
- * This is the row the participant's own list will read (`is_read` / `read_at`
- * are here for it). `status` is about the PUSH only: 'sent' = a device of
- * theirs accepted it, 'failed' = none did (`failed_reason` says why — most
- * often they have not joined the app). The row exists either way.
+ * This row IS the in-app notification — the participant's own list will read
+ * it (`is_read` / `read_at` are here for that), for a notification whose
+ * `channels` holds 'in_app'. `status`: with push ticked, 'sent' = a device of
+ * theirs accepted it and 'failed' = none did; in-app only, 'sent' = they have
+ * an app account to read it in. `failed_reason` says why — most often they
+ * have not joined the app. The row exists either way.
  */
 module.exports = (sequelize) => {
     const EventNotificationRecipient = sequelize.define('EventNotificationRecipient', {

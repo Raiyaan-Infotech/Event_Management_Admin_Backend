@@ -81,6 +81,7 @@ const listNotifications = asyncHandler(async (req, res) => {
         category: req.query.category,
         unread: req.query.unread,
         search: req.query.search,
+        eventId: req.query.event_id,
         page: req.query.page,
         limit: req.query.limit,
     });
@@ -108,6 +109,7 @@ const markAllRead = asyncHandler(async (req, res) => {
     */
     const data = await notificationService.markAllRead(req.websiteClient.id, {
         category: req.body?.category || req.query.category,
+        eventId: req.body?.event_id || req.query.event_id,
     });
     return ApiResponse.success(res, data, `${data.marked} marked as read`);
 });

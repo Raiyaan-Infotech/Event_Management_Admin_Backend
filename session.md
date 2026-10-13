@@ -15890,3 +15890,67 @@ Jamal: the app's Send Notification must reach participants. Asked and answered f
 
 **Before it works on a phone:** the app talks to production — push the backend, then run `node src/database/tools/apply-event-notifications.js --prod --apply`. Until then the list shows an error.
 **Open:** the participant's side (where they read these); tapping the push only opens the app as before; In-App channel; nothing marks a recipient row read yet.
+
+### 775. Mobile app — Gallery: no caption on Edit Media, fixed Add tiles, multi-select remove, centred empty state (2026-10-13)
+`Event_Invite_Mobile_App`, app only — no backend change. `dart analyze`: no errors. NOT run on the phone, NOT committed.
+- **Edit Media** (`gallery_media_pages.dart`): the Caption field is gone; the page is the preview + "Show in Event App". `GalleryRepository.updateDetails` no longer sends `caption`, so the server leaves an existing caption as it is (it still shows in the list view and the viewer where an item has one).
+- **Upload Media** (`gallery_upload_screen.dart`): **Add Photos** and **Add Video** keep their OLD square-tile look and are always the grid's FIRST two tiles (`_AddTile`); what was picked follows them. (A first try put them as two wide cards pinned on top — Jamal wanted the old design, only in a fixed place.) **Multi-select remove here too:** top bar **Select** → tap picked photos / videos to tick them → red **Remove (N)** in the bottom bar takes them off the list (nothing is on the server yet, so no confirm); Cancel leaves the mode. While selecting, a tap does not open the crop and the ✕ is hidden.
+- **Category media** (`gallery_media_screen.dart`) — multi-select remove: **Select** on the left of the toolbar turns tiles (grid and list) into tick boxes; toolbar becomes Cancel · "N selected" · Select All / Clear All; the bottom button becomes red **Remove (N)** → confirm → deleted. No drag-reorder and no ⋮ while selecting. There is no bulk route — the app calls the existing `DELETE /client/gallery/:itemId` four at a time and reloads once; a refusal is reported as "X removed, Y could not be removed".
+- **Empty category:** icon, "No media yet" and a compact **Upload Media** button in the middle of the page (as the Agenda's empty list); the toolbar and the bottom Upload Media bar are hidden while it is empty. Pull to refresh still works.
+
+### 776. Mobile app — Gallery category: long-press selects, reorder moved to ⋮ (2026-10-13)
+Jamal could not find multi-select: a tap opened the photo and a long-press started the drag, and the toolbar's Select text went unnoticed. Checked on the phone (adb) that Select → tap did tick (category page and Upload Media) — nothing removed, nothing uploaded. Then changed, at his choice:
+- **Long-press a photo = start selecting**, with that photo ticked; tap more to tick; red **Remove (N)** at the bottom. The toolbar's Select stays as a second way in.
+- **Reorder is its own mode:** ⋮ → **Reorder Media** (shown when the category has more than one item). Toolbar says "Hold a photo and drag it onto another" + Done, every tile carries a drag badge, the bottom button is Done; taps, ⋮ and selection are off inside it. Saved on drop, as before (hold is 200 ms).
+- `gallery_media_screen.dart` only. `dart analyze`: no errors. This last change is NOT yet seen on the phone (needs a hot reload); NOT committed.
+
+### 777. Mobile app — Gallery category: short hold = reorder, long hold = multi-select; ⋮ Reorder removed (2026-10-13)
+Replaces §776's reorder mode (Jamal: "short select reorder, long select multi select, and remove that reorder option").
+- One press on a photo, told apart by how long it is held STILL: the photo lifts after **150 ms** — drag it onto another to reorder (saved on drop, as before). Held still for a further **550 ms** (finger moved < 12 px) it buzzes and becomes a **selection** with that photo ticked; tap more to tick, red **Remove (N)** at the bottom. A tap still opens the viewer.
+- ⋮ → Reorder Media, the reorder mode, its toolbar / Done button and the drag badge are all gone. The toolbar's Select stays.
+- How: `LongPressDraggable` (`delay` 150 ms) starts a timer in `onDragStarted`; `onDragUpdate` cancels it once the finger has travelled; if it fires, `_selecting` goes on. Tiles stay wrapped while selecting (`maxSimultaneousDrags: 0`) so the hold that is still down ends cleanly, and `_drop` ignores a release once selecting.
+- `gallery_media_screen.dart` only. `dart analyze`: no errors. NOT seen on the phone (needs a hot reload) — the two timings are a first guess and may want tuning by feel. NOT committed.
+
+### 778. Mobile app — Gallery category: back to long-press reorder; Select on its own row under the view toggle (2026-10-13)
+Jamal found §777's short hold / long hold "not convenient". Reverted, so §776 and §777 are both superseded:
+- **Long-press + drag = reorder** (the default hold, saved on drop) and a **tap opens the photo** — as before §776. No timers, no reorder mode, no ⋮ Reorder.
+- **Select has its own row under the grid / list toggle:** the hint "Select media to remove several at once" and an outlined **Select** button with a tick icon on the right. Tapping it turns the row into Cancel · "N selected" · Select All / Clear All; tiles tick on tap; red **Remove (N)** at the bottom. No drag and no ⋮ while selecting.
+- `gallery_media_screen.dart` only. `dart analyze`: no errors. NOT seen on the phone (needs a hot reload); NOT committed.
+
+### 779. Mobile app — Gallery category: Select is an icon, no text (2026-10-13)
+§778's hint line and the "Select" button are gone. Select is now an empty-circle icon button in the same row as the grid / list toggle, to their left (same `GalleryViewToggle` look); tapped, it fills to a tick and is highlighted, and tapping it again leaves select mode. The Cancel · "N selected" · Select All row shows under it only while selecting. `gallery_media_screen.dart`; `dart analyze`: no errors; NOT seen on the phone, NOT committed.
+Moved right after (Jamal): the circle sits on its own row UNDER the list icon, right corner; while selecting, Cancel · "N selected" · Select All are on that same row to its left.
+Cancel and Select All / Clear All are outlined buttons now (were text-only and read as labels).
+
+### 780. Mobile app — Gallery category tiles: tick box on every tile, expand icon, no ⋮ (2026-10-13)
+From Jamal's reference picture (expand icon top-left, blue tick box bottom-right). Supersedes §778 / §779's Select button and circle.
+- **Every tile carries a square tick box, bottom-right** (list view: at the right of the row). Ticking one IS select mode — there is no Select button or circle any more. While something is ticked: the row Cancel · "N selected" · Select All / Clear All (outlined buttons) shows under the grid / list toggle, a tap on a picture ticks it too, and the bottom button is red **Remove (N)**. Unticking the last one (or Cancel) ends it.
+- **⋮ removed.** A tap on the picture opens the same action sheet (View Full Screen, Edit Media, Move to Another Category, Download, Remove from Gallery).
+- **Expand icon, top-left,** opens the full-screen viewer directly. The "hidden from guests" badge moved to the top-right.
+- Long-press + drag still reorders when nothing is ticked.
+- `gallery_media_screen.dart`; `dart analyze`: no errors; NOT seen on the phone (needs a hot reload), NOT committed.
+
+### 781. Mobile app — Gallery category: plain tiles, HOLD to select (phone-gallery style), reorder in the action menu (2026-10-13)
+From Jamal's two reference pictures (a plain grid; and, after a long hold, Cancel · "3 items selected" · Select all with an expand icon + tick box on every tile). Supersedes §776–§780.
+- **Normal view:** nothing drawn on a tile (only the "hidden from guests" badge, top-right). **Tap = the action sheet** (the old ⋮ options). No ⋮, no tick boxes.
+- **Hold a photo = select mode**, that photo ticked. Every tile then shows the expand icon (top-left → full-screen viewer) and a square tick box (bottom-right); a tap on a picture ticks it. Row under the grid / list toggle: Cancel · "N items selected" · Select All / Clear All (outlined buttons, as he asked in §779). Bottom button: red **Remove (N)**. Unticking everything does NOT leave the mode — Cancel does.
+- **Reorder:** the hold is now selection, so drag-reorder is a mode again — action sheet → **Reorder Media** (more than one item): hold 200 ms and drag onto another, saved on drop; hint + Done under the toggle, Done as the bottom button. ⚠ He said "remove that reorder option" in §777, when the short hold did the reordering; it is back only because reorder would otherwise be unreachable. Remove it (and reorder with it) if he says so.
+- `gallery_media_screen.dart`; `dart analyze`: no errors; NOT seen on the phone (needs a hot reload), NOT committed.
+Right after (Jamal): the expand icon is gone from select mode — tiles show the tick box only. And the action sheet overflowed by 8.5 px once Reorder Media was added ("RenderFlex overflowed", the sheet's Column): it is `isScrollControlled` in a `SingleChildScrollView` now, so it takes its own height.
+
+### 782. Organizer notifications — In-App channel can be ticked; saved now, shown later (2026-10-13)
+Jamal: do In-App too — for now just SAVE it in the DB; the page that shows it to the participant comes later.
+- **No new table, no schema change.** The recipient row (`event_notification_recipients`, one per participant) already IS the saved in-app notification; `event_notifications.channels` now really records what was ticked (`in_app` and / or `push`). The later page reads recipient rows of a notification whose `channels` holds `in_app`.
+- **Backend** (`clientEventNotification.service.js`, controller message, model comments): `channels` is read from the body (`in_app`, `push`; anything else dropped); a send / schedule needs at least one ("Please choose In-App, Push Notification or both."). **Push ticked** → pushed as before. **In-App only** → NO push; the rows are saved; a row is `sent` when the participant has an app account to read it in, else `failed` "Has not joined the app yet"; `delivered_count` counts those. A body with NO `channels` key (an app build from before this) = push, as it was. Still nothing written to `client_notifications`.
+- **App:** Channels page — In-App and Push both tickable (both on by default), at least one required; Email / WhatsApp still "Not available". Preview shows a tab per ticked channel when both are; facts / result say "push delivered to N" or "saved in the app for N". `dart analyze` clean.
+- **Tested:** `tests/event-notifications.test.js` 28 pass locally (needs a channel; email / whatsapp refused; in-app only saves rows with no push; unknown channels dropped). One branch SKIPPED — "in-app only, participant WITH an app account" — the local test event has no joined participant.
+- **Phone:** hot-reloaded through the running `flutter run` (DDS `s0.reloadSources`; it only answers with the app in the foreground). The walk-through was ABANDONED — the phone was being used at the same time and screens changed under the taps. Nothing was sent, saved or deleted by the attempt. Seen on the way: production serves the notification list (2 sent on "Rahim weds Rahima"), so §774's backend IS deployed and migrated. ⚠ Production still runs the OLD service: until this change is pushed, it ignores `channels` and pushes every send — do not test "In-App only" on the phone before the push.
+- Not committed (backend files not staged). `src/controllers/clientMessage.controller.js` and `src/services/clientNotification.service.js` are also modified in the working tree — NOT by this work (an event filter on the account feed); left alone.
+
+### 783. Organizer notifications now reach the participant's bell (2026-10-13)
+Jamal: what the organizer sends does not show in the participant's notification list (bell icon). §774 / §782 had deliberately written nothing to that feed.
+- `clientEventNotification.service.deliver` now also writes ONE `client_notifications` row per recipient ACCOUNT (`notifyMany`, a single insert, after the recipient rows) — for In-App and for Push alike. Type `event_notification` (new line in `TYPE_CATEGORY` → category `message`), title + message, `event_id`, link `eventinvit://event/<id>`, meta `{ event_notification_id, image_url, channels }`. A participant with no app account gets none (they have no bell).
+- No app change: the bell already reads `GET /client/notifications`.
+- `tests/event-notifications.test.js`: 30 pass, nothing skipped (the test now picks an event that has a participant with the app; in-app only, so no push leaves; the feed rows it writes are deleted).
+- Not committed, not pushed — production does not do this until the backend is pushed. Notifications already sent are NOT back-filled into the bell.
+- Touches `clientNotification.service.js` (one line in `TYPE_CATEGORY`), a file that also carries somebody else's uncommitted event-filter work — commit with care.

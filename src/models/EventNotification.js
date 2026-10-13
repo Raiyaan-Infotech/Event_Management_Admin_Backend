@@ -40,7 +40,7 @@ module.exports = (sequelize) => {
         sides: { type: DataTypes.JSON, allowNull: true },
         /** Relation names — audience 'groups'. Empty = every relation. */
         relationships: { type: DataTypes.JSON, allowNull: true },
-        /** ['push'] today. In-app, email and WhatsApp are not delivered yet. */
+        /** 'in_app' and / or 'push'. In-app = saved for the participant, shown later. */
         channels: { type: DataTypes.JSON, allowNull: true },
 
         status: {

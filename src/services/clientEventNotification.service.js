@@ -6,6 +6,7 @@ const ApiError = require('../utils/apiError');
 const logger = require('../utils/logger');
 const mediaService = require('./media.service');
 const pushSender = require('./pushSender.service');
+const feed = require('./clientNotification.service');
 
 const { Op } = Sequelize;
 
@@ -21,21 +22,35 @@ const { Op } = Sequelize;
  * Host-only: every call resolves the event or the notification by the
  * signed-in client, so "not found" and "not yours" are one answer.
  *
- * ── WHAT "SENT" MEANS HERE ──────────────────────────────────────────────────
- * The notification was SAVED for each participant (one recipient row each).
- * The push is attempted for those who joined through the app; how many devices
- * accepted it is `delivered_count`. A participant with no app still has their
- * row — the participant-side list reads that table — so a send with zero
- * pushes delivered is still 'sent', and says so in its counts.
+ * ── CHANNELS: 'in_app' AND / OR 'push' ──────────────────────────────────────
+ * The organizer ticks one or both. Whatever is ticked, one recipient row is
+ * written per participant — that row IS the in-app notification, and the
+ * delivery record of the push.
+ *   push    → sent through `pushSender` to the participant's devices.
+ *   in_app  → nothing more to do today: the row is saved, and the page that
+ *             will show it to the participant is a later step (Jamal,
+ *             2026-10-13). That page reads `event_notification_recipients`
+ *             joined to a notification whose `channels` holds 'in_app'.
  *
- * ── NOTHING IS WRITTEN TO `client_notifications` ────────────────────────────
- * The in-app feed is a later step (Jamal). Do not add a `notify()` here.
+ * ── WHAT "SENT" MEANS HERE ──────────────────────────────────────────────────
+ * The notification was SAVED for each participant. `delivered_count` is how
+ * many of them it actually reached: with push ticked, those a device of whose
+ * accepted it; in-app only, those who have an app account to read it in. A
+ * send that reached nobody is still 'sent', and says so in its counts.
+ *
+ * ── THE BELL ────────────────────────────────────────────────────────────────
+ * Every participant with an app account also gets a row in
+ * `client_notifications` — the feed behind the app's bell — whichever channel
+ * was ticked, so what the organizer sent is in the participant's list
+ * (Jamal, 2026-10-13). Written once, in bulk, after the recipient rows.
  */
 
 const TITLE_MAX = 100;
 const MESSAGE_MAX = 500;
 const AUDIENCES = ['all', 'specific', 'groups'];
 const SIDES = ['bride', 'groom'];
+/** What the organizer can tick. Email and WhatsApp are not delivered. */
+const CHANNELS = ['in_app', 'push'];
 const ACTIONS = ['draft', 'send', 'schedule'];
 const EDITABLE = ['draft', 'scheduled'];
 
@@ -184,7 +199,15 @@ const readFields = (body = {}, action) => {
         listOf(body.relationships).map((r) => String(r).trim().slice(0, 60)).filter(Boolean),
     )];
 
+    // An app build from before channels could be chosen sends none: push, as
+    // it was then.
+    const asked = body.channels === undefined ? ['push'] : listOf(body.channels);
+    const channels = CHANNELS.filter((c) => asked.includes(c));
+
     if (!draft) {
+        if (!channels.length) {
+            throw ApiError.badRequest('Please choose In-App, Push Notification or both.');
+        }
         if (audience === 'specific' && !participantIds.length) {
             throw ApiError.badRequest('Please choose at least one participant.');
         }
@@ -201,8 +224,7 @@ const readFields = (body = {}, action) => {
         participant_ids: audience === 'specific' ? participantIds : null,
         sides: audience === 'groups' ? sides : null,
         relationships: audience === 'groups' ? relationships : null,
-        // The one channel that delivers today.
-        channels: ['push'],
+        channels,
     };
 };
 
@@ -239,10 +261,14 @@ const deliver = async (notification, event) => {
         return { recipients: 0, delivered: 0, failed: 0 };
     }
 
+    // Rows written before channels could be chosen were push-only.
+    const stored = listOf(notification.channels);
+    const push = !stored.length || stored.includes('push');
+
     const clientIds = [...new Set(
         participants.map((p) => Number(p.participant_client_id)).filter(Boolean),
     )];
-    const tokens = clientIds.length
+    const tokens = push && clientIds.length
         ? await ClientDeviceToken.findAll({
             where: { website_client_id: { [Op.in]: clientIds }, is_active: true },
             attributes: ['id', 'website_client_id', 'token'],
@@ -281,7 +307,9 @@ const deliver = async (notification, event) => {
     const rows = participants.map((p) => {
         const clientId = Number(p.participant_client_id) || null;
         const outcome = clientId ? byClient.get(clientId) : null;
-        const ok = Boolean(outcome?.ok);
+        // Push ticked: a device accepted it. In-app only: they have the app
+        // account the notification is saved against.
+        const ok = push ? Boolean(outcome?.ok) : Boolean(clientId);
         if (ok) delivered += 1;
         return {
             notification_id: notification.id,
@@ -305,6 +333,26 @@ const deliver = async (notification, event) => {
         await EventNotificationRecipient.bulkCreate(rows.slice(i, i + 500), { ignoreDuplicates: true });
     }
 
+    /*
+      The bell. One feed row per ACCOUNT (not per participant row — somebody on
+      the list twice must not see it twice), in a single insert.
+    */
+    const accounts = [...new Set(rows.map((r) => r.participant_client_id).filter(Boolean))];
+    await feed.notifyMany(accounts.map((clientId) => ({
+        clientId,
+        type: 'event_notification',
+        title: notification.title,
+        body: notification.message || null,
+        eventId: event.id,
+        companyId: event.company_id ?? null,
+        link: `eventinvit://event/${event.id}`,
+        meta: {
+            event_notification_id: notification.id,
+            image_url: notification.image_url || null,
+            channels: stored.length ? stored : ['push'],
+        },
+    })));
+
     const failed = rows.length - delivered;
     /* Worth a line of its own when NOTHING went out for one shared reason
        (no Firebase config, say) — otherwise the counts tell the story. */
@@ -318,7 +366,7 @@ const deliver = async (notification, event) => {
         failed_reason: !delivered && reasons.size === 1 ? String([...reasons][0]).slice(0, 255) : null,
     });
 
-    return { recipients: rows.length, delivered, failed };
+    return { recipients: rows.length, delivered, failed, push };
 };
 
 /** Save [fields] as a draft, a scheduled send, or send it now. */

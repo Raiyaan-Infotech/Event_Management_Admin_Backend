@@ -33,7 +33,18 @@ const fails = async (label, fn, text) => {
     ok('no offset -> null', svc.instantOf('2026-12-01', '09:30', 'Somewhere') === null);
 
     // an event with a participant who has NOT joined the app
-    const p = await m.EventParticipant.findOne({
+    // Prefer an event that ALSO has somebody with the app, so the in-app and
+    // bell checks below are not skipped.
+    const withApp = await m.EventParticipant.findAll({
+        where: { participant_client_id: { [m.Sequelize.Op.ne]: null } },
+        attributes: ['event_id'],
+        group: ['event_id'],
+        raw: true,
+    });
+    const p = (await m.EventParticipant.findOne({
+        where: { participant_client_id: null, event_id: withApp.map((r) => r.event_id) },
+        order: [['id', 'DESC']],
+    })) || await m.EventParticipant.findOne({
         where: { participant_client_id: null },
         order: [['id', 'DESC']],
     });
@@ -61,6 +72,12 @@ const fails = async (label, fn, text) => {
     await fails('groups needs a side', () => svc.update(clientId, d.notification.id, {
         action: 'send', title: 'x', message: 'y', audience: 'groups', sides: [],
     }), 'side');
+    await fails('a send needs a channel', () => svc.update(clientId, d.notification.id, {
+        action: 'send', title: 'x', message: 'y', channels: [],
+    }), 'In-App');
+    await fails('email is not a channel', () => svc.update(clientId, d.notification.id, {
+        action: 'send', title: 'x', message: 'y', channels: ['email', 'whatsapp'],
+    }), 'In-App');
     await fails('past time refused', () => svc.update(clientId, d.notification.id, {
         action: 'schedule', title: 'x', message: 'y', audience: 'specific', participant_ids: [p.id],
         scheduled_date: '2020-01-01', scheduled_time: '10:00', timezone: '(GMT +05:30) IST',
@@ -94,6 +111,48 @@ const fails = async (label, fn, text) => {
     await fails('sent cannot be edited', () => svc.update(clientId, d.notification.id, { action: 'draft', title: 'x' }), 'cannot be edited');
     await fails('sent cannot be rescheduled', () => svc.reschedule(clientId, d.notification.id, {}), 'Only a scheduled');
 
+    // In-app only: saved for the participant, and NO push leaves — so this one
+    // may safely go to somebody who does have the app.
+    const joined = await m.EventParticipant.findOne({
+        where: { event_id: event.id, participant_client_id: { [m.Sequelize.Op.ne]: null } },
+    });
+    const inApp = await svc.create(clientId, event.id, {
+        action: 'send', title: 'SMOKE in-app', message: 'saved only', channels: ['in_app'],
+        audience: 'specific', participant_ids: [p.id, ...(joined ? [joined.id] : [])],
+    });
+    created.push(inApp.notification.id);
+    const inAppRows = await m.EventNotificationRecipient.findAll({ where: { notification_id: inApp.notification.id } });
+    const byParticipant = new Map(inAppRows.map((r) => [r.participant_id, r]));
+    ok('in-app only: saved, no push', inApp.outcome.push === false
+        && inApp.notification.status === 'sent'
+        && JSON.stringify(inApp.notification.channels) === '["in_app"]'
+        && inAppRows.length === (joined ? 2 : 1)
+        && inApp.outcome.delivered === (joined ? 1 : 0),
+    JSON.stringify(inApp.outcome));
+    ok('in-app only: no account = not reached', byParticipant.get(p.id)?.status === 'failed',
+        String(byParticipant.get(p.id)?.failed_reason));
+    const bell = await m.ClientNotification.findAll({ where: { type: 'event_notification', event_id: event.id } });
+    const mine = bell.filter((b) => Number(b.meta?.event_notification_id) === inApp.notification.id);
+    ok('bell: one feed row per account, none for the app-less', mine.length === (joined ? 1 : 0)
+        && (!joined || (Number(mine[0].website_client_id) === Number(joined.participant_client_id)
+            && mine[0].title === 'SMOKE in-app' && mine[0].category === 'message')),
+    `rows=${mine.length}`);
+    if (joined) {
+        ok('in-app only: account = saved for them', byParticipant.get(joined.id)?.status === 'sent'
+            && Number(byParticipant.get(joined.id)?.participant_client_id) === Number(joined.participant_client_id));
+    } else {
+        console.log('SKIP  no participant with the app on this event');
+    }
+
+    const both = await svc.create(clientId, event.id, {
+        action: 'schedule', title: 'SMOKE both', message: 'm', channels: ['push', 'in_app', 'email'],
+        audience: 'specific', participant_ids: [p.id],
+        scheduled_date: '2030-01-01', scheduled_time: '10:00', timezone: '(GMT +00:00) UTC',
+    });
+    created.push(both.notification.id);
+    ok('channels stored, unknown ones dropped',
+        JSON.stringify(both.notification.channels) === '["in_app","push"]', JSON.stringify(both.notification.channels));
+
     // groups resolution (schedule only — nothing is sent)
     if (p.rsvp_side) {
         const g = await svc.create(clientId, event.id, {
@@ -124,6 +183,9 @@ const fails = async (label, fn, text) => {
     await fails('deleted is gone', () => svc.getOne(clientId, dueOne.notification.id), 'not found');
 
     // clean up everything this script wrote
+    const feedRows = (await m.ClientNotification.findAll({ where: { type: 'event_notification', event_id: event.id } }))
+        .filter((b) => created.includes(Number(b.meta?.event_notification_id)));
+    await m.ClientNotification.destroy({ where: { id: feedRows.map((b) => b.id) } });
     await m.EventNotification.destroy({ where: { id: created }, force: true });
     const left = await m.EventNotificationRecipient.count({ where: { notification_id: created } });
     ok('cleanup', left === 0);

@@ -13,7 +13,9 @@ const outcomeMessage = ({ notification, outcome }) => {
     if (notification.status === 'scheduled') return 'Notification scheduled.';
     if (!outcome) return 'Notification saved.';
     return `Notification sent to ${outcome.recipients} participant${outcome.recipients === 1 ? '' : 's'}`
-        + ` — push delivered to ${outcome.delivered}.`;
+        + (outcome.push
+            ? ` — push delivered to ${outcome.delivered}.`
+            : ` — saved in the app for ${outcome.delivered}.`);
 };
 
 const list = asyncHandler(async (req, res) => {
