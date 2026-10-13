@@ -1679,6 +1679,64 @@ CREATE TABLE IF NOT EXISTS `event_messages` (
   CONSTRAINT `fk_event_messages_guest` FOREIGN KEY (`participant_id`) REFERENCES `event_participants` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Table structure for `event_notifications` — the organizer's notifications from the mobile app (own tables, not event_message_campaigns)
+CREATE TABLE IF NOT EXISTS `event_notifications` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `event_id` int unsigned NOT NULL,
+  `website_client_id` int unsigned NOT NULL COMMENT 'the organizer who wrote it',
+  `company_id` int DEFAULT NULL,
+  `title` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `message` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'NULL only on a draft',
+  `image_url` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `audience` enum('all','specific','groups') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'all',
+  `participant_ids` json DEFAULT NULL COMMENT 'event_participants.id list — audience specific',
+  `sides` json DEFAULT NULL COMMENT 'bride / groom — audience groups; both = every side',
+  `relationships` json DEFAULT NULL COMMENT 'relation names — audience groups; empty = every relation',
+  `channels` json DEFAULT NULL COMMENT 'push today',
+  `status` enum('draft','scheduled','sending','sent','failed') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'draft',
+  `scheduled_at` datetime DEFAULT NULL COMMENT 'the instant it goes out',
+  `timezone` varchar(80) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'the label the organizer picked; scheduled_at is read in it',
+  `sent_at` datetime DEFAULT NULL,
+  `recipients_count` int unsigned NOT NULL DEFAULT '0',
+  `delivered_count` int unsigned NOT NULL DEFAULT '0' COMMENT 'participants a device of whose accepted the push',
+  `failed_count` int unsigned NOT NULL DEFAULT '0',
+  `failed_reason` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_event_notifications_event` (`event_id`,`deleted_at`,`created_at`),
+  KEY `idx_event_notifications_client` (`website_client_id`,`deleted_at`),
+  KEY `idx_event_notifications_due` (`status`,`scheduled_at`),
+  CONSTRAINT `fk_event_notifications_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_event_notifications_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table structure for `event_notification_recipients` — one row per participant a notification was sent to
+CREATE TABLE IF NOT EXISTS `event_notification_recipients` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `notification_id` int unsigned NOT NULL,
+  `event_id` int unsigned NOT NULL,
+  `participant_id` int unsigned NOT NULL,
+  `participant_client_id` int unsigned DEFAULT NULL COMMENT 'their app account; NULL = has not joined the app',
+  `status` enum('queued','sent','failed') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'queued' COMMENT 'the push only — the row exists either way',
+  `failed_reason` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `sent_at` datetime DEFAULT NULL,
+  `is_read` tinyint(1) NOT NULL DEFAULT '0',
+  `read_at` datetime DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_event_notification_recipient` (`notification_id`,`participant_id`),
+  KEY `idx_event_notification_recipients_client` (`participant_client_id`,`event_id`,`created_at`),
+  KEY `idx_event_notification_recipients_participant` (`participant_id`),
+  KEY `idx_event_notification_recipients_event` (`event_id`),
+  CONSTRAINT `fk_event_notification_recipients_client` FOREIGN KEY (`participant_client_id`) REFERENCES `website_clients` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_event_notification_recipients_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_event_notification_recipients_notification` FOREIGN KEY (`notification_id`) REFERENCES `event_notifications` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_event_notification_recipients_participant` FOREIGN KEY (`participant_id`) REFERENCES `event_participants` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Table structure for `event_templates`
 CREATE TABLE IF NOT EXISTS `event_templates` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,

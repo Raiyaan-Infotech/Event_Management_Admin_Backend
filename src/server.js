@@ -49,6 +49,8 @@ async function startServer() {
       nothing — which is the state `emailScheduler.service` is in.
     */
     require('./services/campaignScheduler.service').start();
+    // The mobile app's scheduled notifications (event_notifications).
+    require('./services/eventNotificationScheduler.service').start();
 
     server.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);

@@ -20,6 +20,8 @@ const agendaController = require('../controllers/clientAgenda.controller');
 const familyController = require('../controllers/clientFamily.controller');
 const organizerContactController = require('../controllers/clientOrganizerContact.controller');
 const agendaService = require('../services/clientAgenda.service');
+const eventNoticeController = require('../controllers/clientEventNotification.controller');
+const eventNoticeService = require('../services/clientEventNotification.service');
 const guestRegistrationController = require('../controllers/guestRegistration.controller');
 const eventNotificationTemplateController = require('../controllers/clientEventNotificationTemplate.controller');
 const { isWebsiteClientAuthenticated } = require('../middleware/websiteClientAuth');
@@ -666,6 +668,48 @@ router.get('/agenda/:itemId', agendaController.getOne);
 router.put('/agenda/:itemId', agendaController.update);
 router.post('/agenda/:itemId/duplicate', agendaController.duplicate);
 router.delete('/agenda/:itemId', agendaController.remove);
+
+/**
+ * The organizer's notifications from the mobile app (Home → Send
+ * Notification). Host-only. Own tables — `event_notifications` — and not the
+ * Messages routes above.
+ *
+ * One notification is `/event-notifications/:notificationId`, NOT
+ * `/notifications/:id`: that path is the signed-in client's own feed.
+ */
+const eventNoticeImageUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: eventNoticeService.MAX_IMAGE_BYTES },
+    fileFilter: (req, file, cb) => {
+        if (eventNoticeService.IMAGE_MIMES.includes(file.mimetype)) return cb(null, true);
+        cb(new Error('Please choose a JPG, PNG or WEBP image.'), false);
+    },
+});
+
+router.get('/events/:id/notifications', eventNoticeController.list);
+router.post('/events/:id/notifications', eventNoticeController.create);
+router.get('/events/:id/notifications/audience', eventNoticeController.audience);
+router.post(
+    '/events/:id/notifications/image',
+    (req, res, next) => {
+        eventNoticeImageUpload.single('file')(req, res, (err) => {
+            if (err) {
+                return res.status(400).json({
+                    success: false,
+                    message: err.code === 'LIMIT_FILE_SIZE'
+                        ? 'That image is larger than 5MB.'
+                        : err.message || 'That image could not be uploaded.',
+                });
+            }
+            next();
+        });
+    },
+    eventNoticeController.uploadImage,
+);
+router.get('/event-notifications/:notificationId', eventNoticeController.getOne);
+router.put('/event-notifications/:notificationId', eventNoticeController.update);
+router.put('/event-notifications/:notificationId/reschedule', eventNoticeController.reschedule);
+router.delete('/event-notifications/:notificationId', eventNoticeController.remove);
 
 /**
  * Event family list (the app's Edit Event → Family). Reads are open to the host

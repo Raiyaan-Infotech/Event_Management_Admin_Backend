@@ -168,6 +168,10 @@ db.GuestReminder = require('./GuestReminder')(sequelize, Sequelize);
 db.EventParticipantResponseLog = require('./EventParticipantResponseLog')(sequelize, Sequelize);
 db.EventMessage = require('./EventMessage')(sequelize, Sequelize);
 db.EventMessageCampaign = require('./EventMessageCampaign')(sequelize, Sequelize);
+// The organizer's notifications from the mobile app — their own tables, not
+// event_message_campaigns (the portal's Messages).
+db.EventNotification = require('./EventNotification')(sequelize, Sequelize);
+db.EventNotificationRecipient = require('./EventNotificationRecipient')(sequelize, Sequelize);
 db.ClientNotification = require('./ClientNotification')(sequelize, Sequelize);
 
 // Translations
@@ -531,6 +535,12 @@ db.EventMessageCampaign.hasMany(db.EventMessage, { foreignKey: 'campaign_id', as
 db.EventMessage.belongsTo(db.EventMessageCampaign, { foreignKey: 'campaign_id', as: 'campaign' });
 db.Event.hasMany(db.EventMessageCampaign, { foreignKey: 'event_id', as: 'campaigns' });
 db.EventMessageCampaign.belongsTo(db.Event, { foreignKey: 'event_id', as: 'event' });
+
+// App notifications: one written notification, one row per participant it went to.
+db.EventNotification.belongsTo(db.Event, { foreignKey: 'event_id', as: 'event' });
+db.EventNotification.hasMany(db.EventNotificationRecipient, { foreignKey: 'notification_id', as: 'recipients' });
+db.EventNotificationRecipient.belongsTo(db.EventNotification, { foreignKey: 'notification_id', as: 'notification' });
+db.EventNotificationRecipient.belongsTo(db.EventParticipant, { foreignKey: 'participant_id', as: 'participant' });
 
 // The notification feed. Both joins are optional and both are SET NULL in the
 // schema, so a row survives the event or guest it describes being deleted.
