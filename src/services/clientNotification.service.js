@@ -230,22 +230,56 @@ const eventIdOf = (raw) => {
 };
 
 /**
- * The events this client's notifications are about — what the feed's event
- * filter offers. Never narrowed by the filter itself, or picking one event
- * would remove every other choice.
+ * What the feed's event filter offers: EVERY event of this client — the ones
+ * they organise and the ones they joined as a participant — whether or not it
+ * has a notification yet (Jamal, 2026-10-13: an event with none is listed and
+ * simply shows an empty list). `total` is how many notifications each has.
+ *
+ * An event that has notifications but is no longer one of theirs is kept too,
+ * or those rows could not be filtered to. Never narrowed by the filter itself,
+ * or picking one event would remove every other choice.
  */
 const listEvents = async (clientId) => {
-    const rows = await ClientNotification.findAll({
-        where: { website_client_id: clientId, archived_at: null, event_id: { [Op.ne]: null } },
-        attributes: ['event_id', [literal('COUNT(*)'), 'total']],
-        include: [{ association: 'event', attributes: ['id', 'name'], required: true }],
-        group: ['event_id', 'event.id', 'event.name'],
-        raw: true,
-        nest: true,
-    });
-    return rows
-        .map((r) => ({ id: Number(r.event_id), name: r.event?.name || '', total: Number(r.total) }))
-        .sort((a, b) => a.name.localeCompare(b.name));
+    // Lazy: models/index is still loading when this file is first required.
+    const { Event, EventParticipant } = require('../models');
+
+    // Independent reads, so they go together — production is ~374ms a query.
+    const [counted, owned, joined] = await Promise.all([
+        ClientNotification.findAll({
+            where: { website_client_id: clientId, archived_at: null, event_id: { [Op.ne]: null } },
+            attributes: ['event_id', [literal('COUNT(*)'), 'total']],
+            include: [{ association: 'event', attributes: ['id', 'name'], required: true }],
+            group: ['event_id', 'event.id', 'event.name'],
+            raw: true,
+            nest: true,
+        }),
+        Event.findAll({
+            where: { website_client_id: clientId },
+            attributes: ['id', 'name'],
+            raw: true,
+        }),
+        EventParticipant.findAll({
+            where: { participant_client_id: clientId },
+            attributes: ['event_id'],
+            include: [{ model: Event, as: 'event', attributes: ['id', 'name'], required: true }],
+            raw: true,
+            nest: true,
+        }),
+    ]);
+
+    const events = new Map();
+    for (const e of owned) events.set(Number(e.id), { id: Number(e.id), name: e.name || '', total: 0 });
+    for (const p of joined) {
+        const id = Number(p.event?.id);
+        if (id && !events.has(id)) events.set(id, { id, name: p.event.name || '', total: 0 });
+    }
+    for (const r of counted) {
+        const id = Number(r.event_id);
+        const known = events.get(id);
+        if (known) known.total = Number(r.total);
+        else events.set(id, { id, name: r.event?.name || '', total: Number(r.total) });
+    }
+    return [...events.values()].sort((x, y) => x.name.localeCompare(y.name));
 };
 
 /**

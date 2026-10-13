@@ -15954,3 +15954,36 @@ Jamal: what the organizer sends does not show in the participant's notification 
 - `tests/event-notifications.test.js`: 30 pass, nothing skipped (the test now picks an event that has a participant with the app; in-app only, so no push leaves; the feed rows it writes are deleted).
 - Not committed, not pushed — production does not do this until the backend is pushed. Notifications already sent are NOT back-filled into the bell.
 - Touches `clientNotification.service.js` (one line in `TYPE_CATEGORY`), a file that also carries somebody else's uncommitted event-filter work — commit with care.
+
+### 784. Mobile app — "(Optional)" removed everywhere; Organizer section renamed (2026-10-13)
+`Event_Invite_Mobile_App`, app only. `dart analyze lib`: no errors, no warnings. NOT seen on the phone, NOT committed.
+- **"(Optional)" is gone from every label and hint** (37 strings in 15 files, plus the two label helpers that drew it — the Agenda form's `_label` and `GalleryFieldLabel`). A field is now either marked with a red `*` or carries no mark. e.g. "Email (Optional)" → "Email", "Select (Optional)" → "Select", "Attach Image (Optional)" → "Attach Image". Comments were left alone.
+- **Organizer Contact → "Organizer"** (Jamal: drop "Contact" too, for the organizer section only): Edit Event row, the view page's top bar and the edit page's top bar all read **Organizer**; the edit button reads **Update** (was Update Contact); "Edit Contact" → **Edit** (button and menu item); "Crop Contact Photo" → "Crop Photo"; toast "Contact photo updated" → "Photo updated"; result page "Organizer\nUpdated Successfully!". The row's subtitle ("Update organizer contact details") and the participant-side "Contact" tile are unchanged.
+- **Other modules NOT changed** — he asked to be told first. Where an edit page / button repeats the section name: Agenda ("Edit Agenda"), Family ("Edit Family Member", "Edit Member", "Update Family Member"), Gallery ("Edit Gallery Category", "Edit Media"), Guests ("Edit Guest", "Edit Group"), Participants ("Edit Participant", "Update Participant"), RSVP ("Edit Response", "Update Response", "Edit Note"), Notifications ("Edit Notification"), Event ("Edit Event", "Edit Event Details", "Edit Ceremony"), Invitation ("Edit Invitation Content", "Edit Content"). Waiting for his yes / which ones.
+
+### 785. Mobile app — "Edit X" → "Edit", "Update X" → "Update" in every module (2026-10-13)
+Jamal's yes to §784's list ("edit agenda to edit"). 27 strings in 18 organizer files — page titles, buttons and menu rows alike: Agenda, Family (Edit Family Member / Edit Member / Update Family Member), Gallery (Edit Gallery Category / Edit Media), Guests (Edit Guest / Edit Group), Participants (Edit / Update Participant), RSVP (Edit / Update Response, Edit Note), Notifications (Edit Notification), Event (Edit Event Details, Edit Ceremony), Invitation (Edit Invitation Content, Edit Content).
+- **Left as they are:** "Edit Event" (Home quick action, event card menu, the Edit Event page — the name of the action; Home also compares the label to that text), and every "Add X" / "Create X" — so a form's top bar reads "Add Agenda" when adding and "Edit" when editing. Shorten the Add side too if he wants them to match.
+- `dart analyze lib`: no errors, no warnings. NOT seen on the phone, NOT committed.
+
+### 786. Mobile app — login screens show the app icon (2026-10-13)
+`AuthHeroBanner` (`lib/features/common/auth/widgets/auth_hero_banner.dart`) drew a blue rounded square with a people icon above "EventInvit". It now draws `assets/images/app_logo.png` (72 × 72) — the same picture as the launcher icon and the splash screen. One widget, so both `/login` and `/login-mobile` change. `dart analyze`: no errors. NOT seen on the phone, NOT committed.
+
+### 787. Mobile app — bell notification list: event filter removed (2026-10-13)
+Jamal: "notification list remove event filter now". The "All Events" filter field above the tabs of the bell list (`lib/features/common/notifications/notifications_screen.dart`) is gone — the field, its sheet (`_pickEvent`), `_EventFilterField`, `_EventOption`; Mark all as read acts on the whole tab again. The list shows every event's notifications.
+- Left in place, unused by the screen: `notificationEventFilterProvider` (always null now) and the repository's / backend's `event_id` support (uncommitted work in `notification_repository.dart`, `clientMessage.controller.js`, `clientNotification.service.js`) — harmless, and there if the filter comes back.
+- NOT touched: the organizer's Notifications page (Home → Send Notification) still has its event chooser field at the top — that one switches which event's sent notifications are listed. Taken to be a different thing; remove on his word.
+- `dart analyze`: no issues. NOT seen on the phone, NOT committed.
+
+### 788. Correction to §787 — the filter to remove was on the ORGANIZER's list; bell filter restored (2026-10-13)
+§787 removed the wrong one. Jamal meant the event field on Home → Send Notification's list page.
+- **Bell list:** the event filter is BACK, exactly as it was — re-applied from the original change found in the other session's transcript (the file was uncommitted, so git had no copy). `notifications_screen.dart` is as before §787.
+- **Organizer's Notifications page** (`organizer_notifications_screen.dart`): the event field at the top, its "Choose an event" sheet (`_pickEvent`) and `_EventField` are removed. The page lists the event chosen on Home (Send Notification always asks which event first); to see another event's notifications, go back and choose it.
+- `dart analyze` on both folders: no issues. NOT seen on the phone, NOT committed.
+
+### 789. Bell list — the event filter offers EVERY event, with or without notifications (2026-10-13)
+Jamal: the filter did not list an event that has no notifications; it should list all, and such an event just shows an empty list.
+- `clientNotification.service.listEvents` (the `events` of `GET /client/notifications`) now returns every event the account ORGANISES (`events.website_client_id`) or JOINED as a participant (`event_participants.participant_client_id`), each with its notification count — 0 included — plus any event that still has notifications but is no longer theirs. Three reads in one `Promise.all`. Before, only events that already had a notification.
+- Checked on the local DB: an organizer with 4 events, 3 of them with no notification, now gets all 4; filtering to an empty one returns 0 rows and still offers all 4.
+- App unchanged: the sheet already draws "N notifications" under each event (now "0 notifications" for an empty one) and the list already has its empty state.
+- Backend only, NOT committed / pushed — the phone (production) shows it after the push. The whole event filter (§787 / §788) is still uncommitted backend + app work.
