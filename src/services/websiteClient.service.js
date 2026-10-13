@@ -8,6 +8,7 @@ const logger = require('../utils/logger');
 const { OTP_TTL_SECONDS, OTP_MAX_ATTEMPTS } = require('./websiteClientOAuth.service');
 const msg91 = require('./msg91Whatsapp.service');
 const msg91Sms = require('./msg91Sms.service');
+const eventOrganizer = require('./eventOrganizer.service');
 
 const MODEL_NAME = 'WebsiteClient';
 const MODULE_SLUG = 'website_clients';
@@ -578,6 +579,20 @@ const findClientByMobile = async (mobile, vendorId, { allowParticipant = true } 
         }
     }
 
+    /*
+      Still nobody: is it the organizer number of an event? The owner typed it
+      on the Organizer page, so its holder is to manage that event — give the
+      number an account, exactly as a participant's number is given one above.
+    */
+    if (!client) {
+        const made = await eventOrganizer.createFromEvent(digits, resolvedVendorId);
+        if (made) {
+            client = await WebsiteClient.unscoped().findByPk(made.id, {
+                attributes: { exclude: ['password'] },
+            });
+        }
+    }
+
     /**
      * ⚠ THIS ANSWER REVEALS WHETHER A NUMBER IS REGISTERED.
      *
@@ -619,9 +634,12 @@ const requestLoginOtp = async (data = {}, vendorId = DEFAULT_VENDOR_ID) => {
     if (data.login_as === 'organizer') {
         // A client (super admin) holds a plan and may sign in before creating
         // their first event; anyone else must own a live event.
+        // ...or be the organizer the owner named on one: link those events
+        // to this account now, so the count below is true.
+        const organised = await eventOrganizer.claimForClient(client);
         const owned = client.subscription_plan_id
             ? 1
-            : await Event.count({ where: { website_client_id: client.id } });
+            : organised || await Event.count({ where: { website_client_id: client.id } });
         if (!owned) {
             throw ApiError.forbidden('This mobile number is not registered as an event organizer.');
         }
@@ -771,6 +789,10 @@ const verifyLoginOtp = async (data = {}, vendorId = DEFAULT_VENDOR_ID) => {
     }
 
     // Re-read through the default scope so the caller never holds otp_hash.
+    // Signed in: every event whose organizer number is this one is theirs to
+    // manage from here on.
+    await eventOrganizer.claimForClient(client);
+
     return WebsiteClient.findByPk(client.id);
 };
 

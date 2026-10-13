@@ -15987,3 +15987,84 @@ Jamal: the filter did not list an event that has no notifications; it should lis
 - Checked on the local DB: an organizer with 4 events, 3 of them with no notification, now gets all 4; filtering to an empty one returns 0 rows and still offers all 4.
 - App unchanged: the sheet already draws "N notifications" under each event (now "0 notifications" for an empty one) and the list already has its empty state.
 - Backend only, NOT committed / pushed — the phone (production) shows it after the push. The whole event filter (§787 / §788) is still uncommitted backend + app work.
+
+### 790. Mobile app — "Add X" / "Create X" / "Delete X" / "Save X" shortened too (2026-10-13)
+§785 shortened only Edit / Update and left the Add side; Jamal: "still so many buttons the same as before — why keep Add Agenda". 42 more strings in 19 organizer files now drop the module name — titles, buttons, menu rows, confirm buttons: "Add Agenda" → **Add**, "Add New Agenda" → Add New, "Add Another Guest" → Add Another, "Add Family Member" / "Add Gallery Category" / "Add Category" / "Add Guest" / "Add Group" / "Add Participant" → Add, "Create Notification" → **Create**, "Delete Agenda / Member / Category / Guest / Group / Participant / Notification / Response" → **Delete**, "Remove Media" → Remove, "Save Order" / "Save Changes" → **Save**.
+- **Still long, on purpose:** Home's Quick Action tiles (Edit Event, Add Guest … — several actions side by side, a bare "Add" would not say what); the Event's own names (Create Event, Edit Event, Delete Event); tiles and labels that tell two things apart on one page (Add Photos / Add Video, Add Image / Change Image, Add Photo, Add More Details, Add Personal Note, Add Password, Add Logo / Image, New Ceremony / Add New Ceremony, Remove Pin / Remove Photo, Add Manually).
+- `dart analyze lib`: no errors, no warnings. NOT seen on the phone, NOT committed.
+
+### 791. Mobile app — Organizer edit form: photo block in the shared style (2026-10-13)
+Jamal did not want the Organizer form's own photo design (a "Profile Photo" label, a 64 px avatar, an outlined "Change Photo" button and a red bin icon in one row). It is now the block the Family and Participant forms use: a centred 96 px circle with the camera badge (tap to pick), and under it the text links **Add Photo / Change Photo** and **Remove**. Picking was already the shared `AppImagePickCrop` (Camera / Gallery → crop) and is unchanged, as is the upload and save. `organizer_contact_screens.dart`; `dart analyze`: no issues; NOT seen on the phone, NOT committed.
+
+### 792. Mobile app — Organizer edit form labels (2026-10-13)
+"Address / Location" → **Address** (hint "Venue or office address"), "Description / Note" → **Description**. `organizer_contact_screens.dart`; `dart analyze` clean; NOT seen on the phone, NOT committed.
+
+### 793. Mobile app — Organizer view page: ⋮ and Edit button removed; "About Organizer" (2026-10-13)
+View page: the top bar ⋮ and the bottom **Edit** button are gone; one full-width **More Actions** button remains (its sheet still has Edit, Change Photo and the rest). Edit form: "Description" → **About Organizer**. `organizer_contact_screens.dart` (unused `_openEdit` removed); `dart analyze` clean; NOT seen on the phone, NOT committed.
+
+### 794. Mobile app — Organizer view page: photo lost after an update; pull to refresh added (2026-10-13)
+Jamal: after updating the organizer, the view page does not show the photo, and there is no pull to refresh.
+- **Found:** `organizerContactProvider` used the server's card only while the request was `AsyncData`. A save invalidates that request, so for as long as it re-reads the provider fell to its fallback — built from the event, which has NO photo — and the photo disappeared. It now reads `valueOrNull`, which keeps the last answer during a re-read (and after a failed one).
+- **Pull to refresh** on the view page (`RefreshIndicator`, always scrollable): re-reads `GET /client/events/:id/organizer-contact`.
+- ⚠ NOT reproduced on a device, so only the fall-to-fallback is proven from the code. The server side was read and looks right (`organizer_image` is in the model, saved by the PUT and returned by the GET). If the photo is still missing after a hot restart: does it show on the EDIT form after picking, and does a pull to refresh bring it?
+- `organizer_contact_screens.dart`; `dart analyze`: no issues; NOT committed.
+
+### 795. Mobile app — Organizer view page: Message button (2026-10-13)
+The quick actions are now Call · WhatsApp · **Message** · Email. Call (`tel:`), WhatsApp (`wa.me/<digits>`) and the new Message (`sms:`) all use the organizer's saved number (`fullMobile` — the number with its country code, +91 added when none was typed). Call and WhatsApp were already wired to it; Message is new. `organizer_contact_screens.dart`; `dart analyze` clean; NOT run on the phone, NOT committed.
+
+### 796. Organizer photo — reproduced on the phone, works with §794's fix (2026-10-13)
+Jamal: "still that organizer image not show — which table do we save this in?" **Table: `events`** — `organizer` (name), `organizer_image` (photo URL), `contact_phone`, `contact_email`, `venue_address` (the Address field), `description` (About Organizer). No separate organizer table: the page edits the event's own columns.
+- Checked on his phone (adb, production API, organizer "Ismail"): the edit form showed "Add Photo", i.e. the event had NO `organizer_image` stored at that moment — his earlier attempts had not left one. Then on the same form: tap the circle → Choose from Gallery → pick → "Photo uploaded" (form now Change Photo / Remove) → **Update** → the view page shows the photo; a pull to refresh re-read it from the server and it is still there (screenshot taken). So upload, save and reload all work with the current code (§794 is on the phone).
+- ⚠ His event now carries the picture picked for the test (the first image in the phone's gallery) — he can change it from More Actions → Change Photo.
+- Not explained: why his own earlier updates stored nothing. Most likely they ran before §794 reached the phone, or the photo was never uploaded on the form (the old block's "Change Photo" button). No code changed in this entry.
+
+### 797. Mobile app — Organizer view page: the button is "Edit" (2026-10-13)
+The bottom **More Actions** button is now **Edit** and opens the edit form directly. The More Actions sheet is deleted with its **Change Photo** option (`showOrganizerContactActionMenu`, `_ActionTile`) — the photo is changed on the edit form (tap the circle). `organizer_contact_screens.dart`; `dart analyze` clean; NOT seen on the phone, NOT committed.
+
+### 798. Mobile app — Gallery select row: Cancel / Select All as text (2026-10-13)
+Reverses §779: Cancel and Select All / Clear All in the category's select row are plain text links again, no border. `gallery_media_screen.dart`; `dart analyze`: no errors; NOT seen on the phone, NOT committed.
+Then: "N items selected" is larger (16, semi-bold) and Cancel / Select All / Clear All are the same 16 size beside it (was 14 and the small compact-button size).
+Then reduced (Jamal): "N items selected" 15 semi-bold; Cancel / Select All / Clear All 14.
+
+### 799. Mobile app — RSVP settings: "Preview RSVP Form" → "Preview" (2026-10-13)
+Button label only, `rsvp_settings_screen.dart`. `dart analyze`: no errors; NOT seen on the phone, NOT committed.
+Then: Cancel in the gallery select row is red (Select All / Clear All stay blue).
+
+### 800. Event ORGANIZER as a login — decisions, and Phase 1 (the link) BUILT (2026-10-13)
+Jamal tried to sign in with the number on an event's Organizer page ("No account is registered with that mobile number"). That number was contact text only. **Decided by him:**
+- Each event has ONE organizer — the holder of the phone on its Organizer page. They sign in through "Event Organizer" with that number.
+- They have FULL control of that event (edit, guests, participants, RSVP, agenda, family, gallery, notifications, invitation). They may NOT delete the event and may NOT create events.
+- Billing / plan / subscription stay with the client (the owner). A number that is already a client stays a client and also sees the events it organises.
+
+**Size, stated before building:** the server asks "is the caller the event's OWNER" in 183 places across ~30 files. Plan in three phases — (1) link the organizer to an account, (2) let that account into every module + hide Create / Delete, (3) owner / organizer / stranger test across the modules and the app changes.
+
+**Phase 1 — done, LOCAL only (NOT committed, NOT pushed, production NOT migrated):**
+- **Column `events.organizer_client_id`** (INT UNSIGNED NULL → `website_clients.id`, ON DELETE SET NULL, index `idx_events_organizer`). Tool `src/database/tools/apply-event-organizer-client.js` (dry run by default, `--apply`, `--prod`); applied locally; in `initial_setup.sql` and the `Event` model. NULL = the owner only.
+- **`src/services/eventOrganizer.service.js`** keeps the link — nobody types it:
+  - `syncEvent(event)` — after the organizer's number is saved (Organizer page PUT, Create Event, Edit Event): point the event at the account that number already has, or at nobody. The owner's own number links nobody.
+  - `claimForClient(client)` — at sign-in: every event whose organizer number is theirs becomes theirs (one UPDATE). This is also how EXISTING events get linked — no back-fill, no accounts made in bulk.
+  - `createFromEvent(mobile, vendor)` — a number with no account that IS an event's organizer number gets one at its first sign-in (named after the organizer the owner typed), as a participant's number already does.
+  - Numbers are compared on their last 10 digits with spaces / dashes stripped; always inside one tenant (the owner's `vendor_id`).
+- **Login (`websiteClient.service`):** `findClientByMobile` falls through to `createFromEvent`; `requestLoginOtp` with `login_as: 'organizer'` now also accepts an account that ORGANISES an event (was: owns one, or holds a plan); `verifyLoginOtp` claims the events.
+- **`tests/event-organizer-link.test.js`** (local DB, no server, no message sent — MSG91 is off locally; restores the event, deletes the account): 17 pass — unknown number refused; number typed on an event → first sign-in creates the account and links the event; code signs it in; owner's own number links nobody; number with an account linked on save; number removed → unlinked and refused as organizer; other tenant sees nothing.
+- ⚠ **What the organizer can do after Phase 1: nothing yet.** The server will issue them a code and a session, but every module still checks for the OWNER, and the app's own gate (`GET /client/events` must be non-empty for an "Event Organizer" sign-in) still turns them away — that list returns owned events only. Phase 2 is what makes it usable.
+- ⚠ Security note for Phase 2: once it is live, typing a phone number on the Organizer page HANDS THAT PERSON the event. Today it is a contact line guests can see.
+
+### 801. Organizer access — Phase 2 designed, NOT built: the write was refused (2026-10-13)
+Jamal: go ahead with the rest; whether the organizer may see GUESTS (the phone book) waits for his manager — so guests stay owner-only for now.
+- **Design chosen (smaller and safer than editing ~180 ownership checks):** one middleware after authentication on `/api/v1/client`. When a request is about an event the caller ORGANISES — the id is in the path (`/events/:id/…`), or the row named in the path belongs to it (`/agenda/:id`, `/gallery/:id`, `/gallery/categories/:id`, `/family-members/:id`, `/participants/:id`, `/rsvps/:id`, `/event-notifications/:id`), or it is `event_id` on `/participants` / `/rsvps` — the request continues AS THE OWNER (`req.websiteClient` = owner, the real caller on `req.organizerClient`). Refused for an organizer: `DELETE /events/:id`, and `POST /events` when they hold no plan. Everything that names no event (billing, settings, guests phone book, `/me`) runs as the caller and so shows them nothing of the owner's. `GET /events` adds the organised events marked `is_organizer`; `/event-options` uses the owner's plan for an organizer with none. Who-organises-what cached 60 s, cleared when a link changes.
+- **Not on disk.** Creating `src/middleware/eventOrganizerAccess.js` was refused by this session's permission rules (it grants one account access to another account's data). The wiring that referenced it (routes, event controller, `eventOrganizer.service`) had already been applied by a script and was REVERTED, so the backend loads and `tests/event-organizer-link.test.js` is 17 / 17 again. State = §800 (Phase 1) exactly.
+- **Needs Jamal:** allow that write (a permission rule for Edit/Write in this project, or approve it interactively) and Phase 2 can be applied and tested; or he decides otherwise. App side still to do after it: read `is_organizer`, hide Delete Event on those events and Create Event for an account with no plan.
+
+### 802. Organizer access — Phase 2 BUILT: an event's organizer manages it (2026-10-13)
+Jamal allowed the write §801 was refused. Guests (the phone book) stay owner-only — his manager is to decide.
+- **`src/middleware/eventOrganizerAccess.js`**, mounted in `clientPortal.routes.js` right after `isWebsiteClientAuthenticated`. When a request is about an event the caller ORGANISES it continues AS THE EVENT'S OWNER (`req.websiteClient` = owner; the real caller on `req.organizerClient`, the event on `req.organizerEventId`). No service was changed — the ~180 owner checks see the owner. The event is read off the request only: `/events/:id/…` and `/splash-screens/for-event/:id` (path), `/agenda|gallery|gallery/categories|family-members|participants|rsvps|event-notifications/:id` (the row's `event_id`), `/participants` and `/rsvps` list / stats / capacity / export (`event_id` in query or body), and `/event-options` for an organizer with no plan (the owner's catalogue).
+- **Refused for an organizer:** `DELETE /events/:id` ("Only the client who owns this event can delete it.") and, with no plan of their own, `POST /events` ("Only the client can create events.").
+- **Stays their own (so shows nothing of the owner's):** the events list itself, billing, settings, `/me`, the guest phone book, a list call with no event id, `/events/:id/wishlist`, and the owner's OTHER events.
+- **`GET /client/events`** (controller) adds the events the account organises, read as their owner, marked `is_organizer: true`; `GET /client/events/:id` carries the mark too. A client who is also an organizer sees both. This is also what lets the app's "Event Organizer" sign-in through (it requires a non-empty list).
+- **Bug found by the test, fixed:** `syncEvent` skipped the UPDATE when the instance in hand looked unchanged — with a stale instance the link stayed after the number was removed, i.e. somebody keeping control. It now always writes.
+- Who-organises-what is cached 60 s per account (one query a minute for an organizer; none for anyone else after the first) and cleared whenever a link changes.
+- **App:** `ClientEventDetail.isOrganizer`; Event Settings hides **Delete Event** for an organizer. Create Event was already refused for an account with no plan ("Only the account owner with a plan can create events."). `dart analyze` clean on the touched files.
+- **Tests (local DB, no server, nothing sent, everything restored):** `tests/event-organizer-access.test.js` 32 pass — organizer on their event → owner for every shape above; delete / create refused; list, billing, guests, `/me`, no-event list, wishlist → themselves; the owner's other event and its rows → themselves; a stranger → themselves; the owner can still delete; agenda and event services answer for the swapped caller and refuse the bare organizer; number removed → access gone at once. `event-organizer-link.test.js` 17, `event-notifications.test.js` 30 still pass.
+- ⚠ **DEPLOY ORDER:** the `Event` model now has `organizer_client_id`. Run `node src/database/tools/apply-event-organizer-client.js --prod --apply` BEFORE the backend is pushed — pushed first, every query on `events` fails on production ("Unknown column").
+- NOT committed, NOT pushed, NOT run over HTTP or on a phone. Not covered: routes whose path does not name an event (portal Messages `/messages…`, account-wide Splash Screens list, analytics) — an organizer gets nothing there. The organizer can change the organizer number on their event (full control), which hands the event to somebody else.

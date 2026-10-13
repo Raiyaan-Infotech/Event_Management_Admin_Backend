@@ -26,6 +26,7 @@ const guestRegistrationController = require('../controllers/guestRegistration.co
 const eventNotificationTemplateController = require('../controllers/clientEventNotificationTemplate.controller');
 const { isWebsiteClientAuthenticated } = require('../middleware/websiteClientAuth');
 const { codeLimiter } = require('../middleware/rateLimit');
+const { eventOrganizerAccess } = require('../middleware/eventOrganizerAccess');
 
 /**
  * Client portal API — everything here requires a signed-in website client.
@@ -35,6 +36,9 @@ const { codeLimiter } = require('../middleware/rateLimit');
  * the whole catalogue rather than what their plan allows.
  */
 router.use(isWebsiteClientAuthenticated);
+// An event's organizer manages it as its owner would — see the middleware.
+// Directly after authentication, so every route below is covered.
+router.use(eventOrganizerAccess);
 
 router.get('/me', controller.me);
 // Self-service account management. No id parameter anywhere: each acts on the

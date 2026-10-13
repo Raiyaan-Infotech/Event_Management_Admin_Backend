@@ -1954,6 +1954,7 @@ CREATE TABLE IF NOT EXISTS `guest_relationship_options` (
 CREATE TABLE IF NOT EXISTS `events` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `website_client_id` int unsigned NOT NULL COMMENT 'Owner - the signed-in portal client',
+  `organizer_client_id` int unsigned DEFAULT NULL COMMENT 'The login account of the event''s one organizer (the holder of contact_phone). NULL = the owner only',
   `vendor_id` int unsigned NOT NULL DEFAULT '1' COMMENT 'Tenant whose website the client belongs to',
   `company_id` int DEFAULT NULL COMMENT 'Same scoping every other admin module uses',
   `subscription_plan_id` int unsigned DEFAULT NULL,
@@ -2008,6 +2009,7 @@ CREATE TABLE IF NOT EXISTS `events` (
   `deleted_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_events_client` (`website_client_id`,`deleted_at`),
+  KEY `idx_events_organizer` (`organizer_client_id`,`deleted_at`),
   KEY `idx_events_company` (`company_id`,`deleted_at`),
   KEY `idx_events_vendor` (`vendor_id`,`deleted_at`),
   KEY `idx_events_status` (`status`,`deleted_at`),
@@ -2016,6 +2018,7 @@ CREATE TABLE IF NOT EXISTS `events` (
   KEY `fk_events_category` (`event_category_id`),
   CONSTRAINT `fk_events_category` FOREIGN KEY (`event_category_id`) REFERENCES `event_categories` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_events_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_events_organizer_client` FOREIGN KEY (`organizer_client_id`) REFERENCES `website_clients` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_events_plan` FOREIGN KEY (`subscription_plan_id`) REFERENCES `subscription_plans` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB AUTO_INCREMENT=22 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

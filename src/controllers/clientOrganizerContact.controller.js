@@ -3,6 +3,7 @@ const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const { Event } = require('../models');
 const mediaService = require('../services/media.service');
+const eventOrganizer = require('../services/eventOrganizer.service');
 
 /**
  * Organizer Contact - the contact card shown in the mobile app's
@@ -146,6 +147,8 @@ const updateContact = asyncHandler(async (req, res) => {
     if (Object.keys(patch).length > 0) {
         await event.update(patch);
     }
+    // The organizer's number decides who else may manage the event.
+    if ('contact_phone' in patch) await eventOrganizer.syncEvent(event);
 
     return ApiResponse.success(
         res,

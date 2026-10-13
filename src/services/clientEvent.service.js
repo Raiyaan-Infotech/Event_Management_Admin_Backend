@@ -557,6 +557,9 @@ const createEvent = async (clientId, body) => {
         return event;
     });
 
+    // The organizer's number decides who else may manage the event.
+    if (created.contact_phone) await require('./eventOrganizer.service').syncEvent(created);
+
     return getEventById(clientId, created.id);
 };
 
@@ -1361,6 +1364,8 @@ const updateEvent = async (clientId, eventId, body) => {
     // the live event, and a code already printed or shared must keep matching.
     // Only an event that somehow has no code yet is given one.
     await event.update(data);
+    // The organizer's number decides who else may manage the event.
+    if ('contact_phone' in data) await require('./eventOrganizer.service').syncEvent(event);
     if (!event.qr_token) {
         const issuedAt = eventQr.issuedNow();
         await event.update({

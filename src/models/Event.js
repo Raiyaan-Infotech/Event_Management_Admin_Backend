@@ -123,6 +123,12 @@ module.exports = (sequelize) => {
             // Added by apply-event-organizer-image.js.
             organizer_image: { type: DataTypes.STRING(500), allowNull: true },
             /**
+             * The login account of the event's ONE organizer — the holder of
+             * `contact_phone`. Kept by eventOrganizer.service, never typed.
+             * NULL = the owner only. Added by apply-event-organizer-client.js.
+             */
+            organizer_client_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+            /**
              * The host's own picture for a CUSTOM-type template — it replaces
              * the template's picture inside the template's shape, for this
              * event only. Null = the template's own.

@@ -3,6 +3,7 @@ const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const clientEventService = require('../services/clientEvent.service');
 const clientAnalyticsService = require('../services/clientAnalytics.service');
+const { organisedBy } = require('../middleware/eventOrganizerAccess');
 
 /**
  * Events, for the signed-in website client.
@@ -18,6 +19,25 @@ const list = asyncHandler(async (req, res) => {
         req.websiteClient.id,
         req.query
     );
+
+    /*
+      The events this account ORGANISES for somebody else go on the same list
+      (first page), read as their owner would read them and marked
+      `is_organizer` — the app hides Delete on those. A client who is also an
+      organizer sees both.
+    */
+    const organised = await organisedBy(req.websiteClient.id);
+    if (organised.size && (Number(req.query.page) || 1) === 1) {
+        const theirs = await Promise.all(
+            [...organised.entries()].map(([eventId, ownerId]) =>
+                clientEventService.getEventById(ownerId, eventId)),
+        );
+        for (const event of theirs) {
+            if (event) rows.push({ ...event, is_organizer: true });
+        }
+        pagination.totalItems += theirs.filter(Boolean).length;
+    }
+
     return ApiResponse.paginated(res, rows, pagination, 'Events retrieved');
 });
 
@@ -72,6 +92,8 @@ const getById = asyncHandler(async (req, res) => {
         platform: clientPortalService.platformFromHeader(req.get('x-client')),
     });
     if (!event) throw ApiError.notFound('Event not found.');
+    // Read by the event's organizer (see eventOrganizerAccess), not its owner.
+    if (req.organizerClient) event.is_organizer = true;
     return ApiResponse.success(res, { event }, 'Event retrieved');
 });
 
