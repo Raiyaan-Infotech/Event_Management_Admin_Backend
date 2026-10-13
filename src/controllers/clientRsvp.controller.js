@@ -98,11 +98,11 @@ const getSettings = asyncHandler(async (req, res) => {
 const updateSettings = asyncHandler(async (req, res) => {
     const {
         enabled, response_options, deadline,
-        allow_guest_count, allow_special_requests, allow_relationship,
+        allow_guest_count, allow_food_preference, allow_special_requests, allow_relationship,
     } = req.body;
     const data = await rsvpSettingsService.update(req.websiteClient.id, req.params.id, {
         enabled, response_options, deadline,
-        allow_guest_count, allow_special_requests, allow_relationship,
+        allow_guest_count, allow_food_preference, allow_special_requests, allow_relationship,
     });
     logger.logRequest(req, `Client ${req.websiteClient.id} updated RSVP settings of event ${req.params.id}`);
     return ApiResponse.success(res, data, 'RSVP settings saved');

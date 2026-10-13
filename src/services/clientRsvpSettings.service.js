@@ -23,6 +23,9 @@ const DEFAULTS = Object.freeze({
     response_options: RESPONSE_OPTIONS,
     deadline: null,
     allow_guest_count: true,
+    // Off until the organizer asks for it, like the relationship: an event
+    // saved before this existed keeps the form it had.
+    allow_food_preference: false,
     allow_special_requests: true,
     allow_relationship: false,
 });
@@ -64,6 +67,7 @@ const settingsOf = (event) => {
         deadline,
         effective_deadline: deadline || endDate,
         allow_guest_count: bool(stored.allow_guest_count, DEFAULTS.allow_guest_count),
+        allow_food_preference: bool(stored.allow_food_preference, DEFAULTS.allow_food_preference),
         allow_special_requests: bool(stored.allow_special_requests, DEFAULTS.allow_special_requests),
         allow_relationship: bool(stored.allow_relationship, DEFAULTS.allow_relationship),
     };
@@ -110,11 +114,14 @@ const update = async (clientId, eventId, body = {}) => {
         response_options: current.response_options,
         deadline: current.deadline,
         allow_guest_count: current.allow_guest_count,
+        allow_food_preference: current.allow_food_preference,
         allow_special_requests: current.allow_special_requests,
         allow_relationship: current.allow_relationship,
     };
 
-    for (const key of ['enabled', 'allow_guest_count', 'allow_special_requests', 'allow_relationship']) {
+    for (const key of [
+        'enabled', 'allow_guest_count', 'allow_food_preference', 'allow_special_requests', 'allow_relationship',
+    ]) {
         if (body[key] !== undefined) next[key] = bool(body[key], next[key]);
     }
 

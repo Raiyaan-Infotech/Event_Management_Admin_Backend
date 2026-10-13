@@ -721,6 +721,7 @@ const presentMyRsvp = (guest) => ({
     party_size: Number(guest.party_size) || 1,
     special_requirements: guest.special_requirements,
     dietary_preference: guest.dietary_preference,
+    food_preference_option_id: guest.food_preference_option_id || null,
     rsvp_side: guest.rsvp_side || null,
     relationship: guest.relationship || null,
     relationship_option_id: guest.relationship_option_id || null,
@@ -771,10 +772,15 @@ const getMyRsvp = async (clientId, rawEventId) => {
     const rsvpOn = (await rsvpEnabledFor(event)) && settings.enabled;
     const closed = rsvpSettings.deadlinePassed(settings);
 
-    // Only fetched when the form will ask for it.
-    const relationships = settings.allow_relationship
-        ? await relationshipOptions.listForCategory(event.event_category_id, DEFAULT_COMPANY_ID)
-        : [];
+    // Only fetched when the form will ask for them — and together.
+    const [relationships, foods] = await Promise.all([
+        settings.allow_relationship
+            ? relationshipOptions.listForCategory(event.event_category_id, DEFAULT_COMPANY_ID)
+            : [],
+        settings.allow_food_preference
+            ? foodOptions.listForCategory(event.event_category_id, DEFAULT_COMPANY_ID)
+            : [],
+    ]);
 
     return {
         is_host: false,
@@ -783,6 +789,7 @@ const getMyRsvp = async (clientId, rawEventId) => {
         can_respond: rsvpOn && !closed && guest.response_type === 'none',
         settings,
         relationship_options: relationships.map((r) => ({ id: r.id, name: r.name })),
+        food_preference_options: foods.map((r) => ({ id: r.id, name: r.name })),
         rsvp: presentMyRsvp(guest),
     };
 };
@@ -918,6 +925,24 @@ const submitMyRsvp = async (clientId, rawEventId, body = {}) => {
     }
     if (body.notes !== undefined) {
         data.notes = body.notes ? String(body.notes).slice(0, 500) : null;
+    }
+
+    /*
+      Food preference — asked only when the organizer switched "Allow Food
+      Preference" on, and optional even then. It lands in the same two columns
+      the registration form and the host's guest form write (the option's id,
+      and its name as `dietary_preference`), so every screen that shows a
+      guest's food preference keeps working.
+    */
+    if (settings.allow_food_preference
+        && body.food_preference_option_id !== undefined
+        && body.food_preference_option_id !== null
+        && body.food_preference_option_id !== '') {
+        const options = await foodOptions.listForCategory(event.event_category_id, DEFAULT_COMPANY_ID);
+        const option = options.find((o) => Number(o.id) === Number(body.food_preference_option_id));
+        if (!option) throw ApiError.badRequest('That food preference is not available for this event.');
+        data.food_preference_option_id = option.id;
+        data.dietary_preference = String(option.name).slice(0, 255);
     }
 
     /*
