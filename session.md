@@ -16068,3 +16068,55 @@ Jamal allowed the write §801 was refused. Guests (the phone book) stay owner-on
 - **Tests (local DB, no server, nothing sent, everything restored):** `tests/event-organizer-access.test.js` 32 pass — organizer on their event → owner for every shape above; delete / create refused; list, billing, guests, `/me`, no-event list, wishlist → themselves; the owner's other event and its rows → themselves; a stranger → themselves; the owner can still delete; agenda and event services answer for the swapped caller and refuse the bare organizer; number removed → access gone at once. `event-organizer-link.test.js` 17, `event-notifications.test.js` 30 still pass.
 - ⚠ **DEPLOY ORDER:** the `Event` model now has `organizer_client_id`. Run `node src/database/tools/apply-event-organizer-client.js --prod --apply` BEFORE the backend is pushed — pushed first, every query on `events` fails on production ("Unknown column").
 - NOT committed, NOT pushed, NOT run over HTTP or on a phone. Not covered: routes whose path does not name an event (portal Messages `/messages…`, account-wide Splash Screens list, analytics) — an organizer gets nothing there. The organizer can change the organizer number on their event (full control), which hands the event to somebody else.
+
+### 803. Mobile app — Splash Screen preview: square corners (2026-10-13)
+The preview card at the top of the Splash Screen editor (`splash_editor_flow.dart`) had 22 px rounded corners; it is square now (shadow kept). Small pictures INSIDE the card (organizer photo, QR) keep their own rounding. `dart analyze` clean; NOT seen on the phone, NOT committed.
+
+### 804. Mobile app — Invitation Preview: square corners (2026-10-13)
+The shared `InvitationPreviewCard` (`invite_shared.dart` — View Invitation, the Invitation Card page and its Preview, the share steps and Share Link) and the Create / Edit Event invitation card (`create_event_screen.dart`, including its full-page "Invitation Preview") no longer clip to rounded corners. `dart analyze`: no errors; NOT seen on the phone, NOT committed.
+
+### 805. Mobile app — Invitation Card templates page: category row removed (2026-10-13)
+The "Category: Classic   ← Change Category" row above the Color / Image / Gradient / Custom tabs is gone (`create_event_screen.dart`, `_templateGridPage`). The title ("Classic Templates") still names the category and the bottom **Back** returns to the category page. The "Change Category" button on the empty-category message is kept. `dart analyze`: no errors; NOT seen on the phone, NOT committed.
+
+### 806. Mobile app — Agenda list: day pills with All first; Show in Event App removed (2026-10-13)
+`agenda_list_screen.dart`: the square day cards (big day number over "Oct 2026") are now a row of pills — **All** first and selected to begin with, then one per event day ("31 Oct"); tap a day to filter, tap All for everything. The **Show in Event App** row and its switch are removed from this page (the unused `_toggle` with it); the setting itself is untouched — it is the Agenda menu in App Settings. `dart analyze`: no errors or warnings; NOT seen on the phone, NOT committed.
+
+### 807. Mobile app — Family: Show in Event App removed; "Family Profile Settings" (2026-10-13)
+Family list (`organizer_family_screen.dart`): the **Show in Event App** card and its switch are removed (with `_toggle`); the setting itself is untouched — the Family menu in App Settings. `family_settings_screen.dart`: top bar "Family Settings" → **Family Profile Settings**. `dart analyze`: no issues; NOT seen on the phone, NOT committed.
+
+### 808. Mobile app — Family: ⋮ sheet is Edit / Delete; drag to reorder on the list (2026-10-13)
+The ⋮ sheet of a family member no longer offers **Change Photo** or **Change Order** (and the Change Order page and the sheet-side photo flow are deleted). **Order is changed on the list itself:** hold a card and drag it — saved on drop through the existing `PUT .../family/reorder`, drawn at once while it saves. On the Groom Side / Bride Side tabs only that side's cards move; the other side keeps its places. Photo is changed on the member's edit form. `organizer_family_screen.dart`, `family_manage_screens.dart`; `dart analyze` clean; NOT seen on the phone, NOT committed.
+
+### 809. RSVP — "Allow Food Preference" switch; form order (2026-10-13)
+Jamal: a Food Preference dropdown on / off in RSVP Settings (the food preference options already exist — the admin's list the guest forms use), shown in the preview too; and the order, in the settings and in the form: Will you be attending → Number of Guests → Food Preference → Relationship → Special Requests.
+- **Backend, no schema change** (`events.rsvp_settings` is JSON): `allow_food_preference` in `clientRsvpSettings.service` — default **false**, so an event saved before today keeps the form it had; added to the controller's destructured whitelist (`clientRsvp.controller.updateSettings`). `guestRegistration.service`: `GET /client/events/:id/my-rsvp` returns `settings.allow_food_preference`, `food_preference_options` (the event category's options, fetched with the relationships in one `Promise.all`, only when asked for) and `rsvp.food_preference_option_id`; `POST …/my-rsvp` accepts `food_preference_option_id` when the switch is on — checked against that list ("That food preference is not available for this event."), saved to the SAME two columns the registration and host forms write (`food_preference_option_id` + its name in `dietary_preference`). Optional on the form. Ignored when the switch is off.
+- **App:** RSVP Settings switches now read Allow Number of Guests → **Allow Food Preference** (new) → Allow to Specify the Relationship → Allow Special Requests (Special Requests moved last; its subtitle no longer says "Dietary needs", its icon changed, since food has its own row). RSVP Preview and the participant's real RSVP form (`participant/rsvp/rsvp_screen.dart`) both show a **Food Preference** dropdown after Number of Guests, before the Groom / Bride side + relationship; the real form sends the choice. Hint of Special Requests → "e.g. Special needs, notes…".
+- **Tests:** new `tests/rsvp-food-preference.test.js` (local DB, no server; borrows a joined guest, restores their answer, the settings, the log row and the host's notification): 11 pass — default off; off → no options; on → options listed; unknown option refused and nothing saved; the answer stores the option id and its name; read back. `dart analyze` clean on the RSVP files.
+- NOT shown yet: the chosen food preference on the participant's "thank you" / answered summary. The host's guest and RSVP screens already read `dietary_preference`.
+- NOT committed, NOT pushed (production needs the backend for the switch to save), NOT seen on the phone.
+
+### 810. Mobile app — RSVP Settings: "Enable RSVP" row removed (2026-10-13)
+The greyed, locked **Enable RSVP** switch at the top of the card is gone; the card starts at Response Options. RSVP stays always on — the screen still saves `enabled: true`. `rsvp_settings_screen.dart`; `dart analyze` clean; NOT seen on the phone, NOT committed.
+
+### 811. Mobile app — Family list: event preview card on top (2026-10-13)
+Jamal: "family settings show event preview like other menu also". The Family Profile Settings page ALREADY had the event card; the page that lacked it was the Family LIST (Edit Event → Family), unlike Participants and RSVP, which open with it. The list now starts with `EventHeaderCard` (cover, hosts, date) above the All / Groom Side / Bride Side tabs. `organizer_family_screen.dart`; `dart analyze` clean; NOT seen on the phone, NOT committed. My reading of an ambiguous request — confirm with him.
+
+### 812. §811 REVERTED — the Family list has no event card again (2026-10-13)
+Wrong reading. Jamal meant the short event card that the SETTINGS pages carry (Family Profile Settings, Participant Settings, RSVP Settings) so the organizer knows which event they are in — and asked which menus have it, to decide where else to add it. `organizer_family_screen.dart` is back as before §811. Pages WITH the card: Edit Event (hub), Participant Settings, RSVP Settings / Preview / Responses, Family Profile Settings. WITHOUT: Splash Screen, Invitation Card, Basic Details, Date & Time, Venue, App Settings, Agenda, Family list, Photo Gallery, Organizer, Notifications (that one shows the hosts under its title). Waiting for his pick.
+
+### 813. Mobile app — event card on Venue, Agenda and Notifications; no names in the notification top bars (2026-10-13)
+Jamal's pick from §812's list.
+- The short event card (`EventHeaderCard`: cover, hosts, date) now opens **Venue** (Edit Event → Venue only, not the Create Event wizard's Venue step), the **Agenda** list (above the day pills) and the **Notifications** list (above the All / Draft / Scheduled / Sent tabs).
+- **Notification top bars:** the couple's names under the title are removed from every page of the flow (list, View, Create / Edit, Select Audience, Channels, Preview, Reschedule) — `noticeBar` has no subtitle any more and `noticeEventName` is deleted. The list's card now says which event it is.
+- Family list: no card (§812's revert stands).
+- Files: `create_event_screen.dart`, `agenda_list_screen.dart`, `organizer_notifications_screen.dart`, `notification_compose_flow.dart`, `notification_widgets.dart`. `dart analyze`: no errors or warnings. NOT seen on the phone, NOT committed.
+
+### 814. Mobile app — every three-dot menu is a bottom sheet (2026-10-13)
+Jamal: a ⋮ menu opening as a bottom sheet is THE rule; Gallery did not follow it — make them all the same.
+- New shared widget `lib/shared/widgets/app_action_sheet.dart` (`AppActionSheet.show` + `AppSheetAction`; exported from `widgets.dart`): optional title, a row per action (icon + label, red for a `danger` one), Cancel under them; sized to its rows and scrollable.
+- Six popups (`PopupMenuButton`) converted to it, same actions and conditions as before: **Gallery categories** (Edit / Delete — the tile still highlights while its sheet is open), **My Events card** (Continue or View Event / Edit Event / Share Event), **Guest groups** (Edit / Delete), **Guests list row** (View Guest / Edit / Delete), **Participant details** top bar (Edit participant / Remove from event), **Chat list** top bar (Chat Settings).
+- Already sheets, untouched: Family, Notifications, Gallery media (tap the photo), Agenda details. One `showMenu` remains in `organizer_event_screen.dart` — `_openActions`, parked code nothing opens.
+- `dart analyze lib`: no errors, no warnings. NOT seen on the phone, NOT committed. Rule saved to memory.
+
+### 815. Mobile app — Organizer view page: title centred (2026-10-13)
+The view page's top bar had no `centerTitle`, so "Organizer" sat left beside the back arrow while the edit page centred it. Now centred on both. `organizer_contact_screens.dart`; `dart analyze` clean; NOT seen on the phone, NOT committed.
