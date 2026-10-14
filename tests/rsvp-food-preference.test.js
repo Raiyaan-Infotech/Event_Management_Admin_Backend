@@ -82,6 +82,12 @@ const GUEST_FIELDS = [
         ok('on -> the options are listed', Array.isArray(on.food_preference_options),
             `(${on.food_preference_options.length} options)`);
 
+        const noPref = on.food_preference_options.find((o) => o.name.trim().toLowerCase() === 'no preference');
+        ok('the default is "No Preference" when the category has it',
+            noPref ? on.default_food_preference_option_id === noPref.id
+                : on.default_food_preference_option_id === null,
+            `default ${on.default_food_preference_option_id}`);
+
         if (!on.food_preference_options.length) {
             console.log('SKIP  this event\'s category has no food preference options to pick from');
             return;

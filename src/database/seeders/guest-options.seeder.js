@@ -165,75 +165,74 @@ const RELATIONSHIPS = {
 };
 
 const FOOD = {
-    null: ["Vegetarian", "Non-Vegetarian", "Vegan", "Jain Food", "Halal Food", "No Preference", "Other"],
+    null: ["Vegetarian", "Non-Vegetarian", "Vegan", "Jain Food", "Halal Food", "No Preference"],
 
     wedding: [
         "Pure Vegetarian", "Vegetarian", "Non-Vegetarian", "Vegan", "Jain Food",
-        "Satvik Food", "Halal Food", "Eggetarian", "Kids Meal", "No Preference", "Other",
+        "Satvik Food", "Halal Food", "No Preference",
     ],
     engagement: [
         "Vegetarian", "Non-Vegetarian", "Vegan", "Jain Food", "Satvik Food",
-        "Halal Food", "Eggetarian", "No Preference", "Other",
+        "Halal Food", "No Preference",
     ],
     birthday: [
-        "Vegetarian", "Non-Vegetarian", "Vegan", "Eggetarian", "Kids Meal",
-        "Jain Food", "Halal Food", "No Preference", "Other",
+        "Vegetarian", "Non-Vegetarian", "Vegan", "Jain Food", "Halal Food", "No Preference",
     ],
     baby_shower: [
         "Pure Vegetarian", "Vegetarian", "Vegan", "Jain Food", "Satvik Food",
-        "No Onion & Garlic", "Kids Meal", "No Preference", "Other",
+        "No Onion & Garlic", "No Preference",
     ],
     housewarming: [
         "Pure Vegetarian", "Vegetarian", "Vegan", "Jain Food", "Satvik Food",
-        "No Onion & Garlic", "No Preference", "Other",
+        "No Onion & Garlic", "No Preference",
     ],
     graduation: [
-        "Vegetarian", "Non-Vegetarian", "Vegan", "Eggetarian", "Jain Food",
-        "Halal Food", "Kids Meal", "No Preference", "Other",
+        "Vegetarian", "Non-Vegetarian", "Vegan", "Jain Food",
+        "Halal Food", "No Preference",
     ],
     corporate: [
         "Vegetarian", "Non-Vegetarian", "Vegan", "Jain Food", "Halal Food",
-        "Gluten-Free", "Dairy-Free", "Eggetarian", "No Preference", "Other",
+        "Gluten-Free", "Dairy-Free", "No Preference",
     ],
     conference: [
         "Vegetarian", "Non-Vegetarian", "Vegan", "Jain Food", "Halal Food",
-        "Gluten-Free", "Dairy-Free", "Light Meal", "No Preference", "Other",
+        "Gluten-Free", "Dairy-Free", "Light Meal", "No Preference",
     ],
     festival: [
         "Pure Vegetarian", "Vegetarian", "Non-Vegetarian", "Vegan", "Jain Food",
-        "Satvik Food", "Halal Food", "Traditional Meal", "No Preference", "Other",
+        "Satvik Food", "Halal Food", "Traditional Meal", "No Preference",
     ],
     religious: [
         "Pure Vegetarian", "Satvik Food", "Jain Food", "Vegan", "No Onion & Garlic",
-        "Prasadam / Temple Meal", "Fasting Meal", "No Preference", "Other",
+        "Prasadam / Temple Meal", "Fasting Meal", "No Preference",
     ],
     sports: [
         "Vegetarian", "Non-Vegetarian", "Vegan", "High-Protein Meal", "Light Meal",
-        "Kids Meal", "Gluten-Free", "No Preference", "Other",
+        "Gluten-Free", "No Preference",
     ],
     school_college: [
-        "Vegetarian", "Non-Vegetarian", "Vegan", "Kids Meal", "Jain Food",
-        "Halal Food", "No Preference", "Other",
+        "Vegetarian", "Non-Vegetarian", "Vegan", "Jain Food",
+        "Halal Food", "No Preference",
     ],
     concert: [
         "Vegetarian", "Non-Vegetarian", "Vegan", "Jain Food", "Halal Food",
-        "Snacks Only", "No Preference", "Other",
+        "Snacks Only", "No Preference",
     ],
     anniversary: [
         "Vegetarian", "Non-Vegetarian", "Vegan", "Jain Food", "Satvik Food",
-        "Halal Food", "Eggetarian", "No Preference", "Other",
+        "Halal Food", "No Preference",
     ],
     memorial: [
         "Pure Vegetarian", "Vegetarian", "Vegan", "Jain Food", "Satvik Food",
-        "No Onion & Garlic", "No Preference", "Other",
+        "No Onion & Garlic", "No Preference",
     ],
     social: [
         "Vegetarian", "Non-Vegetarian", "Vegan", "Jain Food", "Halal Food",
-        "Kids Meal", "No Preference", "Other",
+        "No Preference",
     ],
     exhibition: [
         "Vegetarian", "Non-Vegetarian", "Vegan", "Jain Food", "Halal Food",
-        "Gluten-Free", "Snacks Only", "No Preference", "Other",
+        "Gluten-Free", "Snacks Only", "No Preference",
     ],
 };
 

@@ -170,6 +170,18 @@ const eventFromToken = async (token) => {
     return event;
 };
 
+/*
+  The RSVP form opens on "No Preference" (Jamal, 2026-10-14); its id travels as
+  the default. The list itself is the admin's, unfiltered.
+*/
+const RSVP_DEFAULT_FOOD = 'no preference';
+const foodKey = (name) => String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+const rsvpDefaultFoodId = (options) => {
+    const option = options.find((o) => foodKey(o.name) === RSVP_DEFAULT_FOOD);
+    return option ? option.id : null;
+};
+
 /**
  * Step 1 — what the app needs to draw the form.
  *
@@ -790,6 +802,8 @@ const getMyRsvp = async (clientId, rawEventId) => {
         settings,
         relationship_options: relationships.map((r) => ({ id: r.id, name: r.name })),
         food_preference_options: foods.map((r) => ({ id: r.id, name: r.name })),
+        /** "No Preference" — the form starts on it when nothing is saved yet. */
+        default_food_preference_option_id: rsvpDefaultFoodId(foods),
         rsvp: presentMyRsvp(guest),
     };
 };
