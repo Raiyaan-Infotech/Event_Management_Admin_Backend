@@ -16120,3 +16120,34 @@ Jamal: a ⋮ menu opening as a bottom sheet is THE rule; Gallery did not follow 
 
 ### 815. Mobile app — Organizer view page: title centred (2026-10-13)
 The view page's top bar had no `centerTitle`, so "Organizer" sat left beside the back arrow while the edit page centred it. Now centred on both. `organizer_contact_screens.dart`; `dart analyze` clean; NOT seen on the phone, NOT committed.
+
+### 816. Mobile app — Event Details "Customize" opens Event App Menu (2026-10-14)
+Jamal: the Customize link beside **Additional Menus** on the organizer's event home should open the Event App Menu screen, not a separate one.
+- The two screens saved the SAME thing — `menu_ids` (switches, Default locked on) and `menu_order` (drag) on the event — so nothing is lost. Home Menu Settings was one mixed list with a Save in the top bar; Event App Menu has Additional / Default tabs and opens on **Additional Menus**, the block Customize sits on.
+- Customize (`organizer_event_screen.dart`) and the parked Event Settings page's row (`event_settings_screen.dart`, renamed "Event App Menu") now open `/event/edit?id=&section=apps`. Save there returns to the event home.
+- `home_menu_settings_screen.dart` and its `/event/home-menus` route are now unused — left in place; delete on Jamal's word.
+- `dart analyze` clean on both files; NOT seen on the phone, NOT committed.
+
+### 817. Contact Us and Messages become Default menus (2026-10-14) — APPLIED local + production (Jamal ran it)
+Jamal: in the admin Menu section, make Contact Us and Messages Default.
+- Data only (`event_menus.is_default` + `menu_group = core`). `set-default-menus.js` `DEFAULT_SLUGS` now lists `contact-us` and `messages` too, so a re-run keeps them Default.
+- Local dry run: exactly 2 menus change (Contact Us #6, Messages #16), 0 plan grants to add (all 9 local plans already grant both).
+- The session's permission layer refused the writes; **Jamal ran `--apply` and `--prod --apply` himself.** Both: 2 menus changed, 0 plan grants added (every plan already had both). Backups: `D:\Jamal\prod-backups\local-default-menus-1791951496360.json`, `prod-default-menus-1791951501718.json`.
+- Production has no `event-information` menu row (local does) — noticed in the output, not touched.
+- Effect in the app: Contact Us moves from Additional Menus to Quick Links and is locked on for every event. Messages is never a tile (`_notTiles`), so nothing changes on screen for it.
+
+### 818. Mobile app — My Events ⋮: "View Event" removed; no ⋮ on past events (2026-10-14)
+Jamal: View Event in the ⋮ did the same as tapping the card. Removed (`organizer_event_card.dart`); a past event had only that option, so its ⋮ is hidden — the card tap still opens it. Draft keeps Continue Event + Edit Event. `dart analyze` clean; NOT seen on the phone, NOT committed.
+- Then audited the app for other options that do nothing (empty `onPressed: () {}`, "coming soon" toasts). List given to Jamal, nothing else changed yet.
+- Jamal's actual question: other ⋮ options that only REPEAT the item's tap. Found three and REMOVED them at his word: Guests list "View Guest" (= row tap, `guest_list_screen.dart`), RSVP response details "View Response" (only closed the sheet — already on the details, `rsvp_responses_screen.dart`), Notifications "View Notification" (= card tap, `organizer_notifications_screen.dart`). `dart analyze` on the three folders: no errors / warnings (2 old style infos elsewhere). NOT seen on the phone, NOT committed.
+
+### 820. Mobile app — Gallery category grid: date headings + upload time on each tile (2026-10-14)
+From Jamal's screenshot ("13-10-2026" above a square photo, "1:08 PM" top right). `gallery_media_screen.dart`, grid view only:
+- Photos are grouped by upload day (`created_at`, already sent by the server — no backend change) under a heading `dd-MM-yyyy`, **newest day first**; inside a day the saved order is kept.
+- Each tile shows its upload time `h:mm a` in white (soft shadow) at the top right. The "hidden from guests" badge moved to the top LEFT.
+- Reorder mode shows one flat grid in the saved order (no headings), so a drag lands where it looks.
+- List view unchanged (its rows already show the date). Participant gallery not changed.
+- `dart analyze` gallery folder: no errors / warnings. NOT seen on the phone, NOT committed.
+
+### 819. Mobile app — Ceremony removed completely (2026-10-14)
+Jamal: "I told you already, remove that ceremony completely." The Edit Event hub had no ceremony row already, but the code was still there (and the §818 audit wrongly listed its "Add New Ceremony" toast as a live option). Removed from `create_event_screen.dart`: `EditSection.ceremonies`, `_ceremoniesSection`, `_CeremonyRow`, `_editingCeremony`, the three ceremony controllers, their load and the `ceremony_title / venue / description` fields in the save; and from `create_event_repository.dart`'s copy list. The app no longer sends ceremony fields, so an edit no longer blanks them either — the backend columns are untouched (the app just never reads or writes them). `dart analyze lib/features/organizer lib/data`: 0 errors / 0 warnings. NOT seen on the phone, NOT committed.

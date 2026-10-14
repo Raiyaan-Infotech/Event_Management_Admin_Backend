@@ -1,7 +1,8 @@
 /**
  * Jamal's menu decision of 2026-09-25 (session §591), applied as DATA:
  *
- *   Default (locked on every plan and every event): the seven below.
+ *   Default (locked on every plan and every event): the ones below —
+ *   seven from §591, plus Contact Us and Messages (Jamal, 2026-10-14).
  *   Everything else: Add-on (optional per plan, switchable per event).
  *   Social Wall: set Inactive — off every menu, kept for a possible return.
  *                The app's screen for it is untouched.
@@ -32,6 +33,7 @@ const BACKUP_DIR = 'D:\\Jamal\\prod-backups';
 
 const DEFAULT_SLUGS = [
     'splash-screens', 'event-invitation', 'participants', 'venue', 'rsvp', 'agenda', 'guests',
+    'contact-us', 'messages',
 ];
 const INACTIVE_SLUGS = ['social-wall'];
 
