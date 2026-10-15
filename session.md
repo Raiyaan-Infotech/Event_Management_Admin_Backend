@@ -16153,6 +16153,13 @@ Jamal: each section on the Agenda screen had a different corner (event card 16, 
 
 - **§824 follow-up:** at 16 px the All / 25 Oct / 26 Oct chips still read as pills; Jamal: chips to **12 px** (`AppRadius.md`). Tiles, Add and the event card stay 16. Seen on the phone.
 
+### 837. Mobile app — in-app video player in the gallery (2026-10-15)
+Jamal: "in app needed player to play that" (RNNoise itself needs no app work — server only). `Event_Invite_Mobile_App`.
+- **New `organizer/gallery/gallery_video_player.dart` — `GalleryVideoPlayer(url, posterUrl, active)`**: `video_player` (already in pubspec since §831, no new package) streaming `VideoPlayerController.networkUrl`; poster + spinner while loading; auto-plays when ready; tap the picture toggles controls (always shown while paused); centre play / pause (buffering spinner), bottom bar `m:ss` · scrubbable `VideoProgressIndicator` · duration; finished → Play restarts from 0; load failure → "This video could not be played.".
+- **`GalleryViewerScreen`** (`gallery_media_pages.dart`): a video page is now the player (`active: i == _index` → a swiped-away video pauses). The "Play Video" button and `playGalleryVideo` (url_launcher to the phone's player) are deleted, with the `url_launcher` import.
+- **Guest gallery** (`participant/gallery/gallery_screen.dart`): tiles did NOTHING on tap; now open the same `GalleryViewerScreen` (photos full screen + pinch zoom, videos play). It imports the viewer from `organizer/gallery` (no role check in it — Share / Download show for guests too).
+- `dart analyze` both gallery folders: 0 errors / 0 warnings (8 old infos). NOT run on a phone. Hot reload is enough (no new plugin). NOT committed.
+
 ### 836. Gallery video — Phase 3: noise cancellation on the server (2026-10-15)
 Jamal: "do that noise cancellation". Video cap stays 5 MB (§831).
 - **Where:** `clientGallery.service.uploadItem`, after every limit check and BEFORE the S3 upload. New `src/utils/videoDenoise.js` runs the bundled **`ffmpeg-static`** binary (new dependency — no apt/Docker change needed on Render): audio filter `highpass=f=80,afftdn=nr=12:nf=-30:tn=1`, picture **copied untouched** (`-c:v copy`), audio re-encoded AAC 64k (webm → opus). mp4 / mov come out as mp4.
@@ -16160,6 +16167,9 @@ Jamal: "do that noise cancellation". Video cap stays 5 MB (§831).
 - **No app change:** the phone already uploads to the same endpoint; guests just get a cleaned file. (App-side trim from §831 still happens first.)
 - `tests/video-denoise.test.js` (no server): noisy mp4 processed + keeps h264/aac, silent video falls back, garbage falls back — 4 pass.
 - ⚠ NOT measured by ear on a real phone clip; the filter strength (nr=12 dB) is a starting point. A ~5 MB clip adds roughly 1–3 s of server time. Render free-tier CPU is slow — watch the first real uploads. NOT committed / pushed (`package.json` + lock changed).
+- **§836 follow-up — "unable to play video".** The picture used to be copied blindly, so an HEVC (`hev1`), 10-bit or 4:4:4 clip came out as an mp4 many phones cannot play. Now the stream is probed: 8-bit 4:2:0 H.264 (or VP8/VP9 in webm) is copied as before; anything else is re-encoded to plain H.264 Main yuv420p (`-preset veryfast -crf 28`). Verified: HEVC and 4:4:4 test clips come out as h264 yuv420p + aac with zero decode errors. Slower for those clips (a few seconds); still fail-open and ≤ 5 MB or the original is kept.
+
+- **§836 follow-up — RNNoise added (background chatter / crowd).** Jamal approved after asking about cost (none: free, runs in the bundled ffmpeg, only extra server CPU ~1–3 s per 30 s clip). Model `src/assets/rnnoise/bd.rnnn` ("beguiling-drafter" = voice signal in recorded noise; keeps laughter) downloaded from GregorR/rnnoise-models — its README: "none of this work is creative and thus none of it is subject to copyright" (no LICENSE file in the repo). Chain is now `highpass=f=80, arnndn=m=bd.rnnn:mix=0.9, afftdn=nr=12:nf=-30:tn=1` (mix 0.9 = 10% original kept so voices don't sound robotic). ffmpeg runs with `cwd` = the model folder so the filter names the file without a Windows `D:` path (a `:` breaks filter-argument parsing). Model missing → RNNoise skipped, rest unchanged. Limit: a loud voice right next to the phone is still kept — it cannot pick a speaker. Test now 6 pass incl. pure-noise clip −20.4 dB → −40.3 dB. NOT heard on a real phone clip. NOT committed.
 
 ### 835. "Change Photo" straight from the ⋮ (Participants / Family / Guests) and Organizer "More Actions" (2026-10-14)
 Jamal: in lists with photos, the ⋮ should offer Change Photo that opens the image upload directly (no edit form); the Organizer view page's button becomes More Actions → Edit / Change Photo.
