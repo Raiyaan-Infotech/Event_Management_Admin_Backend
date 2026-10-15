@@ -35,7 +35,7 @@ if (PROD) {
 const { EventGalleryItem, sequelize } = require('../../models');
 const mediaService = require('../../services/media.service');
 const { imageThumb } = require('../../services/clientGallery.service');
-const { videoPoster } = require('../../utils/videoDenoise');
+const { videoPoster } = require('../../utils/videoProcess');
 
 (async () => {
     console.log(`\n${PROD ? 'PRODUCTION' : 'LOCAL'}  ${process.env.DB_NAME} @ ${process.env.DB_HOST}`);

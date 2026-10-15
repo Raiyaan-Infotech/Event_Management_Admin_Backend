@@ -4,7 +4,7 @@ const {
 const { Op } = Sequelize;
 const ApiError = require('../utils/apiError');
 const mediaService = require('./media.service');
-const { denoiseVideo, videoPoster } = require('../utils/videoDenoise');
+const { processVideo, videoPoster } = require('../utils/videoProcess');
 const subscriptionPlanService = require('./subscriptionPlan.service');
 
 /**
@@ -669,22 +669,33 @@ const uploadItem = async (clientId, eventId, file, body = {}) => {
         }
     }
 
-    // Videos: remove background noise from the sound track. Fail-open, and the
-    // result is only used when it still fits the per-file cap.
+    // Videos: drop the sound when the host turned it off on the Trim screen
+    // (`mute`, WhatsApp's speaker icon), and make a picture phones cannot play
+    // into plain H.264. Sound is otherwise kept exactly as recorded. The result
+    // is used only when it still fits the per-file cap.
     let toStore = file;
-    if (isVideo && String(body.denoise) !== 'false') {
-        const cleaned = await denoiseVideo(file.buffer, file.mimetype);
-        if (cleaned.applied && cleaned.buffer.length <= MAX_VIDEO_BYTES) {
-            const ext = cleaned.mimetype === 'video/webm' ? '.webm' : '.mp4';
+    if (isVideo) {
+        const mute = [true, 'true', 1, '1'].includes(body.mute);
+        const out = await processVideo(file.buffer, file.mimetype, { mute });
+        // Muting is the host's choice, not a nicety: never store with sound
+        // what they asked to be silent.
+        if (mute && !out.muted) {
+            throw ApiError.badRequest('The sound could not be removed from this video. Please try again.');
+        }
+        if (out.applied && out.buffer.length <= MAX_VIDEO_BYTES) {
+            const ext = out.mimetype === 'video/webm' ? '.webm' : '.mp4';
             toStore = {
                 ...file,
-                buffer: cleaned.buffer,
-                size: cleaned.buffer.length,
-                mimetype: cleaned.mimetype,
+                buffer: out.buffer,
+                size: out.buffer.length,
+                mimetype: out.mimetype,
                 originalname: file.originalname
                     ? file.originalname.replace(/\.[^.]+$/, '') + ext
                     : file.originalname,
             };
+        } else if (mute && out.applied) {
+            // Muted but somehow over the cap — refuse rather than keep the sound.
+            throw ApiError.badRequest(`Videos must be ${mb(MAX_VIDEO_BYTES)}MB or smaller.`);
         }
     }
 
