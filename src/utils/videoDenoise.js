@@ -4,11 +4,19 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 
+const logger = require('./logger');
+
+// ffmpeg-static returns its path even when the download at `npm install` never
+// happened, so check the file is really there; otherwise try an ffmpeg on PATH.
 let ffmpegPath = null;
 try {
     ffmpegPath = require('ffmpeg-static');
 } catch (_) {
     ffmpegPath = null;
+}
+if (!ffmpegPath || !fs.existsSync(ffmpegPath)) {
+    logger.warn(`[videoDenoise] ffmpeg-static binary missing (${ffmpegPath}); trying "ffmpeg" on PATH`);
+    ffmpegPath = 'ffmpeg';
 }
 
 const TIMEOUT_MS = 60 * 1000;
@@ -103,12 +111,31 @@ const denoiseVideo = async (buffer, mimetype) => {
         const out = fs.readFileSync(outFile);
         if (!out.length) return original;
         return { buffer: out, mimetype: isWebm ? 'video/webm' : 'video/mp4', applied: true };
-    } catch (_) {
+    } catch (e) {
         // Includes "no audio stream": -map 0:a:0 fails, original goes up as-is.
+        // Logged — a silent fallback hid that Render never ran the filter.
+        logger.warn(`[videoDenoise] skipped, original kept: ${e.message}`);
         return original;
     } finally {
         for (const f of [inFile, outFile]) { try { fs.unlinkSync(f); } catch (_) { /* gone */ } }
     }
 };
+
+/**
+ * Boot-time check, one log line: is ffmpeg runnable, which version, and is the
+ * RNNoise model there. Read it in the Render logs after a deploy.
+ */
+const selfCheck = () => {
+    const child = spawn(ffmpegPath, ['-hide_banner', '-version'], { windowsHide: true });
+    let out = '';
+    child.stdout.on('data', (d) => { out += d.toString(); });
+    child.on('error', (e) => logger.error(`[videoDenoise] ffmpeg NOT runnable (${ffmpegPath}): ${e.message}`));
+    child.on('close', (code) => {
+        if (code !== 0) return logger.error(`[videoDenoise] ffmpeg exited ${code} on -version`);
+        const version = (out.match(/ffmpeg version (\S+)/) || [])[1] || 'unknown';
+        logger.info(`[videoDenoise] ffmpeg ${version} OK (${ffmpegPath}); RNNoise model ${hasModel ? 'present' : 'MISSING'}`);
+    });
+};
+selfCheck();
 
 module.exports = { denoiseVideo, AUDIO_FILTER };
