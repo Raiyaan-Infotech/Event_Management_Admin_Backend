@@ -16153,6 +16153,14 @@ Jamal: each section on the Agenda screen had a different corner (event card 16, 
 
 - **§824 follow-up:** at 16 px the All / 25 Oct / 26 Oct chips still read as pills; Jamal: chips to **12 px** (`AppRadius.md`). Tiles, Add and the event card stay 16. Seen on the phone.
 
+### 836. Gallery video — Phase 3: noise cancellation on the server (2026-10-15)
+Jamal: "do that noise cancellation". Video cap stays 5 MB (§831).
+- **Where:** `clientGallery.service.uploadItem`, after every limit check and BEFORE the S3 upload. New `src/utils/videoDenoise.js` runs the bundled **`ffmpeg-static`** binary (new dependency — no apt/Docker change needed on Render): audio filter `highpass=f=80,afftdn=nr=12:nf=-30:tn=1`, picture **copied untouched** (`-c:v copy`), audio re-encoded AAC 64k (webm → opus). mp4 / mov come out as mp4.
+- **Fail-open:** no audio track, unreadable file, timeout (60 s) or any ffmpeg error → the ORIGINAL is uploaded unchanged. The cleaned file is used only if still ≤ 5 MB. Stored `size_bytes` / `mime_type` / `file_name` are those of the stored file. Opt out per upload with form field `denoise=false`.
+- **No app change:** the phone already uploads to the same endpoint; guests just get a cleaned file. (App-side trim from §831 still happens first.)
+- `tests/video-denoise.test.js` (no server): noisy mp4 processed + keeps h264/aac, silent video falls back, garbage falls back — 4 pass.
+- ⚠ NOT measured by ear on a real phone clip; the filter strength (nr=12 dB) is a starting point. A ~5 MB clip adds roughly 1–3 s of server time. Render free-tier CPU is slow — watch the first real uploads. NOT committed / pushed (`package.json` + lock changed).
+
 ### 835. "Change Photo" straight from the ⋮ (Participants / Family / Guests) and Organizer "More Actions" (2026-10-14)
 Jamal: in lists with photos, the ⋮ should offer Change Photo that opens the image upload directly (no edit form); the Organizer view page's button becomes More Actions → Edit / Change Photo.
 - New shared `AppChangePhoto.run(context, upload:, save:)` (`lib/shared/widgets/app_change_photo.dart`, exported): `AppImagePickCrop` (square crop) → upload → save the URL, one "Updating photo…" loader, "Photo updated" toast; API errors shown.
@@ -16194,6 +16202,7 @@ Jamal asked for a 30-second trim on video upload (and noise cancellation "in fut
 - **`gallery_upload_screen._pickVideo`:** file manager → Trim → if trimmed OR over the cap, `VideoCompress.compressVideo(quality: Res640x480Quality, includeAudio: true, startTime: start, duration: total − end)` behind "Preparing video…". ⚠ video_compress passes `duration` to Transcoder's `TrimDataSource` as the amount cut off the END, not a length — hence `total − end`. Res640x480 ≈ 360×640 at Transcoder's default bitrate (~0.6 Mbps) → ~3 MB for 30 s with sound. A short, small, untrimmed video goes up untouched. Still over 5 MB after that → refused with "choose a shorter part".
 - NOT seen on a phone: the trim boundaries and the output size are worked out from the libraries' source, not measured. `dart analyze` clean. NOT committed.
 - **Android build checked (`flutter build apk --debug`, nothing installed):** 1st try failed — `file_picker` 11 skips applying the Kotlin plugin under AGP 9 (expects Built-in Kotlin) but this app has `android.builtInKotlin=false`, so `FilePickerPlugin` was never compiled. Pinned **`file_picker: 10.3.3`** (applies KGP itself; API is `FilePicker.platform.pickFiles`; custom types still → `ACTION_OPEN_DOCUMENT`). 2nd try: `:file_picker:compileDebugKotlin` "Inconsistent JVM Target" (Kotlin 1.8 vs Java 11) → `android/gradle.properties` `kotlin.jvm.target.validation.mode=warning` (commented). 3rd try: **built OK** (`app-debug.apk`). Flutter warns that file_picker, mobile_scanner, package_info_plus, share_plus and video_compress still apply KGP — a future Flutter will need them on Built-in Kotlin.
+- **Phase 2 decided (2026-10-15): the video cap stays at 5 MB max.** Jamal confirmed — no change to the server (`max_video` 5 MB) or the app (`usage.maxVideoBytes`); the 30 s trim + Res640x480 shrink above is what keeps a clip under it. **Phase 3, noise cancellation, NOT started** — planned later (server-side FFmpeg on Render); nothing to build now.
 
 ### 830. Gallery / organizer / mobile-field batch (2026-10-14)
 Six asks in one message. `Event_Invite_Mobile_App`; `dart analyze lib` no errors / warnings (only old infos), `flutter test` 38/38. NOT run on the phone (no `flutter run` attached). NOT committed.

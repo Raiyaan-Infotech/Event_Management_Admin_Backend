@@ -4,6 +4,7 @@ const {
 const { Op } = Sequelize;
 const ApiError = require('../utils/apiError');
 const mediaService = require('./media.service');
+const { denoiseVideo } = require('../utils/videoDenoise');
 const subscriptionPlanService = require('./subscriptionPlan.service');
 
 /**
@@ -548,8 +549,27 @@ const uploadItem = async (clientId, eventId, file, body = {}) => {
         }
     }
 
+    // Videos: remove background noise from the sound track. Fail-open, and the
+    // result is only used when it still fits the per-file cap.
+    let toStore = file;
+    if (isVideo && String(body.denoise) !== 'false') {
+        const cleaned = await denoiseVideo(file.buffer, file.mimetype);
+        if (cleaned.applied && cleaned.buffer.length <= MAX_VIDEO_BYTES) {
+            const ext = cleaned.mimetype === 'video/webm' ? '.webm' : '.mp4';
+            toStore = {
+                ...file,
+                buffer: cleaned.buffer,
+                size: cleaned.buffer.length,
+                mimetype: cleaned.mimetype,
+                originalname: file.originalname
+                    ? file.originalname.replace(/\.[^.]+$/, '') + ext
+                    : file.originalname,
+            };
+        }
+    }
+
     const stored = await mediaService.upload(
-        file, { folder: `event-gallery/${event.id}` }, event.company_id || client?.company_id || 1
+        toStore, { folder: `event-gallery/${event.id}` }, event.company_id || client?.company_id || 1
     );
     if (!stored || !stored.url) throw ApiError.badRequest('That file could not be stored.');
 
@@ -561,8 +581,8 @@ const uploadItem = async (clientId, eventId, file, body = {}) => {
         type,
         url: stored.url,
         thumbnail_url: null,
-        file_name: file.originalname || null,
-        mime_type: file.mimetype,
+        file_name: toStore.originalname || null,
+        mime_type: toStore.mimetype,
         // The stored size, not the incoming one: images are compressed on the
         // way in, and charging for the pre-compression bytes would be wrong.
         size_bytes: Number(stored.size || size),
