@@ -4,7 +4,7 @@ const {
 const { Op } = Sequelize;
 const ApiError = require('../utils/apiError');
 const mediaService = require('./media.service');
-const { denoiseVideo } = require('../utils/videoDenoise');
+const { denoiseVideo, videoPoster } = require('../utils/videoDenoise');
 const subscriptionPlanService = require('./subscriptionPlan.service');
 
 /**
@@ -498,6 +498,27 @@ const categoryIdOrDefault = async (eventId, raw) =>
  * upload that still consumed bandwidth and left an orphaned object is the
  * failure mode worth engineering around here.
  */
+/**
+ * Grab a video's first frame and store it as `<video name>-poster.jpg` in the
+ * same folder. Returns the URL, or null (no ffmpeg, unreadable video, S3 down).
+ * The poster's bytes are not charged to storage — it is a few KB of preview.
+ */
+const storeVideoPoster = async (videoFile, eventId, companyId) => {
+    try {
+        const jpeg = await videoPoster(videoFile.buffer);
+        if (!jpeg) return null;
+        const base = (videoFile.originalname || 'video').replace(/\.[^.]+$/, '');
+        const stored = await mediaService.upload(
+            { buffer: jpeg, size: jpeg.length, mimetype: 'image/jpeg', originalname: `${base}-poster.jpg` },
+            { folder: `event-gallery/${eventId}` },
+            companyId
+        );
+        return stored?.url || null;
+    } catch (_) {
+        return null;
+    }
+};
+
 const uploadItem = async (clientId, eventId, file, body = {}) => {
     if (!file || !file.buffer) throw ApiError.badRequest('Please choose a file to upload.');
 
@@ -573,6 +594,12 @@ const uploadItem = async (clientId, eventId, file, body = {}) => {
     );
     if (!stored || !stored.url) throw ApiError.badRequest('That file could not be stored.');
 
+    // Video poster = its first frame, stored next to it. Best effort: no
+    // poster just means the tile shows the video icon, as before.
+    const thumbnailUrl = isVideo
+        ? await storeVideoPoster(toStore, event.id, event.company_id || client?.company_id || 1)
+        : null;
+
     const last = await EventGalleryItem.max('sort_order', { where: { event_id: event.id } });
 
     const item = await EventGalleryItem.create({
@@ -580,7 +607,7 @@ const uploadItem = async (clientId, eventId, file, body = {}) => {
         website_client_id: clientId,
         type,
         url: stored.url,
-        thumbnail_url: null,
+        thumbnail_url: thumbnailUrl,
         file_name: toStore.originalname || null,
         mime_type: toStore.mimetype,
         // The stored size, not the incoming one: images are compressed on the
@@ -616,6 +643,9 @@ const removeItem = async (clientId, itemId) => {
 
     const eventId = item.event_id;
     await mediaService.deleteFile(item.url).catch(() => null);
+    if (item.type === 'video' && item.thumbnail_url) {
+        await mediaService.deleteFile(item.thumbnail_url).catch(() => null);
+    }
     await item.destroy({ force: true });
 
     return { removed: true, usage: await getUsage(clientId, eventId) };

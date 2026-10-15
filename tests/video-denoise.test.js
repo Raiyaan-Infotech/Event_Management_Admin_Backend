@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const ffmpeg = require('ffmpeg-static');
-const { denoiseVideo, AUDIO_FILTER } = require('../src/utils/videoDenoise');
+const { denoiseVideo, videoPoster, AUDIO_FILTER } = require('../src/utils/videoDenoise');
 
 // Mean audio level in dB, read from ffmpeg's volumedetect.
 const meanDb = (file) => {
@@ -39,6 +39,9 @@ const make = (out, extra) => spawnSync(ffmpeg, ['-y', '-f', 'lavfi', '-i', 'test
     console.log(`      noise level ${before} dB -> ${after} dB`);
     check('background noise reduced by at least 10 dB', n.applied && before !== null && after !== null && before - after >= 10);
     [noiseOnly, nOut].forEach((f) => { try { fs.unlinkSync(f); } catch (_) {} });
+
+    const poster = await videoPoster(fs.readFileSync(noisy));
+    check('poster is a JPEG of the first frame', !!poster && poster[0] === 0xff && poster[1] === 0xd8);
 
     const silent = tmp('silent.mp4');
     make(silent, ['-c:v', 'libx264']);

@@ -8,16 +8,39 @@ const logger = require('./logger');
 
 // ffmpeg-static returns its path even when the download at `npm install` never
 // happened, so check the file is really there; otherwise try an ffmpeg on PATH.
-let ffmpegPath = null;
+let staticPath = null;
 try {
-    ffmpegPath = require('ffmpeg-static');
+    staticPath = require('ffmpeg-static');
 } catch (_) {
-    ffmpegPath = null;
+    staticPath = null;
 }
-if (!ffmpegPath || !fs.existsSync(ffmpegPath)) {
-    logger.warn(`[videoDenoise] ffmpeg-static binary missing (${ffmpegPath}); trying "ffmpeg" on PATH`);
-    ffmpegPath = 'ffmpeg';
-}
+let ffmpegPath = staticPath && fs.existsSync(staticPath) ? staticPath : 'ffmpeg';
+
+/**
+ * Self-repair when `npm install` skipped the binary download (e.g. a build that
+ * ran with --ignore-scripts or restored a cache): run ffmpeg-static's own
+ * install script once at boot, then switch to the downloaded file.
+ */
+const ensureBinary = () => new Promise((resolve) => {
+    if (!staticPath || fs.existsSync(staticPath)) return resolve();
+    logger.warn(`[videoDenoise] ffmpeg-static binary missing (${staticPath}); downloading it now`);
+    const script = path.join(path.dirname(require.resolve('ffmpeg-static')), 'install.js');
+    const child = spawn(process.execPath, [script], {
+        cwd: path.dirname(script), windowsHide: true, env: { ...process.env, CI: '1' },
+    });
+    let err = '';
+    child.stderr.on('data', (d) => { err += d.toString(); });
+    child.on('error', (e) => { logger.error(`[videoDenoise] download failed: ${e.message}`); resolve(); });
+    child.on('close', (code) => {
+        if (fs.existsSync(staticPath)) {
+            ffmpegPath = staticPath;
+            logger.info('[videoDenoise] ffmpeg-static binary downloaded');
+        } else {
+            logger.error(`[videoDenoise] download failed (exit ${code}): ${err.slice(-300)}`);
+        }
+        resolve();
+    });
+});
 
 const TIMEOUT_MS = 60 * 1000;
 
@@ -106,6 +129,8 @@ const denoiseVideo = async (buffer, mimetype) => {
             ...videoArgs,
             '-af', AUDIO_FILTER,
             ...(isWebm ? ['-c:a', 'libopus', '-b:a', '64k'] : ['-c:a', 'aac', '-b:a', '64k', '-movflags', '+faststart']),
+            // Marker so a stored file shows it was cleaned (ffmpeg -i <file>).
+            '-metadata', `comment=denoised:${hasModel ? 'rnnoise+afftdn' : 'afftdn'}`,
             outFile,
         ]);
         const out = fs.readFileSync(outFile);
@@ -116,6 +141,34 @@ const denoiseVideo = async (buffer, mimetype) => {
         // Logged — a silent fallback hid that Render never ran the filter.
         logger.warn(`[videoDenoise] skipped, original kept: ${e.message}`);
         return original;
+    } finally {
+        for (const f of [inFile, outFile]) { try { fs.unlinkSync(f); } catch (_) { /* gone */ } }
+    }
+};
+
+/**
+ * The video's FIRST frame as a JPEG (max 720 px wide) — the gallery tile's
+ * poster. Returns a Buffer, or null on any problem (never throws).
+ */
+const videoPoster = async (buffer) => {
+    if (!ffmpegPath || !buffer || !buffer.length) return null;
+    const id = crypto.randomBytes(8).toString('hex');
+    const inFile = path.join(os.tmpdir(), `vp-${id}-in`);
+    const outFile = path.join(os.tmpdir(), `vp-${id}.jpg`);
+    try {
+        fs.writeFileSync(inFile, buffer);
+        await run([
+            '-y', '-i', inFile,
+            '-frames:v', '1',
+            '-vf', "scale='min(720,iw)':-2",
+            '-q:v', '4',
+            outFile,
+        ]);
+        const out = fs.readFileSync(outFile);
+        return out.length ? out : null;
+    } catch (e) {
+        logger.warn(`[videoDenoise] poster skipped: ${e.message}`);
+        return null;
     } finally {
         for (const f of [inFile, outFile]) { try { fs.unlinkSync(f); } catch (_) { /* gone */ } }
     }
@@ -136,6 +189,6 @@ const selfCheck = () => {
         logger.info(`[videoDenoise] ffmpeg ${version} OK (${ffmpegPath}); RNNoise model ${hasModel ? 'present' : 'MISSING'}`);
     });
 };
-selfCheck();
+ensureBinary().then(selfCheck);
 
-module.exports = { denoiseVideo, AUDIO_FILTER };
+module.exports = { denoiseVideo, videoPoster, AUDIO_FILTER };
