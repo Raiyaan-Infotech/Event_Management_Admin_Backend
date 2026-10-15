@@ -17,6 +17,7 @@ const eventQr = require('../utils/eventQr');
 const clientPortalService = require('./clientPortal.service');
 const mediaService = require('./media.service');
 const subscriptionPlanService = require('./subscriptionPlan.service');
+const galleryService = require('./clientGallery.service');
 
 /**
  * Events belonging to a signed-in website client.
@@ -1343,6 +1344,10 @@ const deleteEvent = async (clientId, eventId) => {
     const event = await Event.findOne({ where: { id: eventId, website_client_id: clientId } });
     if (!event) return false;
     await event.destroy();
+    // The event is soft-deleted, so nothing cascades: its gallery files would
+    // stay public and keep filling the account's storage. Best effort — the
+    // event is already gone, a storage hiccup must not undo that.
+    await galleryService.purgeEvent(event.id).catch(() => null);
     return true;
 };
 

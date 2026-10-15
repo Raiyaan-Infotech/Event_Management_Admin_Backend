@@ -416,6 +416,67 @@ const deleteFile = async (filePath, companyId = 1) => {
 };
 
 /**
+ * The S3 key inside a URL `uploadS3` built, or null when the URL does not start
+ * with exactly one of the bases it uses (aws_url, else the bucket's S3 URL).
+ * Pure — exported for tests.
+ */
+const s3KeyFromUrl = (url, config = {}) => {
+  if (!url || typeof url !== 'string') return null;
+  const bases = [
+    config.aws_url && `${config.aws_url.replace(/\/+$/, '')}/`,
+    config.aws_bucket && `https://${config.aws_bucket}.s3.${config.aws_region || 'us-east-1'}.amazonaws.com/`,
+  ].filter(Boolean);
+  const base = bases.find((b) => url.startsWith(b));
+  if (!base) return null;
+  try {
+    const key = decodeURIComponent(url.slice(base.length).split('?')[0]);
+    return key && !key.includes('..') ? key : null;
+  } catch (_) {
+    return null;
+  }
+};
+
+/**
+ * Delete a file by the URL `upload()` returned for it.
+ *
+ * `deleteFile` wants a storage path; callers mostly hold the URL. Passing the
+ * URL to `deleteFile` deleted a key that never existed (S3 says OK) and left
+ * every "deleted" gallery photo public. This maps the URL back to its key ONLY
+ * when it starts with exactly the base `upload()` builds — aws_url, else the
+ * bucket's S3 URL, or /uploads/ for the local driver — so it can never guess
+ * at somebody else's object. Anything else is left alone and reported false.
+ * Never throws.
+ */
+const deleteByUrl = async (url, companyId = 1) => {
+  try {
+    if (!url || typeof url !== 'string') return false;
+    const config = await getMediaSettings(companyId);
+    const driver = config.driver || 'local';
+
+    if (driver === 'local') {
+      const m = url.match(/\/uploads\/(.+)$/);
+      if (!m) return false;
+      const rel = decodeURIComponent(m[1].split('?')[0]);
+      if (rel.includes('..')) return false;
+      const fullPath = path.join(__dirname, '../../uploads', rel);
+      if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
+      return true;
+    }
+
+    const key = s3KeyFromUrl(url, config);
+    if (!key) return false;
+
+    // The key already carries custom_s3_path (upload put it there) — delete
+    // it as-is rather than through deleteFile, which would prefix it again.
+    await createS3Client(config).send(new DeleteObjectCommand({ Bucket: config.aws_bucket, Key: key }));
+    return true;
+  } catch (error) {
+    logger.logError(error);
+    return false;
+  }
+};
+
+/**
  * Upload multiple files
  */
 const uploadMultiple = async (files, options = {}, companyId = 1) => {
@@ -794,6 +855,8 @@ module.exports = {
   uploadDataUrisInHtml,
   uploadMultiple,
   deleteFile,
+  deleteByUrl,
+  s3KeyFromUrl,
   listFiles,
   createFolder,
   getMediaSettings,

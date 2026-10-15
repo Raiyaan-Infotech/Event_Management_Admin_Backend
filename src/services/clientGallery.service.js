@@ -164,12 +164,58 @@ const present = (row) => {
     };
 };
 
-/** Bytes this ACCOUNT is holding across every event, deleted items excluded. */
+/**
+ * Items of events that still exist. Events are soft-deleted, so without this
+ * a deleted event's photos went on filling the account's storage forever.
+ */
+const LIVE_EVENT = Sequelize.literal('`event_id` IN (SELECT `id` FROM `events` WHERE `deleted_at` IS NULL)');
+
+/** Bytes this ACCOUNT is holding across its live events, deleted items excluded. */
 const storageUsedFor = async (clientId) => {
     const total = await EventGalleryItem.sum('size_bytes', {
-        where: { website_client_id: clientId },
+        where: { website_client_id: clientId, [Op.and]: [LIVE_EVENT] },
     });
     return Number(total || 0);
+};
+
+/**
+ * Remove a stored file by its URL — never throws, a missing file is not an
+ * error. See mediaService.deleteByUrl for why the URL (not a path) is used.
+ */
+const dropFile = (url, companyId) => (url
+    ? mediaService.deleteByUrl(url, companyId || 1).catch(() => false)
+    : Promise.resolve(false));
+
+/** Run [fn] over [list] a few at a time — prod is slow per call, never one by one. */
+const inBatches = async (list, size, fn) => {
+    for (let i = 0; i < list.length; i += size) {
+        // eslint-disable-next-line no-await-in-loop
+        await Promise.all(list.slice(i, i + size).map(fn));
+    }
+};
+
+/**
+ * An event was deleted: remove its gallery — every photo / video file, video
+ * poster and category cover in storage, then the rows. Called by
+ * clientEvent.deleteEvent; a deleted event's media must not stay public or
+ * keep counting against the account's storage.
+ */
+const purgeEvent = async (eventId) => {
+    const [items, categories] = await Promise.all([
+        EventGalleryItem.findAll({ where: { event_id: eventId }, attributes: ['url', 'thumbnail_url', 'type', 'company_id'] }),
+        EventGalleryCategory.findAll({ where: { event_id: eventId }, attributes: ['cover_image', 'company_id'] }),
+    ]);
+    const files = [
+        ...items.flatMap((i) => [
+            [i.url, i.company_id],
+            ...(i.thumbnail_url && i.thumbnail_url !== i.url ? [[i.thumbnail_url, i.company_id]] : []),
+        ]),
+        ...categories.filter((c) => c.cover_image).map((c) => [c.cover_image, c.company_id]),
+    ];
+    await inBatches(files, 5, ([url, companyId]) => dropFile(url, companyId));
+    await EventGalleryItem.destroy({ where: { event_id: eventId }, force: true });
+    await EventGalleryCategory.destroy({ where: { event_id: eventId }, force: true });
+    return { files: files.length };
 };
 
 /**
@@ -280,13 +326,14 @@ const listCategories = async (clientId, eventId, { visibleOnly = false } = {}) =
     // order the grid draws, so the thumbnail is the photo the host sees first.
     const photos = await EventGalleryItem.findAll({
         where: { event_id: eventId, type: 'image', category_id: { [Op.ne]: null }, ...visible },
-        attributes: ['category_id', 'url'],
+        attributes: ['category_id', 'url', 'thumbnail_url'],
         order: ITEM_ORDER,
         raw: true,
     });
     const firstPhoto = new Map();
     for (const p of photos) {
-        if (!firstPhoto.has(p.category_id)) firstPhoto.set(p.category_id, p.url);
+        // The small copy when there is one — a cover is a thumbnail.
+        if (!firstPhoto.has(p.category_id)) firstPhoto.set(p.category_id, p.thumbnail_url || p.url);
     }
 
     return rows.map((r) => presentCategory(r, byId.get(r.id) || 0, firstPhoto.get(r.id)));
@@ -406,8 +453,15 @@ const updateCategory = async (clientId, categoryId, body = {}) => {
         row.name = name;
     }
     if (body.description !== undefined) row.description = cleanText(body.description, 200);
-    if (body.cover_image !== undefined) row.cover_image = cleanText(body.cover_image, 500);
+    // A replaced or removed cover's old file is deleted once the row is saved.
+    let oldCover = null;
+    if (body.cover_image !== undefined) {
+        const next = cleanText(body.cover_image, 500);
+        if (row.cover_image && row.cover_image !== next) oldCover = row.cover_image;
+        row.cover_image = next;
+    }
     await row.save();
+    if (oldCover) await dropFile(oldCover, row.company_id);
 
     // The default always leads, so it has no position to change.
     if (hasPosition(body) && !isDefault) {
@@ -466,7 +520,10 @@ const removeCategory = async (clientId, categoryId) => {
     await EventGalleryItem.update(
         { category_id: fallback.id }, { where: { category_id: row.id } }
     );
+    const cover = row.cover_image;
     await row.destroy({ force: true });
+    // Its photos moved; its own cover image belongs to nothing now.
+    if (cover) await dropFile(cover, row.company_id);
 
     return { removed: true, categories: await listCategories(clientId, eventId) };
 };
@@ -498,6 +555,48 @@ const categoryIdOrDefault = async (eventId, raw) =>
  * upload that still consumed bandwidth and left an orphaned object is the
  * failure mode worth engineering around here.
  */
+let sharp = null;
+try { sharp = require('sharp'); } catch (_) { sharp = null; }
+
+/** Grid tiles are ~120 px wide at 3x density: 480 px on the SHORT side is plenty. */
+const THUMB_SIDE = 480;
+
+/**
+ * A photo's grid thumbnail (Google Photos style): the short side scaled to
+ * [THUMB_SIDE], JPEG 72, EXIF orientation applied — tens of KB where the
+ * full photo is up to 2 MB. Grids, category covers and lists load this; the
+ * viewer still opens the full photo. Returns a Buffer or null (never throws).
+ */
+const imageThumb = async (buffer) => {
+    if (!sharp || !buffer) return null;
+    try {
+        return await sharp(buffer, { animated: false })
+            .rotate()
+            .resize({ width: THUMB_SIDE, height: THUMB_SIDE, fit: 'outside', withoutEnlargement: true })
+            .jpeg({ quality: 72, mozjpeg: true })
+            .toBuffer();
+    } catch (_) {
+        return null;
+    }
+};
+
+/** Store a photo's thumbnail as `<name>-thumb.jpg` beside it; URL or null. */
+const storeImageThumb = async (imageFile, eventId, companyId) => {
+    try {
+        const jpeg = await imageThumb(imageFile.buffer);
+        if (!jpeg) return null;
+        const base = (imageFile.originalname || 'photo').replace(/\.[^.]+$/, '');
+        const stored = await mediaService.upload(
+            { buffer: jpeg, size: jpeg.length, mimetype: 'image/jpeg', originalname: `${base}-thumb.jpg` },
+            { folder: `event-gallery/${eventId}` },
+            companyId
+        );
+        return stored?.url || null;
+    } catch (_) {
+        return null;
+    }
+};
+
 /**
  * Grab a video's first frame and store it as `<video name>-poster.jpg` in the
  * same folder. Returns the URL, or null (no ffmpeg, unreadable video, S3 down).
@@ -594,11 +693,13 @@ const uploadItem = async (clientId, eventId, file, body = {}) => {
     );
     if (!stored || !stored.url) throw ApiError.badRequest('That file could not be stored.');
 
-    // Video poster = its first frame, stored next to it. Best effort: no
-    // poster just means the tile shows the video icon, as before.
+    // Grid picture, stored next to the file. Video = its first frame; photo =
+    // a ~480 px copy (the full photo is up to 2 MB). Best effort: none means a
+    // video shows its icon and a photo's tile falls back to the full file.
+    const companyForFiles = event.company_id || client?.company_id || 1;
     const thumbnailUrl = isVideo
-        ? await storeVideoPoster(toStore, event.id, event.company_id || client?.company_id || 1)
-        : null;
+        ? await storeVideoPoster(toStore, event.id, companyForFiles)
+        : await storeImageThumb(toStore, event.id, companyForFiles);
 
     const last = await EventGalleryItem.max('sort_order', { where: { event_id: event.id } });
 
@@ -619,6 +720,25 @@ const uploadItem = async (clientId, eventId, file, body = {}) => {
         uploaded_by: clientId,
         company_id: event.company_id || client?.company_id || null,
     });
+
+    // Two uploads at the same moment can both pass the count check above
+    // (the S3 upload sits between check and save). Re-count the items saved up
+    // to and including this one: only the LATER of two racers (higher id) is
+    // over and undoes itself — row and files — so the earlier one keeps the
+    // last place instead of both being thrown away.
+    if (countLimit !== null) {
+        const upToMe = await EventGalleryItem.count({
+            where: { event_id: event.id, type, id: { [Op.lte]: item.id } },
+        });
+        if (upToMe > countLimit) {
+            await item.destroy({ force: true });
+            await dropFile(stored.url, item.company_id);
+            if (thumbnailUrl) await dropFile(thumbnailUrl, item.company_id);
+            throw ApiError.badRequest(
+                `This event has reached its limit of ${countLimit} ${isImage ? 'image' : 'video'}${countLimit === 1 ? '' : 's'}. Please upgrade your plan to add more.`
+            );
+        }
+    }
 
     return { item: present(item), usage: await getUsage(clientId, eventId) };
 };
@@ -642,9 +762,10 @@ const removeItem = async (clientId, itemId) => {
     if (!item) throw ApiError.notFound('That gallery item was not found.');
 
     const eventId = item.event_id;
-    await mediaService.deleteFile(item.url).catch(() => null);
-    if (item.type === 'video' && item.thumbnail_url) {
-        await mediaService.deleteFile(item.thumbnail_url).catch(() => null);
+    await dropFile(item.url, item.company_id);
+    // Its own thumbnail / poster (older photo rows have none, or the same URL).
+    if (item.thumbnail_url && item.thumbnail_url !== item.url) {
+        await dropFile(item.thumbnail_url, item.company_id);
     }
     await item.destroy({ force: true });
 
@@ -732,4 +853,6 @@ module.exports = {
     updateItem,
     reorderItems,
     removeItem,
+    purgeEvent,
+    imageThumb,
 };
