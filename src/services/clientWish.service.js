@@ -506,9 +506,11 @@ const create = async (clientId, eventId, body = {}, file = null) => {
         who = { author_client_id: clientId, guest_name: name, mobile: participant.mobile || null };
     }
 
-    // The organizer's own posts are not filtered — they set the words.
+    // Blocked words are masked for everyone. The organizer's own post is only masked —
+    // never flagged, hidden or notified (they would be reviewing themselves).
     const filter = filterOf(event);
-    const checked = isOwner ? { text: message, flagged: false } : applyFilter(message, filter);
+    const found = applyFilter(message, filter);
+    const checked = isOwner ? { text: found.text, flagged: false } : found;
     const flaggedHidden = checked.flagged && filter.auto_hide;
 
     const media = file ? await storeMedia(event, file, body) : { ...NO_MEDIA, post_type: 'text' };
@@ -549,11 +551,11 @@ const update = async (clientId, wishId, body = {}) => {
     let flaggedNow = false;
     if (has('message')) {
         data.message = str(body.message, MAX_MESSAGE) || '';
-        if (!isOwner) {
+        {
             const filter = filterOf(event);
             const checked = applyFilter(data.message, filter);
             data.message = checked.text;
-            if (checked.flagged) {
+            if (checked.flagged && !isOwner) {
                 flaggedNow = filter.notify;
                 data.is_flagged = 1;
                 if (filter.auto_hide) data.is_hidden = 1;

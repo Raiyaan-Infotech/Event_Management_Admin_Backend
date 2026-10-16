@@ -239,7 +239,8 @@ const refused = async (label, fn, status) => {
         ok('Show = reviewed: flag cleared', !(await EventWish.findByPk(flaggedPost.id)).is_flagged);
         const organizerOwn = await wishes.create(owner, event.id, { message: 'no hate here' });
         made.push(organizerOwn.id);
-        ok('organizer posts are not filtered', organizerOwn.message === 'no hate here');
+        ok('organizer posts are masked too, but not flagged or hidden',
+            organizerOwn.message === 'no kindness here' && organizerOwn.is_flagged === false && organizerOwn.is_hidden === false);
         await wishes.updateFilter(owner, event.id, { auto_hide: false });
         const edited2 = await wishes.update(guest, flaggedPost.id, { message: 'still hate' });
         ok('edit filtered too; no auto-hide = stays visible', edited2.message === 'still kindness' && edited2.is_hidden === false);
