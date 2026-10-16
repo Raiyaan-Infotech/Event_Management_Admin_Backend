@@ -63,7 +63,7 @@ const CATALOGUE = [
     { slug: 'invite-share', name: 'Invite & Share', group: 'app', web: 0, mob: 1, icon: 'mdi:share-variant', color: '#14B8A6' },
     { slug: 'near-by', name: 'Near By', group: 'app', web: 0, mob: 1, icon: 'mdi:near-me', color: '#F97316' },
     { slug: 'chat', name: 'Chat', group: 'app', web: 0, mob: 1, icon: 'mdi:chat-outline', color: '#3B82F6' },
-    { slug: 'wishes', name: 'Wishes', group: 'app', web: 0, mob: 1, icon: 'mdi:heart-outline', color: '#E11D48' },
+    { slug: 'wishes', name: 'Wed Wishes', group: 'app', web: 0, mob: 1, icon: 'mdi:heart-outline', color: '#E11D48' },
     { slug: 'social-wall', name: 'Social Wall', group: 'app', web: 0, mob: 1, icon: 'mdi:post-outline', color: '#6366F1' },
     { slug: 'downloads', name: 'Downloads', group: 'app', web: 0, mob: 1, icon: 'mdi:download', color: '#22C55E' },
     { slug: 'guests', name: 'Guests', group: 'portal', web: 1, mob: 1, icon: 'mdi:account-multiple-outline', color: '#7C3AED' },

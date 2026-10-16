@@ -18,6 +18,8 @@ const galleryController = require('../controllers/clientGallery.controller');
 const galleryService = require('../services/clientGallery.service');
 const agendaController = require('../controllers/clientAgenda.controller');
 const familyController = require('../controllers/clientFamily.controller');
+const wishController = require('../controllers/clientWish.controller');
+const wishService = require('../services/clientWish.service');
 const organizerContactController = require('../controllers/clientOrganizerContact.controller');
 const agendaService = require('../services/clientAgenda.service');
 const eventNoticeController = require('../controllers/clientEventNotification.controller');
@@ -731,6 +733,44 @@ router.put('/events/:id/family-settings', familyController.updateSettings);
 router.get('/family-members/:memberId', familyController.getOne);
 router.put('/family-members/:memberId', familyController.update);
 router.delete('/family-members/:memberId', familyController.remove);
+
+/**
+ * Event Wishes (2026-10-16). Participants write (visible at once) and edit /
+ * delete their own; the organizer adds on someone's behalf, edits, hides,
+ * deletes and blocks a writer from Wishes (per event). Rules in the service.
+ */
+const wishPhotoUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: wishService.MAX_PHOTO_BYTES },
+    fileFilter: (req, file, cb) => {
+        if (wishService.PHOTO_MIMES.includes(file.mimetype)) return cb(null, true);
+        return cb(new Error('Please choose a JPG, PNG or WEBP image.'));
+    },
+});
+router.get('/events/:id/wishes', wishController.list);
+router.post('/events/:id/wishes', wishController.create);
+router.post(
+    '/events/:id/wishes/photo',
+    (req, res, next) => {
+        wishPhotoUpload.single('file')(req, res, (err) => {
+            if (err) {
+                return res.status(400).json({
+                    success: false,
+                    message: err.code === 'LIMIT_FILE_SIZE'
+                        ? `That image is larger than ${Math.round(wishService.MAX_PHOTO_BYTES / (1024 * 1024))}MB.`
+                        : err.message || 'That image could not be uploaded.',
+                });
+            }
+            next();
+        });
+    },
+    wishController.uploadPhoto,
+);
+router.get('/wishes/:wishId', wishController.getOne);
+router.put('/wishes/:wishId', wishController.update);
+router.delete('/wishes/:wishId', wishController.remove);
+router.post('/wishes/:wishId/block', wishController.block);
+router.delete('/wishes/:wishId/block', wishController.unblock);
 
 // The app's read: the ACTIVE splash for one event, or null. Declared BEFORE
 // `/splash-screens/:id` — the same ordering trap as `/events/stats`, since
