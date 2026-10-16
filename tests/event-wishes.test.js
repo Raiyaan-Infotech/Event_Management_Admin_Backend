@@ -147,20 +147,25 @@ const refused = async (label, fn, status) => {
         ok('...cannot hide it', edited.status === 'visible');
         await refused('participant cannot edit the organizer post', () => wishes.update(guest, theirs.id, { message: 'x' }), 403);
         await refused('participant cannot delete the organizer post', () => wishes.remove(guest, theirs.id), 403);
+        await refused('organizer cannot edit a participant wish', () => wishes.update(owner, mine.id, { message: 'rewritten' }), 403);
+        await refused('organizer cannot change its audience', () => wishes.update(owner, mine.id, { audience: 'bride' }), 403);
+        await refused('organizer cannot replace its media', () => wishes.replaceMedia(owner, mine.id, { buffer: Buffer.from('x'), mimetype: 'image/png' }), 403);
+        o = await wishes.list(owner, event.id);
+        ok('organizer: can_edit false on a participant wish, true on own',
+            o.wishes.find((w) => w.id === mine.id).can_edit === false && o.wishes.find((w) => w.id === theirs.id).can_edit === true);
+        ok('organizer can still hide / show it', (await wishes.update(owner, mine.id, { show_in_app: true })).status === 'visible');
 
         // ── Block ─────────────────────────────────────────────────────────
         await refused('participant cannot block', () => wishes.setBlocked(guest, mine.id, true), 403);
         await refused('organizer post: nobody to block', () => wishes.setBlocked(owner, theirs.id, true), 400);
-        // Menu kept visible here so the participant's own list can be checked below.
-        const { wish: blocked } = await wishes.setBlocked(owner, mine.id, true, { hide_menu: false });
+        const { wish: blocked } = await wishes.setBlocked(owner, mine.id, true);
         ok('blocked: status blocked for the organizer', blocked.status === 'blocked' && blocked.author_blocked);
-        await wishes.setBlocked(owner, mine.id, true, { hide_menu: false });
+        await wishes.setBlocked(owner, mine.id, true);
         ok('blocking twice keeps one row', (await EventWishBlock.count({ where: { event_id: event.id, author_client_id: guest } })) === 1);
         o = await wishes.list(owner, event.id);
         ok('Blocked Users tile = 1', o.counts.blocked_users === 1);
-        g = await wishes.list(guest, event.id);
-        ok('participant told they are blocked', g.is_blocked === true && g.can_write === false);
-        ok('their existing post still shows', g.wishes.some((w) => w.id === mine.id && w.status === 'visible'));
+        ok('their existing post stays visible (no hide asked)', o.wishes.find((w) => w.id === mine.id).is_hidden === false);
+        await refused('blocked: wishes list refused (menu hidden)', () => wishes.list(guest, event.id), 403);
         await refused('blocked: new post refused', () => wishes.create(guest, event.id, { message: 'again' }), 403);
         await refused('blocked: edit refused', () => wishes.update(guest, mine.id, { message: 'again' }), 403);
         await refused('blocked: like refused', () => wishes.setLiked(guest, theirs.id, true), 403);
@@ -252,13 +257,20 @@ const refused = async (label, fn, status) => {
         ok('filter off: nothing replaced', off.message === 'hate');
 
         // ── Block options (Phase 2) ───────────────────────────────────────
-        const r1 = await wishes.setBlocked(owner, mine.id, true, { hide_menu: true });
-        ok('block with hide_menu', r1.wish && r1.wish.status === 'blocked');
+        const r1 = await wishes.setBlocked(owner, mine.id, true);
+        ok('block', r1.wish && r1.wish.status === 'blocked');
         ok('menu hidden for that event', (await wishes.menuHiddenFor(guest, [event.id])).has(Number(event.id)));
         await refused('hidden menu: wishes list refused', () => wishes.list(guest, event.id), 403);
-        const r2 = await wishes.setBlocked(owner, mine.id, true, { hide_menu: false });
-        ok('re-block without hide_menu updates the row', r2.wish && !(await wishes.menuHiddenFor(guest, [event.id])).size);
-        ok('blocked but menu shown: list still opens', (await wishes.list(guest, event.id)).is_blocked === true);
+        await wishes.setBlocked(owner, mine.id, true, { hide_menu: false });
+        ok('menu is always hidden (hide_menu:false ignored)', (await wishes.menuHiddenFor(guest, [event.id])).has(Number(event.id)));
+        await wishes.setBlocked(owner, mine.id, false);
+        ok('unblock: menu back', !(await wishes.menuHiddenFor(guest, [event.id])).size);
+        const second = await wishes.create(guest, event.id, { message: 'second one' });
+        made.push(second.id);
+        const r4 = await wishes.setBlocked(owner, second.id, true, { hide_wishes: true });
+        const theirsNow = await EventWish.findAll({ where: { event_id: event.id, author_client_id: guest }, raw: true });
+        ok('block + hide their wishes: all hidden, none deleted',
+            r4.wish && r4.hidden >= 1 && theirsNow.length >= 2 && theirsNow.every((w) => Number(w.is_hidden) === 1));
         await wishes.setBlocked(owner, mine.id, false);
         const keep = await wishes.create(guest, event.id, { message: 'one more' });
         made.push(keep.id);

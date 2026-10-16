@@ -370,7 +370,8 @@ const present = (row, { isOwner, viewerId, ctx, settings = SETTINGS_DEFAULTS }) 
         /** The writer's participant row — the organizer contacts them through it. */
         participant_id: isOwner && person ? person.id : null,
         is_mine: mine,
-        can_edit: isOwner || (mine && !authorBlocked),
+        // The organizer edits only their own posts; a participant's wish is theirs to word.
+        can_edit: (isOwner && !author) || (mine && !authorBlocked),
         can_delete: isOwner || mine,
         created_at: whole || settings.time ? w.created_at : null,
         updated_at: w.updated_at,
@@ -529,10 +530,16 @@ const create = async (clientId, eventId, body = {}, file = null) => {
     return presentOne(row, clientId, isOwner, event);
 };
 
-/** Who may change [wish]: the organizer, or its writer while not blocked. */
+/**
+ * Who may change [wish]'s content: its writer while not blocked, or the organizer
+ * for their own post. The organizer never rewords a participant's wish — they can
+ * only hide / show, review, block or delete it.
+ */
 const assertCanEdit = async (wish, event, isOwner, clientId) => {
     const mine = Number(wish.author_client_id) === Number(clientId);
-    if (!isOwner && !mine) throw ApiError.forbidden('Only the organizer or the writer can edit this wish.');
+    const organizerPost = !wish.author_client_id;
+    if (isOwner && !organizerPost) throw ApiError.forbidden("The organizer cannot edit a participant's wish.");
+    if (!isOwner && !mine) throw ApiError.forbidden('Only the writer can edit this wish.');
     if (!isOwner && await isBlocked(event.id, clientId)) throw refuseBlocked();
 };
 
@@ -543,9 +550,11 @@ const assertCanEdit = async (wish, event, isOwner, clientId) => {
  */
 const update = async (clientId, wishId, body = {}) => {
     const { wish, event, isOwner } = await resolveWish(clientId, wishId);
-    await assertCanEdit(wish, event, isOwner, clientId);
-
     const has = (f) => Object.prototype.hasOwnProperty.call(body, f);
+    // Hide / show and review alone are moderation, not an edit.
+    const editsContent = ['message', 'audience', 'post_type'].some(has);
+    if (editsContent || !isOwner) await assertCanEdit(wish, event, isOwner, clientId);
+
     const data = {};
     const toText = body.post_type === 'text' && wish.post_type !== 'text';
     let flaggedNow = false;
@@ -619,9 +628,9 @@ const setLiked = async (clientId, wishId, liked) => {
 
 /**
  * Block / unblock the participant who wrote [wishId] — organizer only.
- * Block options (Jamal's "Block Participant" screen): `hide_menu` (default on)
- * hides the Wed Wishes menu from them too; `remove_wishes` deletes every post
- * they made on this event, files included. Returns the wish, or null when it
+ * A block always hides the Wed Wishes menu from them. `hide_wishes` hides every
+ * post they made on this event (kept, can be shown again). `remove_wishes` (old
+ * app builds) deletes them, files included. Returns the wish, or null when it
  * was removed with the others.
  */
 const setBlocked = async (clientId, wishId, blocked, options = {}) => {
@@ -635,7 +644,7 @@ const setBlocked = async (clientId, wishId, blocked, options = {}) => {
         return { wish: await presentOne(wish, clientId, true, event), removed: 0 };
     }
 
-    const hideMenu = bool(options.hide_menu, true) ? 1 : 0;
+    const hideMenu = 1;
     const [row, created] = await EventWishBlock.findOrCreate({ where, defaults: { ...where, hide_menu: hideMenu } });
     if (!created && Number(row.hide_menu) !== hideMenu) await row.update({ hide_menu: hideMenu });
 
@@ -647,9 +656,14 @@ const setBlocked = async (clientId, wishId, blocked, options = {}) => {
             await dropMediaOf(w, event.company_id);
         }
         removed = await EventWish.destroy({ where });
-        return { wish: null, removed };
+        return { wish: null, removed, hidden: 0 };
     }
-    return { wish: await presentOne(wish, clientId, true, event), removed };
+    let hidden = 0;
+    if (bool(options.hide_wishes, false)) {
+        [hidden] = await EventWish.update({ is_hidden: 1 }, { where: { ...where, is_hidden: 0 } });
+        await wish.reload();
+    }
+    return { wish: await presentOne(wish, clientId, true, event), removed, hidden };
 };
 
 /**
