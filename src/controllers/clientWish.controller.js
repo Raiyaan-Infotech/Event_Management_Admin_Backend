@@ -42,7 +42,7 @@ const unlike = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, { wish }, 'Like removed.');
 });
 
-/** Body: hide_wishes (default false); remove_wishes (old app builds). The menu is always hidden. */
+/** The menu is always hidden; their wishes are kept. Body: remove_wishes (old app builds only). */
 const block = asyncHandler(async (req, res) => {
     const result = await service.setBlocked(req.websiteClient.id, req.params.wishId, true, req.body || {});
     return ApiResponse.success(res, result, 'User blocked from wishes.');

@@ -265,13 +265,16 @@ const refused = async (label, fn, status) => {
         ok('menu is always hidden (hide_menu:false ignored)', (await wishes.menuHiddenFor(guest, [event.id])).has(Number(event.id)));
         await wishes.setBlocked(owner, mine.id, false);
         ok('unblock: menu back', !(await wishes.menuHiddenFor(guest, [event.id])).size);
-        const second = await wishes.create(guest, event.id, { message: 'second one' });
-        made.push(second.id);
-        const r4 = await wishes.setBlocked(owner, second.id, true, { hide_wishes: true });
-        const theirsNow = await EventWish.findAll({ where: { event_id: event.id, author_client_id: guest }, raw: true });
-        ok('block + hide their wishes: all hidden, none deleted',
-            r4.wish && r4.hidden >= 1 && theirsNow.length >= 2 && theirsNow.every((w) => Number(w.is_hidden) === 1));
-        await wishes.setBlocked(owner, mine.id, false);
+        const other = await wishes.create(guest, event.id, { message: 'another one' });
+        made.push(other.id);
+        await wishes.update(owner, other.id, { show_in_app: false });
+        ok('hide one: their other wishes stay visible', !(await EventWish.findByPk(mine.id)).is_hidden);
+        await wishes.update(owner, other.id, { show_in_app: true });
+        await wishes.update(owner, other.id, { show_in_app: false, all_from_writer: true });
+        ok('hide + "their other wishes": all of theirs hidden', (await EventWish.findAll({
+            where: { event_id: event.id, author_client_id: guest }, raw: true,
+        })).every((w) => Number(w.is_hidden) === 1));
+        await EventWish.update({ is_hidden: 0 }, { where: { event_id: event.id, author_client_id: guest } });
         const keep = await wishes.create(guest, event.id, { message: 'one more' });
         made.push(keep.id);
         const r3 = await wishes.setBlocked(owner, keep.id, true, { remove_wishes: true });

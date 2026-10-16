@@ -587,6 +587,13 @@ const update = async (clientId, wishId, body = {}) => {
     await wish.update(data);
     if (toText) await dropMediaOf(before, event.company_id);
     if (flaggedNow) await notifyFlagged(event, wish);
+    // Hide Wish → "Also hide their other wishes on this event".
+    if (isOwner && data.is_hidden === 1 && wish.author_client_id && bool(body.all_from_writer, false)) {
+        await EventWish.update(
+            { is_hidden: 1 },
+            { where: { event_id: event.id, author_client_id: wish.author_client_id, is_hidden: 0 } },
+        );
+    }
     return presentOne(wish, clientId, isOwner, event);
 };
 
@@ -628,10 +635,9 @@ const setLiked = async (clientId, wishId, liked) => {
 
 /**
  * Block / unblock the participant who wrote [wishId] — organizer only.
- * A block always hides the Wed Wishes menu from them. `hide_wishes` hides every
- * post they made on this event (kept, can be shown again). `remove_wishes` (old
- * app builds) deletes them, files included. Returns the wish, or null when it
- * was removed with the others.
+ * A block always hides the Wed Wishes menu from them; their wishes stay as they
+ * are. `remove_wishes` (old app builds only) deletes them, files included.
+ * Returns the wish, or null when it was removed with the others.
  */
 const setBlocked = async (clientId, wishId, blocked, options = {}) => {
     const { wish, event, isOwner } = await resolveWish(clientId, wishId);
@@ -656,14 +662,9 @@ const setBlocked = async (clientId, wishId, blocked, options = {}) => {
             await dropMediaOf(w, event.company_id);
         }
         removed = await EventWish.destroy({ where });
-        return { wish: null, removed, hidden: 0 };
+        return { wish: null, removed };
     }
-    let hidden = 0;
-    if (bool(options.hide_wishes, false)) {
-        [hidden] = await EventWish.update({ is_hidden: 1 }, { where: { ...where, is_hidden: 0 } });
-        await wish.reload();
-    }
-    return { wish: await presentOne(wish, clientId, true, event), removed, hidden };
+    return { wish: await presentOne(wish, clientId, true, event), removed };
 };
 
 /**
