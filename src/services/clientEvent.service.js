@@ -658,6 +658,7 @@ const getEventForViewer = async (clientId, eventId, opts = {}) => {
     const presented = await presentOne(event, { ...opts, isOwner });
     if (!isOwner) {
         for (const field of HOST_ONLY_FIELDS) delete presented[field];
+        await dropBlockedWishesMenu(clientId, [presented]);
     }
     /*
       Whether THIS caller owns the event, stated outright.
@@ -710,6 +711,21 @@ const getEventForViewer = async (clientId, eventId, opts = {}) => {
 // needs hiding from a participant, which only ever READS them. Reaching this
 // function as a non-owner already proves the viewer joined the event.
 const HOST_ONLY_MENU_SLUGS = new Set(['guests']);
+
+/**
+ * A participant blocked from Wed Wishes WITH "Hide Wed Wishes menu" does not
+ * see the menu at all (Jamal's Block Participant screen, 2026-10-16). Removes
+ * the `wishes` menu from [presented] events where that applies.
+ */
+const dropBlockedWishesMenu = async (clientId, presented) => {
+    const hidden = await wishService.menuHiddenFor(clientId, presented.map((p) => p.id));
+    if (!hidden.size) return;
+    for (const p of presented) {
+        if (hidden.has(Number(p.id)) && Array.isArray(p.menus)) {
+            p.menus = p.menus.filter((m) => m.slug !== 'wishes');
+        }
+    }
+};
 
 /**
  * `isOwner` — whether the CALLER hosts this event. Defaults to true because
@@ -1521,6 +1537,7 @@ const getWishlist = async (clientId, { platform = 'website' } = {}) => {
         const presented = await presentOne(event, { platform, isOwner });
         if (!isOwner) {
             for (const field of HOST_ONLY_FIELDS) delete presented[field];
+            await dropBlockedWishesMenu(clientId, [presented]);
         }
         return { ...presented, wishlisted: true };
     }));

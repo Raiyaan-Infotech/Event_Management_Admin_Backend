@@ -3,6 +3,7 @@ const {
 } = require('../models');
 const ApiError = require('../utils/apiError');
 const mediaService = require('./media.service');
+const notificationService = require('./clientNotification.service');
 const gallery = require('./clientGallery.service');
 const subscriptionPlanService = require('./subscriptionPlan.service');
 const { processVideo, videoPoster } = require('../utils/videoProcess');
@@ -34,6 +35,16 @@ const { Op } = Sequelize;
  * `events.wish_settings` (the settings icon on the list, like Family's). The
  * server enforces and trims; the organizer and the writer are never trimmed.
  *
+ * Content filter (Phase 2, `wish_settings.filter`): the organizer's blocked
+ * words / phrases, each with what it is replaced by. A participant's post that
+ * contains one is saved with the word REPLACED and flagged (`is_flagged`);
+ * with auto-hide it is also hidden until the organizer reviews it, and with
+ * notify the organizer gets an in-app notification. Words match whole words,
+ * any case, in any script (Tamil / Hindi letters and marks count as letters).
+ *
+ * Block options: hide the Wed Wishes menu from the person too (`hide_menu`),
+ * and optionally remove every post they made on the event.
+ *
  * Text is cut by CHARACTERS (code points), not UTF-16 units, so an emoji or a
  * Tamil / Hindi letter at the limit is never split in half.
  *
@@ -50,7 +61,10 @@ const MEDIA_MIMES = [...IMAGE_MIMES, ...gallery.VIDEO_MIMES];
 /** Multer's ceiling; the real per-type caps are checked in storeMedia. */
 const MAX_UPLOAD_BYTES = Math.max(gallery.MAX_IMAGE_BYTES, gallery.MAX_VIDEO_BYTES);
 
-const EVENT_ATTRS = ['id', 'website_client_id', 'company_id', 'wish_settings', 'subscription_plan_id', 'organizer'];
+const EVENT_ATTRS = [
+    'id', 'name', 'website_client_id', 'organizer_client_id', 'company_id', 'wish_settings',
+    'subscription_plan_id', 'organizer',
+];
 
 const SETTINGS_DEFAULTS = Object.freeze({
     allow_new: true,
@@ -78,14 +92,77 @@ const bool = (value, fallback) => (value === undefined || value === null
     ? fallback
     : value === true || value === 1 || value === '1' || value === 'true');
 
+const storedOf = (event) => parseJson((event?.toJSON ? event.toJSON() : (event || {})).wish_settings);
+
 /** Resolved settings for an event; `name` is always on (a wish needs a name). */
 const settingsOf = (event) => {
-    const plain = event?.toJSON ? event.toJSON() : (event || {});
-    const stored = parseJson(plain.wish_settings);
+    const stored = storedOf(event);
     const out = {};
     for (const [k, d] of Object.entries(SETTINGS_DEFAULTS)) out[k] = bool(stored[k], d);
     out.name = true;
     return out;
+};
+
+// ── Content filter ──────────────────────────────────────────────────────────
+
+const MAX_FILTER_WORDS = 200;
+const MAX_FILTER_WORD = 60;
+const DEFAULT_REPLACE = '***';
+
+/** The event's filter: on/off, words, auto-hide, notify. Off until switched on. */
+const filterOf = (event) => {
+    const f = parseJson(storedOf(event).filter);
+    const words = [];
+    const seen = new Set();
+    for (const w of Array.isArray(f.words) ? f.words : []) {
+        const word = str(w?.word, MAX_FILTER_WORD);
+        if (!word || seen.has(word.toLowerCase())) continue;
+        seen.add(word.toLowerCase());
+        const replace = typeof w?.replace === 'string' ? Array.from(w.replace.trim()).slice(0, MAX_FILTER_WORD).join('') : '';
+        words.push({ word, replace: replace || DEFAULT_REPLACE });
+        if (words.length >= MAX_FILTER_WORDS) break;
+    }
+    return {
+        enabled: bool(f.enabled, false),
+        words,
+        auto_hide: bool(f.auto_hide, true),
+        notify: bool(f.notify, true),
+    };
+};
+
+const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * [text] with every blocked word / phrase replaced. A match is a whole word in
+ * any script — letters, digits and combining marks (Indic vowel signs) on
+ * either side mean it is part of a longer word — any case.
+ */
+const applyFilter = (text, filter) => {
+    if (!filter.enabled || !text || !filter.words.length) return { text, flagged: false };
+    let out = text;
+    let flagged = false;
+    for (const { word, replace } of filter.words) {
+        const re = new RegExp(`(?<![\\p{L}\\p{N}\\p{M}])${escapeRegex(word)}(?![\\p{L}\\p{N}\\p{M}])`, 'giu');
+        out = out.replace(re, () => {
+            flagged = true;
+            return replace;
+        });
+    }
+    return { text: out, flagged };
+};
+
+/** Tell the organizer a post was flagged (in-app; best effort, never throws). */
+const notifyFlagged = async (event, wish) => {
+    const snippet = Array.from(wish.message || '').slice(0, 120).join('');
+    const ids = [...new Set([event.website_client_id, event.organizer_client_id].map(Number).filter(Boolean))];
+    await Promise.all(ids.map((id) => notificationService.notify(id, {
+        type: 'wish_flagged',
+        title: 'A wish was flagged',
+        body: `${wish.guest_name}${snippet ? `: ${snippet}` : ''}`,
+        eventId: event.id,
+        companyId: event.company_id ?? null,
+        meta: { wish_id: wish.id },
+    }).catch(() => null)));
 };
 
 /** The event as the caller may see it: its owner, or one of its participants. */
@@ -285,6 +362,8 @@ const present = (row, { isOwner, viewerId, ctx, settings = SETTINGS_DEFAULTS }) 
         like_count: ctx.likes.get(w.id) || 0,
         liked_by_me: ctx.mine.has(w.id),
         is_hidden: Number(w.is_hidden) === 1,
+        /** Organizer only: the content filter caught a word, not reviewed yet. */
+        is_flagged: isOwner ? Number(w.is_flagged) === 1 : false,
         status,
         added_by_organizer: !author,
         author_blocked: isOwner ? authorBlocked : false,
@@ -311,7 +390,7 @@ const contextFor = async (eventId, rows, viewerId) => {
                 raw: true,
             })
             : [],
-        EventWishBlock.findAll({ where: { event_id: eventId }, attributes: ['author_client_id'], raw: true }),
+        EventWishBlock.findAll({ where: { event_id: eventId }, attributes: ['author_client_id', 'hide_menu'], raw: true }),
         ids.length
             ? EventWishLike.findAll({
                 where: { wish_id: ids },
@@ -333,6 +412,7 @@ const contextFor = async (eventId, rows, viewerId) => {
     return {
         people: byClient,
         blocked: new Set(blocks.map((b) => Number(b.author_client_id))),
+        hiddenMenu: new Set(blocks.filter((b) => Number(b.hide_menu) === 1).map((b) => Number(b.author_client_id))),
         likes: new Map(counts.map((c) => [Number(c.wish_id), Number(c.n)])),
         mine: new Set(mine.map((m) => Number(m.wish_id))),
     };
@@ -349,9 +429,13 @@ const list = async (clientId, eventId) => {
     if (!isOwner) where[Op.or] = [{ is_hidden: 0 }, { author_client_id: clientId }];
     const rows = await EventWish.findAll({ where, order: [['created_at', 'DESC'], ['id', 'DESC']] });
     const ctx = await contextFor(event.id, rows, clientId);
+    const blockedHere = !isOwner && ctx.blocked.has(Number(clientId));
+    // Blocked with the menu hidden: Wed Wishes is not there for them at all.
+    if (blockedHere && ctx.hiddenMenu.has(Number(clientId))) {
+        throw ApiError.forbidden('Wed Wishes is not available for you on this event.');
+    }
     const settings = settingsOf(event);
     const wishes = rows.map((r) => present(r, { isOwner, viewerId: clientId, ctx, settings }));
-    const blockedHere = !isOwner && ctx.blocked.has(Number(clientId));
 
     const result = {
         wishes,
@@ -370,6 +454,8 @@ const list = async (clientId, eventId) => {
             blocked: count('blocked'),
             /** People blocked from Wishes on this event (the dashboard tile). */
             blocked_users: ctx.blocked.size,
+            /** Caught by the content filter, not reviewed yet. */
+            flagged: wishes.filter((w) => w.is_flagged).length,
         };
     }
     return result;
@@ -420,17 +506,24 @@ const create = async (clientId, eventId, body = {}, file = null) => {
         who = { author_client_id: clientId, guest_name: name, mobile: participant.mobile || null };
     }
 
+    // The organizer's own posts are not filtered — they set the words.
+    const filter = filterOf(event);
+    const checked = isOwner ? { text: message, flagged: false } : applyFilter(message, filter);
+    const flaggedHidden = checked.flagged && filter.auto_hide;
+
     const media = file ? await storeMedia(event, file, body) : { ...NO_MEDIA, post_type: 'text' };
     const row = await EventWish.create({
         ...who,
         ...media,
         audience: pick(body.audience, AUDIENCES, 'both'),
-        message: message || '',
-        is_hidden: 0,
+        message: checked.text || '',
+        is_hidden: flaggedHidden ? 1 : 0,
+        is_flagged: checked.flagged ? 1 : 0,
         event_id: event.id,
         website_client_id: event.website_client_id,
         company_id: event.company_id ?? null,
     });
+    if (checked.flagged && filter.notify) await notifyFlagged(event, row);
     return presentOne(row, clientId, isOwner, event);
 };
 
@@ -453,17 +546,36 @@ const update = async (clientId, wishId, body = {}) => {
     const has = (f) => Object.prototype.hasOwnProperty.call(body, f);
     const data = {};
     const toText = body.post_type === 'text' && wish.post_type !== 'text';
-    if (has('message')) data.message = str(body.message, MAX_MESSAGE) || '';
+    let flaggedNow = false;
+    if (has('message')) {
+        data.message = str(body.message, MAX_MESSAGE) || '';
+        if (!isOwner) {
+            const filter = filterOf(event);
+            const checked = applyFilter(data.message, filter);
+            data.message = checked.text;
+            if (checked.flagged) {
+                flaggedNow = filter.notify;
+                data.is_flagged = 1;
+                if (filter.auto_hide) data.is_hidden = 1;
+            }
+        }
+    }
     if ((toText || (wish.post_type === 'text' && has('message'))) && !(data.message ?? wish.message)) {
         throw ApiError.badRequest('Please fill all mandatory fields.');
     }
     if (has('audience')) data.audience = pick(body.audience, AUDIENCES, wish.audience);
-    if (isOwner && has('show_in_app')) data.is_hidden = body.show_in_app ? 0 : 1;
+    if (isOwner && has('show_in_app')) {
+        data.is_hidden = body.show_in_app ? 0 : 1;
+        // Showing a flagged post IS the review.
+        if (body.show_in_app) data.is_flagged = 0;
+    }
+    if (isOwner && bool(body.reviewed, false)) data.is_flagged = 0;
 
     const before = wish.toJSON();
     if (toText) Object.assign(data, NO_MEDIA, { post_type: 'text' });
     await wish.update(data);
     if (toText) await dropMediaOf(before, event.company_id);
+    if (flaggedNow) await notifyFlagged(event, wish);
     return presentOne(wish, clientId, isOwner, event);
 };
 
@@ -503,16 +615,55 @@ const setLiked = async (clientId, wishId, liked) => {
     return presentOne(wish, clientId, isOwner, event);
 };
 
-/** Block / unblock the participant who wrote [wishId] — organizer only. */
-const setBlocked = async (clientId, wishId, blocked) => {
+/**
+ * Block / unblock the participant who wrote [wishId] — organizer only.
+ * Block options (Jamal's "Block Participant" screen): `hide_menu` (default on)
+ * hides the Wed Wishes menu from them too; `remove_wishes` deletes every post
+ * they made on this event, files included. Returns the wish, or null when it
+ * was removed with the others.
+ */
+const setBlocked = async (clientId, wishId, blocked, options = {}) => {
     const { wish, event, isOwner } = await resolveWish(clientId, wishId);
     if (!isOwner) throw ApiError.forbidden('Only the organizer can block a participant.');
     if (!wish.author_client_id) throw ApiError.badRequest('This is your own post — there is no participant to block.');
 
     const where = { event_id: event.id, author_client_id: wish.author_client_id };
-    if (blocked) await EventWishBlock.findOrCreate({ where, defaults: where });
-    else await EventWishBlock.destroy({ where });
-    return presentOne(wish, clientId, true, event);
+    if (!blocked) {
+        await EventWishBlock.destroy({ where });
+        return { wish: await presentOne(wish, clientId, true, event), removed: 0 };
+    }
+
+    const hideMenu = bool(options.hide_menu, true) ? 1 : 0;
+    const [row, created] = await EventWishBlock.findOrCreate({ where, defaults: { ...where, hide_menu: hideMenu } });
+    if (!created && Number(row.hide_menu) !== hideMenu) await row.update({ hide_menu: hideMenu });
+
+    let removed = 0;
+    if (bool(options.remove_wishes, false)) {
+        const theirs = await EventWish.findAll({ where, raw: true });
+        for (const w of theirs) {
+            // eslint-disable-next-line no-await-in-loop
+            await dropMediaOf(w, event.company_id);
+        }
+        removed = await EventWish.destroy({ where });
+        return { wish: null, removed };
+    }
+    return { wish: await presentOne(wish, clientId, true, event), removed };
+};
+
+/**
+ * Whether the Wed Wishes menu is hidden from [clientId] on these events — a
+ * block with `hide_menu`. Returns the set of event ids (clientEvent drops the
+ * `wishes` menu for them).
+ */
+const menuHiddenFor = async (clientId, eventIds) => {
+    const ids = [...new Set((eventIds || []).map(Number).filter(Boolean))];
+    if (!clientId || !ids.length) return new Set();
+    const rows = await EventWishBlock.findAll({
+        where: { author_client_id: clientId, event_id: ids, hide_menu: 1 },
+        attributes: ['event_id'],
+        raw: true,
+    });
+    return new Set(rows.map((r) => Number(r.event_id)));
 };
 
 /** Removes every wish file of a deleted event (with clientGallery.purgeEvent). */
@@ -539,12 +690,43 @@ const updateSettings = async (clientId, eventId, body = {}) => {
     const next = {};
     for (const k of Object.keys(SETTINGS_DEFAULTS)) next[k] = bool(body[k], current[k]);
     next.name = true;
-    await event.update({ wish_settings: next });
+    // The content filter is saved on its own screen — keep it.
+    await event.update({ wish_settings: { ...storedOf(event), ...next } });
     return { event_id: event.id, settings: next };
+};
+
+// ── Content filter settings (Wish Settings → Content Filter) ────────────────
+
+const getFilter = async (clientId, eventId) => {
+    const { event, isOwner } = await resolveEvent(clientId, eventId);
+    if (!isOwner) throw ApiError.forbidden('Only the organizer can see the content filter.');
+    return { event_id: event.id, filter: filterOf(event) };
+};
+
+const updateFilter = async (clientId, eventId, body = {}) => {
+    const { event, isOwner } = await resolveEvent(clientId, eventId);
+    if (!isOwner) throw ApiError.forbidden('Only the organizer can change the content filter.');
+    if (body.words !== undefined && !Array.isArray(body.words)) throw ApiError.badRequest('Invalid word list.');
+    const current = filterOf(event);
+    const merged = {
+        enabled: bool(body.enabled, current.enabled),
+        words: body.words === undefined ? current.words : body.words,
+        auto_hide: bool(body.auto_hide, current.auto_hide),
+        notify: bool(body.notify, current.notify),
+    };
+    // Normalised exactly as it is read back (trim, dedupe, caps, default ***).
+    const filter = filterOf({ wish_settings: { filter: merged } });
+    await event.update({ wish_settings: { ...storedOf(event), filter } });
+    return { event_id: event.id, filter };
 };
 
 module.exports = {
     SETTINGS_DEFAULTS,
+    applyFilter,
+    filterOf,
+    getFilter,
+    updateFilter,
+    menuHiddenFor,
     MAX_UPLOAD_BYTES,
     MEDIA_MIMES,
     settingsOf,

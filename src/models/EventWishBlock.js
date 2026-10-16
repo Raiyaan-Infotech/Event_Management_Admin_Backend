@@ -11,6 +11,8 @@ module.exports = (sequelize) => {
         id: { type: DataTypes.INTEGER.UNSIGNED, primaryKey: true, autoIncrement: true },
         event_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
         author_client_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
+        /** The Wed Wishes menu is hidden from this participant too. */
+        hide_menu: { type: DataTypes.TINYINT(1), allowNull: false, defaultValue: 1 },
     }, {
         tableName: 'event_wish_blocks',
         timestamps: true,

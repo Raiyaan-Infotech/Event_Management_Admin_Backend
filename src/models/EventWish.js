@@ -33,6 +33,8 @@ module.exports = (sequelize) => {
         /** Stored bytes of the media — counted in the plan's storage. */
         size_bytes: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false, defaultValue: 0 },
         is_hidden: { type: DataTypes.TINYINT(1), allowNull: false, defaultValue: 0 },
+        /** The content filter caught a blocked word (already replaced); cleared on review. */
+        is_flagged: { type: DataTypes.TINYINT(1), allowNull: false, defaultValue: 0 },
     }, {
         tableName: 'event_wishes',
         timestamps: true,

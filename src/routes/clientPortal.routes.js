@@ -767,6 +767,8 @@ router.get('/events/:id/wishes', wishController.list);
 router.post('/events/:id/wishes', wishMedia, wishController.create);
 router.get('/events/:id/wish-settings', wishController.getSettings);
 router.put('/events/:id/wish-settings', wishController.updateSettings);
+router.get('/events/:id/wish-filter', wishController.getFilter);
+router.put('/events/:id/wish-filter', wishController.updateFilter);
 router.get('/wishes/:wishId', wishController.getOne);
 router.put('/wishes/:wishId', wishController.update);
 router.post('/wishes/:wishId/media', wishMedia, wishController.replaceMedia);

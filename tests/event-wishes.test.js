@@ -151,9 +151,10 @@ const refused = async (label, fn, status) => {
         // ── Block ─────────────────────────────────────────────────────────
         await refused('participant cannot block', () => wishes.setBlocked(guest, mine.id, true), 403);
         await refused('organizer post: nobody to block', () => wishes.setBlocked(owner, theirs.id, true), 400);
-        const blocked = await wishes.setBlocked(owner, mine.id, true);
+        // Menu kept visible here so the participant's own list can be checked below.
+        const { wish: blocked } = await wishes.setBlocked(owner, mine.id, true, { hide_menu: false });
         ok('blocked: status blocked for the organizer', blocked.status === 'blocked' && blocked.author_blocked);
-        await wishes.setBlocked(owner, mine.id, true);
+        await wishes.setBlocked(owner, mine.id, true, { hide_menu: false });
         ok('blocking twice keeps one row', (await EventWishBlock.count({ where: { event_id: event.id, author_client_id: guest } })) === 1);
         o = await wishes.list(owner, event.id);
         ok('Blocked Users tile = 1', o.counts.blocked_users === 1);
@@ -196,6 +197,79 @@ const refused = async (label, fn, status) => {
         // The fake photo above is not a real file — clear it so delete has nothing to remove.
         await EventWish.update({ photo: null, post_type: 'text' }, { where: { id: theirs.id } });
 
+        // ── Content filter (Phase 2) ──────────────────────────────────────
+        const f0 = await wishes.getFilter(owner, event.id);
+        ok('filter off by default', f0.filter.enabled === false && f0.filter.words.length === 0);
+        await refused('participant cannot read the filter', () => wishes.getFilter(guest, event.id), 403);
+        const f1 = await wishes.updateFilter(owner, event.id, {
+            enabled: true,
+            words: [
+                { word: 'hate', replace: 'kindness' },
+                { word: 'bad word', replace: '' },
+                { word: 'HATE', replace: 'dup' },
+                { word: 'முட்டாள்', replace: '***' },
+            ],
+            auto_hide: true,
+            notify: true,
+        });
+        ok('filter saved: duplicates dropped, empty replace = ***', f1.filter.words.length === 3
+            && f1.filter.words.find((w) => w.word === 'bad word').replace === '***');
+        ok('settings save keeps the filter', await (async () => {
+            await wishes.updateSettings(owner, event.id, { time: true });
+            return (await wishes.getFilter(owner, event.id)).filter.words.length === 3;
+        })());
+        const t = (s) => wishes.applyFilter(s, f1.filter);
+        ok('whole word, any case', t('I HATE this').text === 'I kindness this');
+        ok('part of a longer word is left', t('hateful but fine').flagged === false);
+        ok('phrase matched', t('such a bad word here').text === 'such a *** here');
+        ok('Tamil word matched', t('நீ முட்டாள் இல்லை').text === 'நீ *** இல்லை');
+        ok('clean text not flagged', t('Congratulations 💐').flagged === false);
+
+        const { ClientNotification } = require('../src/models');
+        const notesBefore = await ClientNotification.count({ where: { website_client_id: owner, type: 'wish_flagged' } });
+        const flaggedPost = await wishes.create(guest, event.id, { message: 'I hate you' });
+        made.push(flaggedPost.id);
+        ok('flagged post: word replaced', flaggedPost.message === 'I kindness you');
+        ok('auto-hide: hidden until reviewed', flaggedPost.is_hidden === true);
+        ok('organizer notified', (await ClientNotification.count({ where: { website_client_id: owner, type: 'wish_flagged' } })) === notesBefore + 1);
+        o = await wishes.list(owner, event.id);
+        ok('organizer sees it flagged + counted', o.wishes.find((w) => w.id === flaggedPost.id).is_flagged && o.counts.flagged >= 1);
+        ok('participants never see is_flagged', (await wishes.getOne(guest, flaggedPost.id)).is_flagged === false);
+        await wishes.update(owner, flaggedPost.id, { show_in_app: true });
+        ok('Show = reviewed: flag cleared', !(await EventWish.findByPk(flaggedPost.id)).is_flagged);
+        const organizerOwn = await wishes.create(owner, event.id, { message: 'no hate here' });
+        made.push(organizerOwn.id);
+        ok('organizer posts are not filtered', organizerOwn.message === 'no hate here');
+        await wishes.updateFilter(owner, event.id, { auto_hide: false });
+        const edited2 = await wishes.update(guest, flaggedPost.id, { message: 'still hate' });
+        ok('edit filtered too; no auto-hide = stays visible', edited2.message === 'still kindness' && edited2.is_hidden === false);
+        await wishes.update(owner, flaggedPost.id, { reviewed: true });
+        ok('Mark Reviewed clears the flag', !(await EventWish.findByPk(flaggedPost.id)).is_flagged);
+        await wishes.updateFilter(owner, event.id, { enabled: false });
+        const off = await wishes.create(guest, event.id, { message: 'hate' });
+        made.push(off.id);
+        ok('filter off: nothing replaced', off.message === 'hate');
+
+        // ── Block options (Phase 2) ───────────────────────────────────────
+        const r1 = await wishes.setBlocked(owner, mine.id, true, { hide_menu: true });
+        ok('block with hide_menu', r1.wish && r1.wish.status === 'blocked');
+        ok('menu hidden for that event', (await wishes.menuHiddenFor(guest, [event.id])).has(Number(event.id)));
+        await refused('hidden menu: wishes list refused', () => wishes.list(guest, event.id), 403);
+        const r2 = await wishes.setBlocked(owner, mine.id, true, { hide_menu: false });
+        ok('re-block without hide_menu updates the row', r2.wish && !(await wishes.menuHiddenFor(guest, [event.id])).size);
+        ok('blocked but menu shown: list still opens', (await wishes.list(guest, event.id)).is_blocked === true);
+        await wishes.setBlocked(owner, mine.id, false);
+        const keep = await wishes.create(guest, event.id, { message: 'one more' });
+        made.push(keep.id);
+        const r3 = await wishes.setBlocked(owner, keep.id, true, { remove_wishes: true });
+        ok('block + remove their wishes', r3.wish === null && r3.removed >= 2);
+        ok('...all their posts on the event gone', (await EventWish.count({ where: { event_id: event.id, author_client_id: guest } })) === 0);
+        await EventWishBlock.destroy({ where: { event_id: event.id, author_client_id: guest } });
+        // Their posts were removed by the block — rebuild the ones the delete checks use.
+        const again2 = await wishes.create(guest, event.id, { message: 'After unblock' });
+        made.push(again2.id);
+        again.id = again2.id;
+
         // ── Delete ────────────────────────────────────────────────────────
         await wishes.remove(guest, again.id);
         ok('participant deletes own', !(await EventWish.findByPk(again.id)));
@@ -212,6 +286,8 @@ const refused = async (label, fn, status) => {
         }
         await EventWishBlock.destroy({ where: { event_id: event.id, author_client_id: guest } });
         await Event.update({ wish_settings: savedSettings ?? null }, { where: { id: event.id } });
+        // The "A wish was flagged" notifications the filter checks sent.
+        await require('../src/models').ClientNotification.destroy({ where: { type: 'wish_flagged', event_id: event.id } });
     }
 
     console.log(`\n${pass} passed, ${fail} failed`);

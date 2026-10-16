@@ -42,14 +42,25 @@ const unlike = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, { wish }, 'Like removed.');
 });
 
+/** Body: hide_menu (default true), remove_wishes (default false). */
 const block = asyncHandler(async (req, res) => {
-    const wish = await service.setBlocked(req.websiteClient.id, req.params.wishId, true);
-    return ApiResponse.success(res, { wish }, 'User blocked from wishes.');
+    const result = await service.setBlocked(req.websiteClient.id, req.params.wishId, true, req.body || {});
+    return ApiResponse.success(res, result, 'User blocked from wishes.');
 });
 
 const unblock = asyncHandler(async (req, res) => {
-    const wish = await service.setBlocked(req.websiteClient.id, req.params.wishId, false);
-    return ApiResponse.success(res, { wish }, 'User unblocked.');
+    const result = await service.setBlocked(req.websiteClient.id, req.params.wishId, false);
+    return ApiResponse.success(res, result, 'User unblocked.');
+});
+
+const getFilter = asyncHandler(async (req, res) => {
+    const result = await service.getFilter(req.websiteClient.id, req.params.id);
+    return ApiResponse.success(res, result, 'Content filter loaded.');
+});
+
+const updateFilter = asyncHandler(async (req, res) => {
+    const result = await service.updateFilter(req.websiteClient.id, req.params.id, req.body);
+    return ApiResponse.success(res, result, 'Content filter saved.');
 });
 
 const getSettings = asyncHandler(async (req, res) => {
@@ -64,4 +75,5 @@ const updateSettings = asyncHandler(async (req, res) => {
 
 module.exports = {
     list, getOne, create, update, replaceMedia, remove, like, unlike, block, unblock, getSettings, updateSettings,
+    getFilter, updateFilter,
 };

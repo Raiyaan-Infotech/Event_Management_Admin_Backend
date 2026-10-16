@@ -38,6 +38,8 @@ const TYPE_CATEGORY = {
     guest_message: 'message',
     // An organizer's notification from the app (event_notifications).
     event_notification: 'message',
+    // Wed Wishes: the content filter caught a blocked word in a post.
+    wish_flagged: 'system',
     // RSVP
     rsvp_accepted: 'rsvp',
     rsvp_declined: 'rsvp',
