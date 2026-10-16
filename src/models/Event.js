@@ -194,6 +194,13 @@ module.exports = (sequelize) => {
              * defaults (all on). Added by apply-event-family-members.js.
              */
             family_settings: { type: DataTypes.JSON, allowNull: true },
+            /**
+             * The organizer's Wed Wishes settings (the Wishes list → settings
+             * icon): allow_new, allow_photo, details_screen, profile_photo, name,
+             * wish_photo, time. NULL = the defaults (all on). See
+             * migrations/sql/20261016-event-wish-settings.sql.
+             */
+            wish_settings: { type: DataTypes.JSON, allowNull: true },
         },
         {
             tableName: 'events',

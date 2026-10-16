@@ -13,8 +13,8 @@ const getOne = asyncHandler(async (req, res) => {
 });
 
 const create = asyncHandler(async (req, res) => {
-    const wish = await service.create(req.websiteClient.id, req.params.id, req.body);
-    return ApiResponse.created(res, { wish }, 'Wish added.');
+    const wish = await service.create(req.websiteClient.id, req.params.id, req.body, req.file);
+    return ApiResponse.created(res, { wish }, 'Your post is published.');
 });
 
 const update = asyncHandler(async (req, res) => {
@@ -22,9 +22,24 @@ const update = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, { wish }, 'Wish updated.');
 });
 
+const replaceMedia = asyncHandler(async (req, res) => {
+    const wish = await service.replaceMedia(req.websiteClient.id, req.params.wishId, req.file, req.body);
+    return ApiResponse.success(res, { wish }, 'Wish updated.');
+});
+
 const remove = asyncHandler(async (req, res) => {
     const result = await service.remove(req.websiteClient.id, req.params.wishId);
     return ApiResponse.success(res, result, 'Wish deleted.');
+});
+
+const like = asyncHandler(async (req, res) => {
+    const wish = await service.setLiked(req.websiteClient.id, req.params.wishId, true);
+    return ApiResponse.success(res, { wish }, 'Liked.');
+});
+
+const unlike = asyncHandler(async (req, res) => {
+    const wish = await service.setLiked(req.websiteClient.id, req.params.wishId, false);
+    return ApiResponse.success(res, { wish }, 'Like removed.');
 });
 
 const block = asyncHandler(async (req, res) => {
@@ -37,9 +52,16 @@ const unblock = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, { wish }, 'User unblocked.');
 });
 
-const uploadPhoto = asyncHandler(async (req, res) => {
-    const result = await service.uploadPhoto(req.websiteClient.id, req.params.id, req.file);
-    return ApiResponse.success(res, result, 'Photo uploaded.');
+const getSettings = asyncHandler(async (req, res) => {
+    const result = await service.getSettings(req.websiteClient.id, req.params.id);
+    return ApiResponse.success(res, result, 'Wish settings loaded.');
 });
 
-module.exports = { list, getOne, create, update, remove, block, unblock, uploadPhoto };
+const updateSettings = asyncHandler(async (req, res) => {
+    const result = await service.updateSettings(req.websiteClient.id, req.params.id, req.body);
+    return ApiResponse.success(res, result, 'Wish settings saved.');
+});
+
+module.exports = {
+    list, getOne, create, update, replaceMedia, remove, like, unlike, block, unblock, getSettings, updateSettings,
+};

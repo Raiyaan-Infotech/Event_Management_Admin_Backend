@@ -18,6 +18,7 @@ const clientPortalService = require('./clientPortal.service');
 const mediaService = require('./media.service');
 const subscriptionPlanService = require('./subscriptionPlan.service');
 const galleryService = require('./clientGallery.service');
+const wishService = require('./clientWish.service');
 
 /**
  * Events belonging to a signed-in website client.
@@ -1348,6 +1349,7 @@ const deleteEvent = async (clientId, eventId) => {
     // stay public and keep filling the account's storage. Best effort — the
     // event is already gone, a storage hiccup must not undo that.
     await galleryService.purgeEvent(event.id).catch(() => null);
+    await wishService.purgeEvent(event.id).catch(() => null);
     return true;
 };
 

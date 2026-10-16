@@ -1,5 +1,5 @@
 const {
-    Sequelize, EventGalleryItem, EventGalleryCategory, Event, EventParticipant, WebsiteClient,
+    Sequelize, EventGalleryItem, EventGalleryCategory, Event, EventParticipant, WebsiteClient, EventWish,
 } = require('../models');
 const { Op } = Sequelize;
 const ApiError = require('../utils/apiError');
@@ -12,7 +12,9 @@ const subscriptionPlanService = require('./subscriptionPlan.service');
  * plan mean anything (they were stored and displayed but enforced nowhere).
  *
  * Three different limits apply, and they are NOT the same shape:
- *   max_photos / max_videos — PER EVENT ("Images per event gallery")
+ *   max_photos / max_videos — PER EVENT ("Images per event gallery"); since
+ *                             2026-10-16 a Wed Wishes video also takes one
+ *                             of max_videos ("Max Videos")
  *   storage_limit           — PER ACCOUNT, every event's media summed
  *   per-file size           — a fixed product rule, not a plan field
  */
@@ -170,12 +172,26 @@ const present = (row) => {
  */
 const LIVE_EVENT = Sequelize.literal('`event_id` IN (SELECT `id` FROM `events` WHERE `deleted_at` IS NULL)');
 
-/** Bytes this ACCOUNT is holding across its live events, deleted items excluded. */
+/**
+ * Bytes this ACCOUNT is holding across its live events, deleted items excluded:
+ * gallery files AND Wed Wishes media ("Max Storage", 2026-10-16).
+ */
 const storageUsedFor = async (clientId) => {
-    const total = await EventGalleryItem.sum('size_bytes', {
-        where: { website_client_id: clientId, [Op.and]: [LIVE_EVENT] },
-    });
-    return Number(total || 0);
+    const where = { website_client_id: clientId, [Op.and]: [LIVE_EVENT] };
+    const [galleryBytes, wishBytes] = await Promise.all([
+        EventGalleryItem.sum('size_bytes', { where }),
+        EventWish.sum('size_bytes', { where }),
+    ]);
+    return Number(galleryBytes || 0) + Number(wishBytes || 0);
+};
+
+/** Videos on one event, gallery + Wed Wishes — what "Max Videos" counts. */
+const videosUsedFor = async (eventId) => {
+    const [galleryVideos, wishVideos] = await Promise.all([
+        EventGalleryItem.count({ where: { event_id: eventId, type: 'video' } }),
+        EventWish.count({ where: { event_id: eventId, post_type: 'video' } }),
+    ]);
+    return galleryVideos + wishVideos;
 };
 
 /**
@@ -238,7 +254,7 @@ const getUsage = async (clientId, eventId) => {
     const ownerId = event.website_client_id ?? clientId;
     const [photos, videos, storageUsed, client] = await Promise.all([
         EventGalleryItem.count({ where: { event_id: event.id, type: 'image' } }),
-        EventGalleryItem.count({ where: { event_id: event.id, type: 'video' } }),
+        videosUsedFor(event.id),
         storageUsedFor(ownerId),
         WebsiteClient.findByPk(ownerId, { attributes: ['subscription_plan_id'] }),
     ]);
@@ -644,7 +660,9 @@ const uploadItem = async (clientId, eventId, file, body = {}) => {
         planId, isImage ? 'max_photos' : 'max_videos'
     );
     if (countLimit !== null) {
-        const used = await EventGalleryItem.count({ where: { event_id: event.id, type } });
+        const used = isImage
+            ? await EventGalleryItem.count({ where: { event_id: event.id, type } })
+            : await videosUsedFor(event.id);
         if (used >= countLimit) {
             throw ApiError.badRequest(
                 `This event has reached its limit of ${countLimit} ${isImage ? 'image' : 'video'}${countLimit === 1 ? '' : 's'}. Please upgrade your plan to add more.`
@@ -740,7 +758,7 @@ const uploadItem = async (clientId, eventId, file, body = {}) => {
     if (countLimit !== null) {
         const upToMe = await EventGalleryItem.count({
             where: { event_id: event.id, type, id: { [Op.lte]: item.id } },
-        });
+        }) + (isImage ? 0 : await EventWish.count({ where: { event_id: event.id, post_type: 'video' } }));
         if (upToMe > countLimit) {
             await item.destroy({ force: true });
             await dropFile(stored.url, item.company_id);
@@ -853,6 +871,9 @@ module.exports = {
     IMAGE_MIMES,
     VIDEO_MIMES,
     getUsage,
+    storageUsedFor,
+    storageBytesFor,
+    videosUsedFor,
     listItems,
     listCategories,
     listCategoriesForViewer,

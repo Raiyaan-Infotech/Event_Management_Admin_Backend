@@ -735,40 +735,44 @@ router.put('/family-members/:memberId', familyController.update);
 router.delete('/family-members/:memberId', familyController.remove);
 
 /**
- * Event Wishes (2026-10-16). Participants write (visible at once) and edit /
- * delete their own; the organizer adds on someone's behalf, edits, hides,
- * deletes and blocks a writer from Wishes (per event). Rules in the service.
+ * Wed Wishes (2026-10-16) — a feed of Text / Image / Video posts with likes.
+ * Participants post (visible at once) and edit / delete their own; the
+ * organizer posts, edits, hides, deletes and blocks a writer from Wishes (per
+ * event). A post's image / video goes up WITH it (multipart `file`), so a file
+ * is never stored without its post. Rules in the service.
  */
-const wishPhotoUpload = multer({
+const wishMediaUpload = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: wishService.MAX_PHOTO_BYTES },
+    limits: { fileSize: wishService.MAX_UPLOAD_BYTES },
     fileFilter: (req, file, cb) => {
-        if (wishService.PHOTO_MIMES.includes(file.mimetype)) return cb(null, true);
-        return cb(new Error('Please choose a JPG, PNG or WEBP image.'));
+        if (wishService.MEDIA_MIMES.includes(file.mimetype)) return cb(null, true);
+        return cb(new Error('Please choose a JPG, PNG or WEBP image, or an MP4, WebM or MOV video.'));
     },
 });
+/** Optional `file` — a text post sends plain JSON and passes straight through. */
+const wishMedia = (req, res, next) => {
+    wishMediaUpload.single('file')(req, res, (err) => {
+        if (err) {
+            return res.status(400).json({
+                success: false,
+                message: err.code === 'LIMIT_FILE_SIZE'
+                    ? `That file is larger than ${Math.round(wishService.MAX_UPLOAD_BYTES / (1024 * 1024))}MB.`
+                    : err.message || 'That file could not be uploaded.',
+            });
+        }
+        return next();
+    });
+};
 router.get('/events/:id/wishes', wishController.list);
-router.post('/events/:id/wishes', wishController.create);
-router.post(
-    '/events/:id/wishes/photo',
-    (req, res, next) => {
-        wishPhotoUpload.single('file')(req, res, (err) => {
-            if (err) {
-                return res.status(400).json({
-                    success: false,
-                    message: err.code === 'LIMIT_FILE_SIZE'
-                        ? `That image is larger than ${Math.round(wishService.MAX_PHOTO_BYTES / (1024 * 1024))}MB.`
-                        : err.message || 'That image could not be uploaded.',
-                });
-            }
-            next();
-        });
-    },
-    wishController.uploadPhoto,
-);
+router.post('/events/:id/wishes', wishMedia, wishController.create);
+router.get('/events/:id/wish-settings', wishController.getSettings);
+router.put('/events/:id/wish-settings', wishController.updateSettings);
 router.get('/wishes/:wishId', wishController.getOne);
 router.put('/wishes/:wishId', wishController.update);
+router.post('/wishes/:wishId/media', wishMedia, wishController.replaceMedia);
 router.delete('/wishes/:wishId', wishController.remove);
+router.post('/wishes/:wishId/like', wishController.like);
+router.delete('/wishes/:wishId/like', wishController.unlike);
 router.post('/wishes/:wishId/block', wishController.block);
 router.delete('/wishes/:wishId/block', wishController.unblock);
 

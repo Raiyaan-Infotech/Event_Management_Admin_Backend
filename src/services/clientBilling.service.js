@@ -9,7 +9,6 @@ const {
     ClientSubscriptionEvent,
     Event,
     EventParticipant,
-    EventGalleryItem,
     Guest,
 } = require('../models');
 const { Op } = Sequelize;
@@ -18,6 +17,7 @@ const ApiError = require('../utils/apiError');
 // there is no cycle. Terms are the only thing that raise invoices, and terms
 // are managed here.
 const invoiceService = require('./clientInvoice.service');
+const galleryService = require('./clientGallery.service');
 
 /**
  * Client-portal Billing — Phase 1.
@@ -474,12 +474,8 @@ const getUsage = async (clientId, subscription) => {
     // Bytes held by this account's gallery, shown in the plan's own unit
     // (MB unless the plan is set in GB), two decimals.
     // Live events only — the same count the gallery upload checks against.
-    const storageBytes = Number(await EventGalleryItem.sum('size_bytes', {
-        where: {
-            website_client_id: clientId,
-            [Op.and]: [Sequelize.literal('`event_id` IN (SELECT `id` FROM `events` WHERE `deleted_at` IS NULL)')],
-        },
-    })) || 0;
+    // Gallery files AND Wed Wishes media ("Max Storage") — the gallery's own sum.
+    const storageBytes = await galleryService.storageUsedFor(clientId);
     const storageUnit = limits.storage_unit === 'GB' ? 'GB' : 'MB';
     const storageUsed = Math.round((storageBytes / (storageUnit === 'GB' ? 1024 ** 3 : 1024 ** 2)) * 100) / 100;
 
