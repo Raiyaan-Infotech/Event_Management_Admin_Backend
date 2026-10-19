@@ -40,6 +40,8 @@ const TYPE_CATEGORY = {
     event_notification: 'message',
     // Wed Wishes: the content filter caught a blocked word in a post.
     wish_flagged: 'system',
+    // Plan storage reached 50% / 100% (notificationTrigger.triggerStorageAlert).
+    storage_alert: 'system',
     // RSVP
     rsvp_accepted: 'rsvp',
     rsvp_declined: 'rsvp',

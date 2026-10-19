@@ -50,7 +50,7 @@ const LIMIT_FIELDS = [
     { key: 'max_events', label: 'Max Events' },
     { key: 'max_guests_per_event', label: 'Max Guests' },
     { key: 'max_rsvp_per_event', label: 'Max RSVP per Event' },
-    { key: 'max_photos', label: 'Max Images' },
+    { key: 'max_photos', label: 'Max Photos' },
     { key: 'max_videos', label: 'Max Videos' },
 ];
 const LIMIT_KEYS = LIMIT_FIELDS.map((f) => f.key);

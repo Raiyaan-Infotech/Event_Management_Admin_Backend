@@ -5,6 +5,7 @@ const ApiError = require('../utils/apiError');
 const mediaService = require('./media.service');
 const notificationService = require('./clientNotification.service');
 const gallery = require('./clientGallery.service');
+const notificationTrigger = require('./notificationTrigger.service');
 const subscriptionPlanService = require('./subscriptionPlan.service');
 const { processVideo, videoPoster } = require('../utils/videoProcess');
 
@@ -246,17 +247,20 @@ const storeMedia = async (event, file, body = {}, replacing = null) => {
         throw ApiError.badRequest(`${isImage ? 'Images' : 'Videos'} must be ${mb(cap)}MB or smaller. This file is ${mb(size)}MB.`);
     }
 
-    // Max Videos — per event, gallery and wishes together.
-    if (isVideo) {
-        const limit = await subscriptionPlanService.getPlanLimit(event.subscription_plan_id, 'max_videos');
-        if (limit !== null) {
-            const used = await gallery.videosUsedFor(event.id)
-                - (replacing && replacing.post_type === 'video' ? 1 : 0);
-            if (used >= limit) {
-                throw ApiError.badRequest(
-                    `This event has reached its limit of ${limit} video${limit === 1 ? '' : 's'}. Please upgrade your plan to add more.`,
-                );
-            }
+    // Max Photos / Max Videos — per event, gallery and wishes together.
+    const kind = isVideo ? 'video' : 'image';
+    let countBefore = null;
+    let countLimit = null;
+    const limit = await subscriptionPlanService.getPlanLimit(event.subscription_plan_id, isVideo ? 'max_videos' : 'max_photos');
+    if (limit !== null) {
+        const used = (isVideo ? await gallery.videosUsedFor(event.id) : await gallery.photosUsedFor(event.id))
+            - (replacing && replacing.post_type === kind ? 1 : 0);
+        countBefore = used;
+        countLimit = limit;
+        if (used >= limit) {
+            throw ApiError.badRequest(
+                `This event has reached its limit of ${limit} ${isVideo ? 'video' : 'photo'}${limit === 1 ? '' : 's'}. Please upgrade your plan to add more.`,
+            );
         }
     }
 
@@ -267,8 +271,10 @@ const storeMedia = async (event, file, body = {}, replacing = null) => {
         ? await subscriptionPlanService.getById(owner.subscription_plan_id).catch(() => null)
         : null;
     const storageLimit = gallery.storageBytesFor(plan);
+    let storageBefore = null;
     if (storageLimit !== null) {
         const used = await gallery.storageUsedFor(ownerId) - Number(replacing?.size_bytes || 0);
+        storageBefore = used;
         if (used + size > storageLimit) {
             const left = Math.max(0, storageLimit - used);
             throw ApiError.badRequest(
@@ -316,6 +322,17 @@ const storeMedia = async (event, file, body = {}, replacing = null) => {
         }
     } catch (_) {
         thumbnail = null;
+    }
+
+    // Tell the organizer when this takes photos / videos / storage past 50% / 100%.
+    if (countLimit !== null && countBefore !== null && !(replacing && replacing.post_type === kind)) {
+        notificationTrigger.checkUsageCrossing(
+            ownerId, isVideo ? 'videos' : 'photos', countBefore, 1, countLimit,
+            { eventName: event.name },
+        );
+    }
+    if (storageLimit !== null && storageBefore !== null) {
+        notificationTrigger.checkStorageCrossing(ownerId, storageBefore, Number(stored.size || toStore.size || size), storageLimit);
     }
 
     const duration = Math.round(Number(body.duration_seconds));

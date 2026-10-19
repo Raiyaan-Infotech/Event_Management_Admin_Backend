@@ -19,6 +19,16 @@ const AVAILABLE_VARIABLES = [
     { key: 'event_time', label: '{{event_time}}' },
     { key: 'venue_name', label: '{{venue_name}}' },
     { key: 'event_link', label: '{{event_link}}' },
+    // Storage alerts (account level).
+    { key: 'storage_percent', label: '{{storage_percent}}' },
+    { key: 'storage_used', label: '{{storage_used}}' },
+    { key: 'storage_limit', label: '{{storage_limit}}' },
+    { key: 'storage_left', label: '{{storage_left}}' },
+    // Photo / video limit alerts.
+    { key: 'usage_percent', label: '{{usage_percent}}' },
+    { key: 'usage_used', label: '{{usage_used}}' },
+    { key: 'usage_limit', label: '{{usage_limit}}' },
+    { key: 'usage_left', label: '{{usage_left}}' },
 ];
 const AVAILABLE_VARIABLE_KEYS = new Set(AVAILABLE_VARIABLES.map((v) => v.key));
 
@@ -30,6 +40,12 @@ const AVAILABLE_VARIABLE_KEYS = new Set(AVAILABLE_VARIABLES.map((v) => v.key));
  */
 const SYSTEM_TRIGGERS = [
     { key: 'welcome_invitation', label: 'Welcome Invitation (guest joins an event)' },
+    { key: 'storage_half_full', label: 'Storage 50% Full (organizer plan storage)' },
+    { key: 'storage_full', label: 'Storage Full (organizer plan storage)' },
+    { key: 'photos_half_full', label: 'Photos 50% Full (event photo limit)' },
+    { key: 'photos_full', label: 'Photos Full (event photo limit)' },
+    { key: 'videos_half_full', label: 'Videos 50% Full (event video limit)' },
+    { key: 'videos_full', label: 'Videos Full (event video limit)' },
 ];
 const SYSTEM_TRIGGER_KEYS = new Set(SYSTEM_TRIGGERS.map((t) => t.key));
 

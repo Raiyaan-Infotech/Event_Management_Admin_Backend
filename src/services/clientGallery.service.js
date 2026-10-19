@@ -6,6 +6,7 @@ const ApiError = require('../utils/apiError');
 const mediaService = require('./media.service');
 const { processVideo, videoPoster } = require('../utils/videoProcess');
 const subscriptionPlanService = require('./subscriptionPlan.service');
+const notificationTrigger = require('./notificationTrigger.service');
 
 /**
  * The event gallery — the first place the image, video and storage limits on a
@@ -14,7 +15,8 @@ const subscriptionPlanService = require('./subscriptionPlan.service');
  * Three different limits apply, and they are NOT the same shape:
  *   max_photos / max_videos — PER EVENT ("Images per event gallery"); since
  *                             2026-10-16 a Wed Wishes video also takes one
- *                             of max_videos ("Max Videos")
+ *                             of max_videos ("Max Videos"), and (2026-10-19)
+ *                             a Wed Wishes image one of max_photos
  *   storage_limit           — PER ACCOUNT, every event's media summed
  *   per-file size           — a fixed product rule, not a plan field
  */
@@ -185,6 +187,15 @@ const storageUsedFor = async (clientId) => {
     return Number(galleryBytes || 0) + Number(wishBytes || 0);
 };
 
+/** Photos on one event, gallery + Wed Wishes — what "Max Photos" counts. */
+const photosUsedFor = async (eventId) => {
+    const [galleryPhotos, wishPhotos] = await Promise.all([
+        EventGalleryItem.count({ where: { event_id: eventId, type: 'image' } }),
+        EventWish.count({ where: { event_id: eventId, post_type: 'image' } }),
+    ]);
+    return galleryPhotos + wishPhotos;
+};
+
 /** Videos on one event, gallery + Wed Wishes — what "Max Videos" counts. */
 const videosUsedFor = async (eventId) => {
     const [galleryVideos, wishVideos] = await Promise.all([
@@ -253,7 +264,7 @@ const getUsage = async (clientId, eventId) => {
     // a participant reading the gallery must see the host's quota, not their own.
     const ownerId = event.website_client_id ?? clientId;
     const [photos, videos, storageUsed, client] = await Promise.all([
-        EventGalleryItem.count({ where: { event_id: event.id, type: 'image' } }),
+        photosUsedFor(event.id),
         videosUsedFor(event.id),
         storageUsedFor(ownerId),
         WebsiteClient.findByPk(ownerId, { attributes: ['subscription_plan_id'] }),
@@ -659,10 +670,12 @@ const uploadItem = async (clientId, eventId, file, body = {}) => {
     const countLimit = await subscriptionPlanService.getPlanLimit(
         planId, isImage ? 'max_photos' : 'max_videos'
     );
+    let countBefore = null;
     if (countLimit !== null) {
         const used = isImage
-            ? await EventGalleryItem.count({ where: { event_id: event.id, type } })
+            ? await photosUsedFor(event.id)
             : await videosUsedFor(event.id);
+        countBefore = used;
         if (used >= countLimit) {
             throw ApiError.badRequest(
                 `This event has reached its limit of ${countLimit} ${isImage ? 'image' : 'video'}${countLimit === 1 ? '' : 's'}. Please upgrade your plan to add more.`
@@ -677,8 +690,10 @@ const uploadItem = async (clientId, eventId, file, body = {}) => {
         ? await subscriptionPlanService.getById(client.subscription_plan_id).catch(() => null)
         : null;
     const storageLimit = storageBytesFor(plan);
+    let storageBefore = null;
     if (storageLimit !== null) {
         const used = await storageUsedFor(clientId);
+        storageBefore = used;
         if (used + size > storageLimit) {
             const left = Math.max(0, storageLimit - used);
             throw ApiError.badRequest(
@@ -767,6 +782,17 @@ const uploadItem = async (clientId, eventId, file, body = {}) => {
                 `This event has reached its limit of ${countLimit} ${isImage ? 'image' : 'video'}${countLimit === 1 ? '' : 's'}. Please upgrade your plan to add more.`
             );
         }
+    }
+
+    // Tell the organizer when this upload takes photos / videos / storage past 50% / 100%.
+    if (countLimit !== null && countBefore !== null) {
+        notificationTrigger.checkUsageCrossing(
+            event.website_client_id ?? clientId, isImage ? 'photos' : 'videos', countBefore, 1, countLimit,
+            { eventName: event.name },
+        );
+    }
+    if (storageLimit !== null && storageBefore !== null) {
+        notificationTrigger.checkStorageCrossing(clientId, storageBefore, Number(stored.size || size), storageLimit);
     }
 
     return { item: present(item), usage: await getUsage(clientId, eventId) };
@@ -873,6 +899,7 @@ module.exports = {
     getUsage,
     storageUsedFor,
     storageBytesFor,
+    photosUsedFor,
     videosUsedFor,
     listItems,
     listCategories,

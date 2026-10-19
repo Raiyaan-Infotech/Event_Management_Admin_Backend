@@ -40,6 +40,13 @@ const TEMPLATE_TRIGGER_KEYS = {
     RSVP_CONFIRMATION: 'rsvp_confirmation',
     RSVP_DECLINED: 'rsvp_declined',
     REMINDER_24H: 'reminder_24h',
+    // Account-level (not per event): the plan's Max Storage crossed 50% / 100%.
+    STORAGE_HALF_FULL: 'storage_half_full',
+    STORAGE_FULL: 'storage_full',
+    PHOTOS_HALF_FULL: 'photos_half_full',
+    PHOTOS_FULL: 'photos_full',
+    VIDEOS_HALF_FULL: 'videos_half_full',
+    VIDEOS_FULL: 'videos_full',
 };
 
 /** Formats a date string nicely for human notification reading. */
@@ -317,7 +324,155 @@ const triggerWelcomeInvitation = async ({
     }
 };
 
+/** Built-in wording, used until an admin writes a template for the trigger. */
+const USAGE_NOUN = { storage: 'storage', photos: 'photos', videos: 'videos' };
+const usageDefaults = (kind, level) => {
+    const noun = USAGE_NOUN[kind];
+    if (kind === 'storage') {
+        return level === 'full'
+            ? {
+                title: 'Your storage is full',
+                content: 'You have used all {{storage_limit}} of your storage, so new photos and videos cannot be added. Delete some media or upgrade your plan.',
+            }
+            : {
+                title: 'Your storage is {{storage_percent}}% full',
+                content: 'You have used {{storage_used}} of your {{storage_limit}} storage. Delete some media or upgrade your plan before it runs out.',
+            };
+    }
+    return level === 'full'
+        ? {
+            title: `Your ${noun} limit is full`,
+            content: `"{{event_name}}" has used all {{usage_limit}} ${noun} on your plan, so no more can be added. Delete some or upgrade your plan.`,
+        }
+        : {
+            title: `Your ${noun} limit is {{usage_percent}}% full`,
+            content: `"{{event_name}}" has used {{usage_used}} of {{usage_limit}} ${noun} on your plan. Delete some or upgrade your plan before it runs out.`,
+        };
+};
+
+const sizeText = (bytes) => {
+    const mbVal = Number(bytes || 0) / (1024 * 1024);
+    if (mbVal >= 1024) return `${(mbVal / 1024).toFixed(mbVal / 1024 >= 10 ? 0 : 1)} GB`;
+    return `${mbVal.toFixed(mbVal >= 10 || mbVal === 0 ? 0 : 1)} MB`;
+};
+
+/**
+ * Trigger: a plan allowance reached 50% or 100% - `kind` is storage (account
+ * level, bytes) or photos / videos (per event, counts; shared by the Gallery
+ * and Wed Wishes). Sent to the event's owner.
+ *
+ * Template = the one tagged `<kind>_half_full` / `<kind>_full` in the admin's
+ * Notification Templates (e.g. `photos_half_full`). No template at all -> the
+ * built-in wording above is used; a template that exists but is inactive ->
+ * nothing is sent. There is no per-event on/off.
+ *
+ * Never throws: it runs after an upload that already succeeded.
+ */
+const triggerUsageAlert = async ({
+    clientId, kind = 'storage', level, used, limit, eventName = '', companyId = null,
+} = {}) => {
+    try {
+        if (!clientId || !(Number(limit) > 0) || !USAGE_NOUN[kind] || !['half', 'full'].includes(level)) {
+            return { triggered: false, reason: 'bad_input' };
+        }
+        const key = `${kind}_${level === 'full' ? 'full' : 'half_full'}`;
+        const template = await NotificationTemplate.findOne({
+            where: { trigger_key: key },
+            attributes: ['id', 'name', 'title', 'content', 'channels', 'image_url', 'is_active', 'company_id'],
+        });
+        if (template && !template.is_active) return { triggered: false, reason: 'template_inactive' };
+
+        const percent = level === 'full'
+            ? 100
+            : Math.max(50, Math.min(99, Math.floor((Number(used) / Number(limit)) * 100)));
+        const isBytes = kind === 'storage';
+        const fmt = (n) => (isBytes ? sizeText(n) : String(Math.round(Number(n))));
+        const left = Math.max(0, Number(limit) - Number(used));
+        const variables = {
+            guest_name: 'there',
+            event_name: eventName || 'your event',
+            usage_percent: String(percent),
+            usage_used: fmt(used),
+            usage_limit: fmt(limit),
+            usage_left: fmt(left),
+            storage_percent: String(percent),
+            storage_used: fmt(used),
+            storage_limit: fmt(limit),
+            storage_left: fmt(left),
+        };
+        const source = template || usageDefaults(kind, level);
+        const title = renderPlaceholders(source.title, variables);
+        const body = renderPlaceholders(source.content, variables);
+        const channels = template && Array.isArray(template.channels) && template.channels.length
+            ? template.channels
+            : ['in_app', 'push'];
+
+        if (channels.includes('in_app')) {
+            await notifications.notify(clientId, {
+                type: 'storage_alert',
+                title,
+                body,
+                companyId: companyId ?? template?.company_id ?? null,
+                meta: { kind, level, percent, template_id: template?.id || null },
+            });
+        }
+        if (channels.includes('push')) {
+            const tokens = await ClientDeviceToken.findAll({
+                where: { website_client_id: clientId, is_active: 1 },
+                attributes: ['id', 'token'],
+            });
+            if (tokens.length) {
+                await pushSender.sendToTokens(tokens, {
+                    title,
+                    body: body.replace(/\s+/g, ' ').trim(),
+                    imageUrl: template?.image_url || undefined,
+                    data: { type: 'storage_alert', kind, level },
+                });
+            }
+        }
+        return { triggered: true, kind, level, title };
+    } catch (err) {
+        logger.warn?.('[NotificationTrigger] usage alert failed (non-fatal):', err.message);
+        return { triggered: false, reason: 'error', error: err.message };
+    }
+};
+
+/** Storage-only wrapper, kept for callers / tests. */
+const triggerStorageAlert = ({ usedBytes, limitBytes, ...rest } = {}) =>
+    triggerUsageAlert({ ...rest, kind: 'storage', used: usedBytes, limit: limitBytes });
+
+/** 'half' when 50% was crossed, 'full' when 100% was reached, else null. */
+const crossingLevel = (before, after, limit) => {
+    if (!(Number(limit) > 0)) return null;
+    const b = Number(before) / Number(limit);
+    const a = Number(after) / Number(limit);
+    if (b < 1 && a >= 1) return 'full';
+    if (b < 0.5 && a >= 0.5) return 'half';
+    return null;
+};
+
+/**
+ * Called after something was stored. Fires once when usage crosses 50% (and
+ * again after it fell back under 50% and crossed anew) and once at 100%; jumping
+ * over both sends only the full one. Fire and forget.
+ */
+const checkUsageCrossing = (clientId, kind, usedBefore, added, limit, extra = {}) => {
+    if (!clientId) return;
+    const level = crossingLevel(usedBefore, Number(usedBefore) + Number(added), limit);
+    if (!level) return;
+    triggerUsageAlert({
+        clientId, kind, level, used: Number(usedBefore) + Number(added), limit: Number(limit), ...extra,
+    });
+};
+
+const checkStorageCrossing = (clientId, usedBefore, added, limitBytes) =>
+    checkUsageCrossing(clientId, 'storage', usedBefore, added, limitBytes);
+
 module.exports = {
+    triggerUsageAlert,
+    checkUsageCrossing,
+    triggerStorageAlert,
+    checkStorageCrossing,
     triggerWelcomeInvitation,
     isTemplateEnabledForEvent,
     findApplicableTemplate,
