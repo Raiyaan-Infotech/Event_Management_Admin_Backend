@@ -154,6 +154,9 @@ router.put(
 router.delete('/me/avatar', controller.removeMyAvatar);
 router.get('/event-options', controller.eventOptions);
 router.put('/favourite-templates', controller.setFavouriteTemplates);
+// Home → Quick Actions: the plan's menus the organizer picked, in their order.
+router.get('/quick-actions', controller.getQuickActions);
+router.put('/quick-actions', controller.saveQuickActions);
 
 // Inlines one of our own uploaded files as a data URI, so the invitation
 // download can rasterise a card whose frame and decorations come from a CDN

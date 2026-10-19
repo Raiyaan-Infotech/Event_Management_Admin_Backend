@@ -3687,6 +3687,7 @@ CREATE TABLE IF NOT EXISTS `website_clients` (
   `deleted_at` datetime DEFAULT NULL,
   `favourite_templates` json DEFAULT NULL COMMENT 'Template slugs the client hearted on the Templates screen',
   `favourite_events` json DEFAULT NULL COMMENT 'Event ids the client hearted (wishlist) on Home / My Events',
+  `quick_actions` json DEFAULT NULL COMMENT 'Home Quick Actions: ordered menu slugs from the plan, NULL = default set',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uniq_website_client_email` (`vendor_id`,`email`),
   UNIQUE KEY `uniq_website_client_mobile` (`vendor_id`,`mobile`),

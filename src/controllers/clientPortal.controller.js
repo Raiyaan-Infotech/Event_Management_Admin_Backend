@@ -2,6 +2,7 @@ const { asyncHandler } = require('../utils/helpers');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const clientPortalService = require('../services/clientPortal.service');
+const quickActionsService = require('../services/clientQuickActions.service');
 const mediaService = require('../services/media.service');
 const logger = require('../utils/logger');
 const { clearWebsiteClientCookies } = require('../middleware/websiteClientAuth');
@@ -40,6 +41,24 @@ const setFavouriteTemplates = asyncHandler(async (req, res) => {
     );
     if (ids === null) throw ApiError.notFound('Account not found.');
     return ApiResponse.success(res, { favourite_templates: ids }, 'Favourites updated');
+});
+
+/**
+ * Home → Quick Actions: the menus the account's plan grants (`available`) and
+ * the ones the organizer put on Home, in order (`selected`).
+ */
+const getQuickActions = asyncHandler(async (req, res) => {
+    const data = await quickActionsService.get(req.websiteClient.id);
+    return ApiResponse.success(res, data, 'Quick actions retrieved');
+});
+
+/** PUT `{ slugs: [...] }` — the complete new order; `null` = back to default. */
+const saveQuickActions = asyncHandler(async (req, res) => {
+    const slugs = req.body && Object.prototype.hasOwnProperty.call(req.body, 'slugs')
+        ? req.body.slugs
+        : undefined;
+    const data = await quickActionsService.save(req.websiteClient.id, slugs);
+    return ApiResponse.success(res, data, 'Quick actions saved');
 });
 
 /**
@@ -144,4 +163,5 @@ module.exports = {
     removeMyAvatar,
     updateMe,
     changeMyPassword,
-    deleteMyAccount, me, eventOptions, setFavouriteTemplates, proxyImage };
+    deleteMyAccount, me, eventOptions, setFavouriteTemplates, proxyImage,
+    getQuickActions, saveQuickActions };

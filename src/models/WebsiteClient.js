@@ -95,6 +95,15 @@ module.exports = (sequelize) => {
              */
             favourite_events: { type: DataTypes.JSON, allowNull: true },
 
+            /**
+             * Home → Quick Actions, as the organizer arranged them: an ordered
+             * list of menu BASE slugs (`gallery`, not `gallery-2`) taken from
+             * the menus their plan grants. NULL = the default set. Edit Event
+             * is the app's own fixed first tile and is never in here. Read and
+             * re-checked against the plan by clientQuickActions.service.
+             */
+            quick_actions: { type: DataTypes.JSON, allowNull: true },
+
             // The provider's own user id (Google `sub`, Facebook id). This, not
             // the email, is what identifies a social account: Facebook does not
             // always share an email, and a Google email can change.
