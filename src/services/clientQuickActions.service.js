@@ -18,15 +18,14 @@ const clientPortalService = require('./clientPortal.service');
  */
 
 /**
- * What Home shows before the organizer customises it — the old fixed grid's
- * order (Edit Splash, Add Guest, Gallery, Agenda, Invitation, My Briefcase,
- * QR Code, Notifications, Send Notification, My Plan, Participants), only the
- * ones that exist for this account.
+ * What Home shows before the organizer customises it (Jamal, 2026-10-19):
+ * Splash · Invitation · Venue · Agenda · Family · Participants · RSVP ·
+ * Gallery · Contact Us — the same order as Menu Management (apply-menu-order.js),
+ * only the ones the plan grants. Every Default menu is added after them.
  */
 const DEFAULT_SLUGS = [
-    'splash-screens', 'guests', 'gallery', 'agenda', 'event-invitation',
-    'my-briefcase', 'qr-code', 'notifications',
-    'messages', 'my-plan', 'participants',
+    'splash-screens', 'event-invitation', 'venue', 'agenda', 'family',
+    'participants', 'rsvp', 'gallery', 'contact-us',
 ];
 
 const baseSlug = (slug) => String(slug || '').replace(/-\d+$/, '');
@@ -42,7 +41,7 @@ const availableFor = async (clientId) => {
     if (!ids.length) return [];
     const menus = await EventMenu.findAll({
         where: { id: { [Op.in]: ids }, is_active: 1 },
-        attributes: ['id', 'name', 'slug', 'icon', 'color', 'is_default', 'menu_group', 'sort_order'],
+        attributes: ['id', 'name', 'slug', 'description', 'icon', 'color', 'is_default', 'menu_group', 'sort_order'],
         order: [['sort_order', 'ASC'], ['id', 'ASC']],
     });
     const seen = new Set();
@@ -55,6 +54,7 @@ const availableFor = async (clientId) => {
             slug,
             menu_id: m.id,
             name: m.name,
+            description: m.description || null,
             icon: m.icon || null,
             color: m.color || null,
             is_default: !!m.is_default,
@@ -76,12 +76,27 @@ const clean = (list, allowed) => {
     return out;
 };
 
+/**
+ * A DEFAULT menu (Menu Management's "Default" switch) is always a Quick
+ * Action and cannot be removed (Jamal, 2026-10-19): any default missing from
+ * the list is added after the others, in the plan's order. The app draws them
+ * grey with no ✕; they can still be moved.
+ */
+const withDefaults = (list, available) => {
+    const out = [...list];
+    for (const m of available) {
+        if (m.is_default && !out.includes(m.slug)) out.push(m.slug);
+    }
+    return out;
+};
+
 const shape = (available, stored) => {
     const allowed = new Set(available.map((m) => m.slug));
     const customised = Array.isArray(stored);
+    const base = customised ? clean(stored, allowed) : clean(DEFAULT_SLUGS, allowed);
     return {
-        available,
-        selected: customised ? clean(stored, allowed) : clean(DEFAULT_SLUGS, allowed),
+        available: available.map((m) => ({ ...m, locked: !!m.is_default })),
+        selected: withDefaults(base, available),
         is_custom: customised,
     };
 };
@@ -107,7 +122,7 @@ const save = async (clientId, slugs) => {
         return shape(available, null);
     }
     if (!Array.isArray(slugs)) throw ApiError.badRequest('Send the quick actions as a list.');
-    const list = clean(slugs, new Set(available.map((m) => m.slug)));
+    const list = withDefaults(clean(slugs, new Set(available.map((m) => m.slug))), available);
     await WebsiteClient.update({ quick_actions: list }, { where: { id: clientId } });
     return shape(available, list);
 };

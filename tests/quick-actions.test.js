@@ -42,19 +42,27 @@ const ok = (label, cond, extra = '') => {
         const slugs = def.available.map((m) => m.slug);
         ok('available has one entry per base slug', new Set(slugs).size === slugs.length && slugs.every((s) => !/-\d+$/.test(s)));
         ok('the 4 Home Quick Action MENUS are offered (from Menu Management)', ['qr-code', 'notifications', 'my-plan', 'my-briefcase'].every((s) => def.available.some((m) => m.slug === s && m.kind === 'quick_action' && m.menu_id)));
-        ok('the default includes them in the old order', ['my-briefcase', 'qr-code', 'notifications', 'messages', 'my-plan'].filter((s) => slugs.includes(s)).every((s, i, arr) => i === 0 || def.selected.indexOf(arr[i - 1]) < def.selected.indexOf(s)));
+        ok('available follows Menu Management order (Splash, Invitation, Venue, Agenda, ...)', JSON.stringify(slugs.slice(0, 4)) === JSON.stringify(['splash-screens', 'event-invitation', 'venue', 'agenda']), JSON.stringify(slugs.slice(0, 6)));
         ok('available entries carry name and icon', def.available.every((m) => m.name && 'icon' in m));
         ok('no saved list → default set, all granted', !def.is_custom && def.selected.every((s) => slugs.includes(s)), JSON.stringify(def.selected));
-        ok('default keeps its own order', JSON.stringify(def.selected) === JSON.stringify(svc.DEFAULT_SLUGS.filter((s) => slugs.includes(s))));
+        const defaults = def.available.filter((m) => m.is_default).map((m) => m.slug);
+        ok('every Default menu is in the list, marked locked', defaults.every((s) => def.selected.includes(s)) && def.available.every((m) => m.locked === !!m.is_default));
+        ok('default keeps its own order first', JSON.stringify(def.selected.slice(0, svc.DEFAULT_SLUGS.filter((s) => slugs.includes(s)).length)) === JSON.stringify(svc.DEFAULT_SLUGS.filter((s) => slugs.includes(s))));
 
-        const [a, b, c] = slugs;
+        const addons = def.available.filter((m) => !m.is_default).map((m) => m.slug);
+        const [a, b, c] = addons;
+        const tail = (list) => list.filter((s) => !defaults.includes(s));
         const r1 = await svc.save(client.id, [c, `${a}-2`, 'not-a-menu', c, b]);
-        ok('save keeps the order, base slug of a suffixed one, drops unknown + duplicate', JSON.stringify(r1.selected) === JSON.stringify([c, a, b]), JSON.stringify(r1.selected));
+        ok('save keeps the order, base slug of a suffixed one, drops unknown + duplicate', JSON.stringify(tail(r1.selected)) === JSON.stringify([c, a, b]), JSON.stringify(r1.selected));
+        ok('…the Default menus are added back after them', JSON.stringify(r1.selected.slice(3)) === JSON.stringify(defaults));
         ok('…and is marked customised', r1.is_custom === true);
-        ok('read back the same', JSON.stringify((await svc.get(client.id)).selected) === JSON.stringify([c, a, b]));
+        ok('read back the same', JSON.stringify((await svc.get(client.id)).selected) === JSON.stringify(r1.selected));
 
         const r2 = await svc.save(client.id, []);
-        ok('empty list allowed (nothing locked)', r2.selected.length === 0 && r2.is_custom);
+        ok('removing everything still keeps the Default menus', JSON.stringify(r2.selected) === JSON.stringify(defaults) && r2.is_custom);
+        const moved = [defaults[defaults.length - 1], a, ...defaults.slice(0, -1)];
+        const r2b = await svc.save(client.id, moved);
+        ok('a Default menu can be moved (order kept)', JSON.stringify(r2b.selected) === JSON.stringify(moved));
 
         const r3 = await svc.save(client.id, slugs);
         ok('every plan menu allowed (no limit)', r3.selected.length === slugs.length);
@@ -67,7 +75,7 @@ const ok = (label, cond, extra = '') => {
 
         // A stored slug the plan no longer grants is cut on read.
         await WebsiteClient.update({ quick_actions: ['zz-gone', a] }, { where: { id: client.id } });
-        ok('a slug the plan no longer grants is dropped on read', JSON.stringify((await svc.get(client.id)).selected) === JSON.stringify([a]));
+        ok('a slug the plan no longer grants is dropped on read', JSON.stringify(tail((await svc.get(client.id)).selected)) === JSON.stringify([a]));
     } finally {
         await WebsiteClient.update({ quick_actions: saved ?? null }, { where: { id: client.id } });
     }

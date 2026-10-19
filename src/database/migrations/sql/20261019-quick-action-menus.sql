@@ -18,7 +18,7 @@ SET @s   := (SELECT COALESCE(MAX(sort_order), 0) FROM event_menus WHERE deleted_
 INSERT INTO event_menus (name, slug, description, menu_group, event_category_id, is_default, icon, color, sort_order, is_active, company_id, created_at, updated_at)
 SELECT * FROM (
   SELECT 'QR Code' AS name, 'qr-code' AS slug, 'Open the event invitation QR code.' AS description, 'quick_action' AS g, @cat AS c, 0 AS d, 'mdi:qrcode' AS i, NULL AS col, @s + 1 AS so, 1 AS a, @co AS co, NOW() AS ca, NOW() AS ua
-  UNION ALL SELECT 'Notifications', 'notifications', 'Open your notifications.', 'quick_action', @cat, 0, 'mdi:bell-outline', NULL, @s + 2, 1, @co, NOW(), NOW()
+  UNION ALL SELECT 'Notifications', 'notifications', 'Create a new notification for one event.', 'quick_action', @cat, 0, 'mdi:bell-outline', NULL, @s + 2, 1, @co, NOW(), NOW()
   UNION ALL SELECT 'My Plan', 'my-plan', 'Your plan limits: storage, photos, videos, guests and participants.', 'quick_action', @cat, 0, 'mdi:crown-outline', NULL, @s + 3, 1, @co, NOW(), NOW()
   UNION ALL SELECT 'My Briefcase', 'my-briefcase', 'Your briefcase (coming soon).', 'quick_action', @cat, 0, 'mdi:briefcase-outline', NULL, @s + 4, 1, @co, NOW(), NOW()
 ) AS m
