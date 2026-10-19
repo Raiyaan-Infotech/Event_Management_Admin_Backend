@@ -43,6 +43,23 @@ const MB = 1024 * 1024;
     await wait(600);
     ok((await count()) === before + 1, 'already over 50% sends nothing more');
 
+    // Crossing 75% -> one "75%" alert, then nothing more under 100%.
+    trigger.checkStorageCrossing(client.id, 70 * MB, 10 * MB, limit);
+    await wait(900);
+    const q = await ClientNotification.findOne({ where, order: [['id', 'DESC']] });
+    ok((await count()) === before + 2 && q.meta?.level === 'three_quarter' && /80%/.test(q.title), 'crossing 75% sends one 75% alert (says 80%)', q?.title);
+    trigger.checkStorageCrossing(client.id, 80 * MB, 10 * MB, limit);
+    await wait(500);
+    ok((await count()) === before + 2, 'between 75% and 100% sends nothing more');
+    // Jumping 40% -> 80% sends only the 75% one, not the 50% one too.
+    const mid = await count();
+    trigger.checkStorageCrossing(client.id, 40 * MB, 40 * MB, limit);
+    await wait(900);
+    const j = await ClientNotification.findOne({ where, order: [['id', 'DESC']] });
+    ok((await count()) === mid + 1 && j.meta?.level === 'three_quarter', 'jumping 40% → 80% sends only the 75% alert');
+    await ClientNotification.destroy({ where: { id: j.id }, force: true });
+    await ClientNotification.destroy({ where: { id: q.id }, force: true });
+
     // Reaching 100% -> one "full" alert.
     trigger.checkStorageCrossing(client.id, 95 * MB, 5 * MB, limit);
     await wait(900);

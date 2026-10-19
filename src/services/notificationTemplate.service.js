@@ -41,10 +41,13 @@ const AVAILABLE_VARIABLE_KEYS = new Set(AVAILABLE_VARIABLES.map((v) => v.key));
 const SYSTEM_TRIGGERS = [
     { key: 'welcome_invitation', label: 'Welcome Invitation (guest joins an event)' },
     { key: 'storage_half_full', label: 'Storage 50% Full (organizer plan storage)' },
+    { key: 'storage_75_full', label: 'Storage 75% Full (organizer plan storage)' },
     { key: 'storage_full', label: 'Storage Full (organizer plan storage)' },
     { key: 'photos_half_full', label: 'Photos 50% Full (event photo limit)' },
+    { key: 'photos_75_full', label: 'Photos 75% Full (event photo limit)' },
     { key: 'photos_full', label: 'Photos Full (event photo limit)' },
     { key: 'videos_half_full', label: 'Videos 50% Full (event video limit)' },
+    { key: 'videos_75_full', label: 'Videos 75% Full (event video limit)' },
     { key: 'videos_full', label: 'Videos Full (event video limit)' },
 ];
 const SYSTEM_TRIGGER_KEYS = new Set(SYSTEM_TRIGGERS.map((t) => t.key));

@@ -40,14 +40,25 @@ const TEMPLATE_TRIGGER_KEYS = {
     RSVP_CONFIRMATION: 'rsvp_confirmation',
     RSVP_DECLINED: 'rsvp_declined',
     REMINDER_24H: 'reminder_24h',
-    // Account-level (not per event): the plan's Max Storage crossed 50% / 100%.
+    // Plan allowances crossing 50% / 75% / 100% (storage per account, photos /
+    // videos per event). See USAGE_LEVELS.
     STORAGE_HALF_FULL: 'storage_half_full',
+    STORAGE_75_FULL: 'storage_75_full',
     STORAGE_FULL: 'storage_full',
     PHOTOS_HALF_FULL: 'photos_half_full',
+    PHOTOS_75_FULL: 'photos_75_full',
     PHOTOS_FULL: 'photos_full',
     VIDEOS_HALF_FULL: 'videos_half_full',
+    VIDEOS_75_FULL: 'videos_75_full',
     VIDEOS_FULL: 'videos_full',
 };
+
+/** Usage alert levels, highest first: threshold and trigger_key suffix. */
+const USAGE_LEVELS = [
+    { level: 'full', at: 1, suffix: 'full' },
+    { level: 'three_quarter', at: 0.75, suffix: '75_full' },
+    { level: 'half', at: 0.5, suffix: 'half_full' },
+];
 
 /** Formats a date string nicely for human notification reading. */
 const formatDate = (dateVal) => {
@@ -357,12 +368,13 @@ const sizeText = (bytes) => {
 };
 
 /**
- * Trigger: a plan allowance reached 50% or 100% - `kind` is storage (account
- * level, bytes) or photos / videos (per event, counts; shared by the Gallery
- * and Wed Wishes). Sent to the event's owner.
+ * Trigger: a plan allowance reached 50%, 75% or 100% - `kind` is storage
+ * (account level, bytes) or photos / videos (per event, counts; shared by the
+ * Gallery and Wed Wishes). Sent to the event's owner.
  *
- * Template = the one tagged `<kind>_half_full` / `<kind>_full` in the admin's
- * Notification Templates (e.g. `photos_half_full`). No template at all -> the
+ * Template = the one tagged `<kind>_half_full` / `<kind>_75_full` /
+ * `<kind>_full` in the admin's Notification Templates (e.g.
+ * `photos_75_full`). No template at all -> the
  * built-in wording above is used; a template that exists but is inactive ->
  * nothing is sent. There is no per-event on/off.
  *
@@ -372,10 +384,11 @@ const triggerUsageAlert = async ({
     clientId, kind = 'storage', level, used, limit, eventName = '', companyId = null,
 } = {}) => {
     try {
-        if (!clientId || !(Number(limit) > 0) || !USAGE_NOUN[kind] || !['half', 'full'].includes(level)) {
+        const step = USAGE_LEVELS.find((l) => l.level === level);
+        if (!clientId || !(Number(limit) > 0) || !USAGE_NOUN[kind] || !step) {
             return { triggered: false, reason: 'bad_input' };
         }
-        const key = `${kind}_${level === 'full' ? 'full' : 'half_full'}`;
+        const key = `${kind}_${step.suffix}`;
         const template = await NotificationTemplate.findOne({
             where: { trigger_key: key },
             attributes: ['id', 'name', 'title', 'content', 'channels', 'image_url', 'is_active', 'company_id'],
@@ -384,7 +397,7 @@ const triggerUsageAlert = async ({
 
         const percent = level === 'full'
             ? 100
-            : Math.max(50, Math.min(99, Math.floor((Number(used) / Number(limit)) * 100)));
+            : Math.max(step.at * 100, Math.min(99, Math.floor((Number(used) / Number(limit)) * 100)));
         const isBytes = kind === 'storage';
         const fmt = (n) => (isBytes ? sizeText(n) : String(Math.round(Number(n))));
         const left = Math.max(0, Number(limit) - Number(used));
@@ -441,20 +454,22 @@ const triggerUsageAlert = async ({
 const triggerStorageAlert = ({ usedBytes, limitBytes, ...rest } = {}) =>
     triggerUsageAlert({ ...rest, kind: 'storage', used: usedBytes, limit: limitBytes });
 
-/** 'half' when 50% was crossed, 'full' when 100% was reached, else null. */
+/**
+ * The highest of 50% / 75% / 100% this change crossed, or null. Crossing two at
+ * once (e.g. 40% → 80%) gives only the higher one.
+ */
 const crossingLevel = (before, after, limit) => {
     if (!(Number(limit) > 0)) return null;
     const b = Number(before) / Number(limit);
     const a = Number(after) / Number(limit);
-    if (b < 1 && a >= 1) return 'full';
-    if (b < 0.5 && a >= 0.5) return 'half';
-    return null;
+    const hit = USAGE_LEVELS.find((l) => b < l.at && a >= l.at);
+    return hit ? hit.level : null;
 };
 
 /**
- * Called after something was stored. Fires once when usage crosses 50% (and
- * again after it fell back under 50% and crossed anew) and once at 100%; jumping
- * over both sends only the full one. Fire and forget.
+ * Called after something was stored. Fires once each time usage crosses 50%,
+ * 75% and 100% (again if it fell back under a line and crossed it anew);
+ * jumping over several sends only the highest. Fire and forget.
  */
 const checkUsageCrossing = (clientId, kind, usedBefore, added, limit, extra = {}) => {
     if (!clientId) return;
