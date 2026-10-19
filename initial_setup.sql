@@ -1635,7 +1635,7 @@ CREATE TABLE IF NOT EXISTS `event_menus` (
   `slug` varchar(180) COLLATE utf8mb4_unicode_ci NOT NULL,
   `remarks` varchar(300) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'free-form internal note',
   `description` text COLLATE utf8mb4_unicode_ci COMMENT 'what this menu is for — shown on the view page',
-  `menu_group` enum('core','addon') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'core',
+  `menu_group` enum('core','addon','quick_action') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'core',
   `event_category_id` int unsigned DEFAULT NULL,
   `is_default` tinyint NOT NULL DEFAULT '0' COMMENT '1 = new plans start with it ticked; 0 = add-on feature',
   `icon` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT '',

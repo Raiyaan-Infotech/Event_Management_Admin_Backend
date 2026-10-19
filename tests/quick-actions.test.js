@@ -41,6 +41,8 @@ const ok = (label, cond, extra = '') => {
         const def = await svc.get(client.id);
         const slugs = def.available.map((m) => m.slug);
         ok('available has one entry per base slug', new Set(slugs).size === slugs.length && slugs.every((s) => !/-\d+$/.test(s)));
+        ok('the 4 Home Quick Action MENUS are offered (from Menu Management)', ['qr-code', 'notifications', 'my-plan', 'my-briefcase'].every((s) => def.available.some((m) => m.slug === s && m.kind === 'quick_action' && m.menu_id)));
+        ok('the default includes them in the old order', ['my-briefcase', 'qr-code', 'notifications', 'messages', 'my-plan'].filter((s) => slugs.includes(s)).every((s, i, arr) => i === 0 || def.selected.indexOf(arr[i - 1]) < def.selected.indexOf(s)));
         ok('available entries carry name and icon', def.available.every((m) => m.name && 'icon' in m));
         ok('no saved list → default set, all granted', !def.is_custom && def.selected.every((s) => slugs.includes(s)), JSON.stringify(def.selected));
         ok('default keeps its own order', JSON.stringify(def.selected) === JSON.stringify(svc.DEFAULT_SLUGS.filter((s) => slugs.includes(s))));

@@ -493,7 +493,9 @@ const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
     // lists deciding what the wizard may offer. What the admin ticks on the plan
     // is what the client sees. `is_default` decides the switch — a Default menu
     // is always on and cannot be turned off, an Add-on can.
-    const menus = granted;
+    // ...except Home Quick Action menus (QR Code, My Plan, ...), which are
+    // not event features — Home's Quick Actions read them on their own.
+    const menus = granted.filter((m) => m.menu_group !== 'quick_action');
 
     // The admin-authored invitation templates this plan entitles them to. The
     // wizard narrows these further by the category actually chosen in

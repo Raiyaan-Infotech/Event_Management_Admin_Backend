@@ -761,6 +761,8 @@ const presentOne = async (event, { platform = 'website', isOwner = true } = {}) 
                 where: {
                     id: { [Op.in]: grantedIds },
                     is_active: 1,
+                    // Home Quick Action menus are not event menus.
+                    menu_group: { [Op.ne]: 'quick_action' },
                 },
                 // name / icon / color / sort_order: the app draws its Explore
                 // tiles straight from these (Menu Management is the source of

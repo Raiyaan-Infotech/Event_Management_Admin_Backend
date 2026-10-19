@@ -34,11 +34,13 @@ module.exports = (sequelize) => {
             type: DataTypes.STRING(300),
             allowNull: true,
         },
-        // A label only: Core or Add-on. Every menu a plan grants is offered to
+        // Core / Add-on: a label only — every menu a plan grants is offered to
         // every event; `is_default` (not this column) decides whether an event
-        // may switch it off.
+        // may switch it off. `quick_action` (2026-10-19) is different: a menu
+        // for the app's Home Quick Actions only (QR Code, My Plan, ...), never
+        // a tile inside an event — presentOne and getEventOptions skip it.
         menu_group: {
-            type: DataTypes.ENUM('core', 'addon'),
+            type: DataTypes.ENUM('core', 'addon', 'quick_action'),
             allowNull: false,
             defaultValue: 'core',
         },
