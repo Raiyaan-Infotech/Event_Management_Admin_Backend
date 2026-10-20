@@ -9,10 +9,10 @@ const { Op } = Sequelize;
 /**
  * Live Streaming (2026-10-20) — the app's Live Streaming menu.
  *
- * Stream Types work like gallery categories: per event, the organizer adds /
- * renames / deletes / reorders them, and every event has one built-in type,
- * "Live Stream", which cannot be renamed or deleted. A stream belongs to one
- * type; deleting a type moves its streams to the built-in one.
+ * Stream Types work like gallery categories — per event, the organizer adds /
+ * renames / deletes / reorders them — but with NO built-in type (Jamal,
+ * 2026-10-20): an event starts with none. A stream must belong to one type;
+ * deleting a type deletes its streams.
  *
  * Writing is host-only (an event's organizer works as the host through
  * eventOrganizerAccess); reading is open to the host and to the event's
@@ -25,7 +25,6 @@ const { Op } = Sequelize;
 const PLATFORMS = ['youtube', 'facebook', 'instagram', 'zoom', 'google_meet', 'other'];
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 const IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
-const DEFAULT_TYPE_NAME = 'Live Stream';
 const MENU_SLUG = 'live-streaming';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -34,7 +33,7 @@ const WEB_URL = /^https?:\/\/[^\s/$.?#][^\s]*$/i;
 const MEDIA_URL = /^(https?:\/\/|\/uploads\/)/i;
 
 const EVENT_ATTRS = ['id', 'name', 'company_id', 'website_client_id', 'menu_ids'];
-const TYPE_ORDER = [[Sequelize.literal('is_default IS NULL'), 'ASC'], ['sort_order', 'ASC'], ['id', 'ASC']];
+const TYPE_ORDER = [['sort_order', 'ASC'], ['id', 'ASC']];
 const STREAM_ORDER = [['sort_order', 'ASC'], ['stream_date', 'ASC'], ['stream_time', 'ASC'], ['id', 'ASC']];
 
 const clean = (raw, max) => {
@@ -42,7 +41,6 @@ const clean = (raw, max) => {
     return s ? s.slice(0, max) : null;
 };
 const hhmm = (t) => (t ? String(t).slice(0, 5) : null);
-const isDefaultType = (r) => r.is_default === true || r.is_default === 1;
 const has = (body, f) => Object.prototype.hasOwnProperty.call(body, f);
 
 /** The event, proven to belong to this client (writes). */
@@ -79,61 +77,19 @@ const dropFile = (url, companyId) => (url
 
 /* ─────────────────────────── Stream Types ─────────────────────────────── */
 
-/**
- * The event's built-in "Live Stream" type, made the first time it is needed —
- * lazily, so existing events need nothing special. The unique (event_id,
- * is_default) key makes a concurrent first call safe.
- */
-const ensureDefaultType = async (eventId) => {
-    const find = () => EventLiveStreamType.findOne({ where: { event_id: eventId, is_default: true } });
-    let row = await find();
-    if (row) return row;
-
-    const event = await Event.findByPk(eventId, { attributes: ['id', 'website_client_id', 'company_id'] });
-    if (!event) throw ApiError.notFound('That event was not found.');
-
-    const named = await EventLiveStreamType.findOne({ where: { event_id: eventId, name: DEFAULT_TYPE_NAME } });
-    if (named) {
-        named.is_default = true;
-        await named.save();
-        row = named;
-    } else {
-        try {
-            row = await EventLiveStreamType.create({
-                event_id: eventId,
-                website_client_id: event.website_client_id,
-                name: DEFAULT_TYPE_NAME,
-                sort_order: 0,
-                is_default: true,
-                company_id: event.company_id ?? null,
-            });
-        } catch (e) {
-            row = await find();
-            if (!row) throw e;
-        }
-    }
-    await EventLiveStream.update({ type_id: row.id }, { where: { event_id: eventId, type_id: null } });
-    return row;
-};
-
 const presentType = (r, counts = {}, firstCover = null) => ({
     id: r.id,
     name: r.name,
     description: r.description || null,
-    /** What the host chose; NULL when nothing. */
-    cover_image: r.cover_image || null,
-    /** What a list draws: the chosen cover, else the first stream's cover. */
-    cover_url: r.cover_image || firstCover || null,
+    /** A type has no picture of its own; this is its first stream's cover. */
+    cover_url: firstCover || null,
     sort_order: r.sort_order,
-    /** The built-in Live Stream type: cannot be renamed or deleted. */
-    is_default: isDefaultType(r),
     stream_count: counts.total || 0,
     enabled_count: counts.enabled || 0,
 });
 
 /** The event's types with counts. A participant gets only types holding an enabled stream. */
 const typesFor = async (eventId, { viewer = false } = {}) => {
-    await ensureDefaultType(eventId);
     const [rows, streams] = await Promise.all([
         EventLiveStreamType.findAll({ where: { event_id: eventId }, order: TYPE_ORDER }),
         EventLiveStream.findAll({
@@ -192,7 +148,6 @@ const checkCover = (raw) => {
 
 const createType = async (clientId, eventId, body = {}) => {
     const event = await resolveEvent(clientId, eventId);
-    await ensureDefaultType(event.id);
     const name = clean(body.name, 120);
     if (!name) throw ApiError.badRequest('Please fill all mandatory fields.');
     await assertTypeNameFree(event.id, name);
@@ -203,8 +158,7 @@ const createType = async (clientId, eventId, body = {}) => {
         website_client_id: clientId,
         name,
         description: clean(body.description, 200),
-        cover_image: checkCover(body.cover_image),
-        sort_order: Number.isFinite(Number(last)) ? Number(last) + 1 : 1,
+        sort_order: Number.isFinite(Number(last)) ? Number(last) + 1 : 0,
         company_id: event.company_id ?? null,
     });
     const types = await typesFor(event.id);
@@ -217,62 +171,57 @@ const resolveType = async (clientId, typeId) => {
     return row;
 };
 
-/** Only the fields SENT change. The built-in type keeps its name. */
+/** Only the fields SENT change. */
 const updateType = async (clientId, typeId, body = {}) => {
     const row = await resolveType(clientId, typeId);
     if (has(body, 'name')) {
         const name = clean(body.name, 120);
-        if (isDefaultType(row)) {
-            if (name !== row.name) throw ApiError.badRequest('The Live Stream type cannot be renamed.');
-        } else {
-            if (!name) throw ApiError.badRequest('Please fill all mandatory fields.');
-            await assertTypeNameFree(row.event_id, name, row.id);
-            row.name = name;
-        }
+        if (!name) throw ApiError.badRequest('Please fill all mandatory fields.');
+        await assertTypeNameFree(row.event_id, name, row.id);
+        row.name = name;
     }
     if (has(body, 'description')) row.description = clean(body.description, 200);
-    let oldCover = null;
-    if (has(body, 'cover_image')) {
-        const next = checkCover(body.cover_image);
-        if (row.cover_image && row.cover_image !== next) oldCover = row.cover_image;
-        row.cover_image = next;
-    }
     await row.save();
-    if (oldCover) await dropFile(oldCover, row.company_id);
     const types = await typesFor(row.event_id);
     return { type: types.find((t) => t.id === row.id), types };
 };
 
-/** Delete a type. Its streams are NOT deleted — they move to the built-in Live Stream type. */
+/**
+ * Delete a type AND its live streams (Jamal, 2026-10-20: there is no built-in
+ * type to move them to). The app says how many go before it asks.
+ */
 const removeType = async (clientId, typeId) => {
     const row = await resolveType(clientId, typeId);
-    if (isDefaultType(row)) throw ApiError.badRequest('The Live Stream type cannot be deleted.');
-    const fallback = await ensureDefaultType(row.event_id);
-    const moved = await EventLiveStream.update({ type_id: fallback.id }, { where: { type_id: row.id } });
-    const { event_id: eventId, cover_image: cover, company_id: companyId } = row;
+    const streams = await EventLiveStream.findAll({
+        where: { type_id: row.id },
+        attributes: ['id', 'cover_image', 'company_id'],
+    });
+    const eventId = row.event_id;
+    if (streams.length) await EventLiveStream.destroy({ where: { type_id: row.id } });
     await row.destroy();
-    if (cover) await dropFile(cover, companyId);
-    return { removed: true, moved: moved[0] || 0, types: await typesFor(eventId) };
+    const covers = streams.filter((s) => s.cover_image);
+    for (let i = 0; i < covers.length; i += 5) {
+        await Promise.all(covers.slice(i, i + 5).map((s) => dropFile(s.cover_image, s.company_id)));
+    }
+    return { removed: true, streams_removed: streams.length, types: await typesFor(eventId) };
 };
 
-/**
- * Save the drag order: `ids` = the event's types in the new order. The built-in
- * type always leads; ids of other events are ignored.
- */
+/** Save the drag order: `ids` = the event's types in the new order; other events' ids ignored. */
 const reorderTypes = async (clientId, eventId, body = {}) => {
     const event = await resolveEvent(clientId, eventId);
     if (!Array.isArray(body.ids)) throw ApiError.badRequest('Invalid stream type order.');
-    const def = await ensureDefaultType(event.id);
     const rows = await EventLiveStreamType.findAll({ where: { event_id: event.id }, order: TYPE_ORDER, attributes: ['id'] });
     const known = new Set(rows.map((r) => r.id));
-    const sent = [...new Set(body.ids.map(Number))].filter((id) => known.has(id) && id !== def.id);
-    const order = [def.id, ...sent, ...rows.map((r) => r.id).filter((id) => id !== def.id && !sent.includes(id))];
-    // One UPDATE with CASE — prod is ~370ms a query, so never row by row.
-    const cases = order.map((id, i) => `WHEN ${Number(id)} THEN ${i}`).join(' ');
-    await EventLiveStreamType.sequelize.query(
-        `UPDATE event_live_stream_types SET sort_order = CASE id ${cases} END WHERE event_id = ? AND id IN (${order.map(Number).join(',')})`,
-        { replacements: [event.id] },
-    );
+    const sent = [...new Set(body.ids.map(Number))].filter((id) => known.has(id));
+    const order = [...sent, ...rows.map((r) => r.id).filter((id) => !sent.includes(id))];
+    if (order.length) {
+        // One UPDATE with CASE — prod is ~370ms a query, so never row by row.
+        const cases = order.map((id, i) => `WHEN ${Number(id)} THEN ${i}`).join(' ');
+        await EventLiveStreamType.sequelize.query(
+            `UPDATE event_live_stream_types SET sort_order = CASE id ${cases} END WHERE event_id = ? AND id IN (${order.map(Number).join(',')})`,
+            { replacements: [event.id] },
+        );
+    }
     return { types: await typesFor(event.id) };
 };
 
@@ -299,15 +248,13 @@ const present = (row, typeName = null) => {
     };
 };
 
-/** A type id proven to belong to THIS event; nothing / a stray id = the built-in type. */
-const typeIdOrDefault = async (eventId, raw) => {
+/** A type id proven to belong to THIS event. A stream must have one. */
+const requireType = async (eventId, raw) => {
     const id = Number(raw);
-    if (id) {
-        const row = await EventLiveStreamType.findOne({ where: { id, event_id: eventId }, attributes: ['id'] });
-        if (row) return row.id;
-        throw ApiError.badRequest('Please choose a valid stream type.');
-    }
-    return (await ensureDefaultType(eventId)).id;
+    if (!id) throw ApiError.badRequest('Please fill all mandatory fields.');
+    const row = await EventLiveStreamType.findOne({ where: { id, event_id: eventId }, attributes: ['id'] });
+    if (!row) throw ApiError.badRequest('Please choose a valid stream type.');
+    return row.id;
 };
 
 /**
@@ -412,7 +359,7 @@ const getOne = async (clientId, streamId) => {
 const create = async (clientId, eventId, body = {}) => {
     const event = await resolveEvent(clientId, eventId);
     const data = normalise(body);
-    const typeId = await typeIdOrDefault(event.id, body.type_id);
+    const typeId = await requireType(event.id, body.type_id);
     const last = await EventLiveStream.max('sort_order', { where: { event_id: event.id } });
     const row = await EventLiveStream.create({
         ...data,
@@ -429,7 +376,7 @@ const create = async (clientId, eventId, body = {}) => {
 const update = async (clientId, streamId, body = {}) => {
     const row = await resolveStream(clientId, streamId);
     const data = normalise(body, row);
-    if (has(body, 'type_id')) data.type_id = await typeIdOrDefault(row.event_id, body.type_id);
+    if (has(body, 'type_id')) data.type_id = await requireType(row.event_id, body.type_id);
     const oldCover = has(data, 'cover_image') && row.cover_image && row.cover_image !== data.cover_image
         ? row.cover_image : null;
     await row.update(data);
@@ -445,7 +392,7 @@ const remove = async (clientId, streamId) => {
     return { removed: true };
 };
 
-/** Store a cover (stream or type) and hand back its URL; the form saves the URL. */
+/** Store a stream's cover and hand back its URL; the form saves the URL. */
 const uploadCover = async (clientId, eventId, file) => {
     if (!file || !file.buffer) throw ApiError.badRequest('Please choose an image to upload.');
     const event = await resolveEvent(clientId, eventId);
@@ -458,13 +405,12 @@ const uploadCover = async (clientId, eventId, file) => {
     return { url: stored.url };
 };
 
-/** A deleted event's covers leave storage; the rows go with the event (FK cascade / soft delete). */
+/** A deleted event's stream covers leave storage, then its streams and types go. */
 const purgeEvent = async (eventId) => {
-    const [streams, types] = await Promise.all([
-        EventLiveStream.findAll({ where: { event_id: eventId }, attributes: ['cover_image', 'company_id'], raw: true }),
-        EventLiveStreamType.findAll({ where: { event_id: eventId }, attributes: ['cover_image', 'company_id'], raw: true }),
-    ]);
-    const files = [...streams, ...types].filter((r) => r.cover_image);
+    const streams = await EventLiveStream.findAll({
+        where: { event_id: eventId }, attributes: ['cover_image', 'company_id'], raw: true,
+    });
+    const files = streams.filter((r) => r.cover_image);
     for (let i = 0; i < files.length; i += 5) {
         await Promise.all(files.slice(i, i + 5).map((r) => dropFile(r.cover_image, r.company_id)));
     }
@@ -476,7 +422,6 @@ module.exports = {
     PLATFORMS,
     MAX_IMAGE_BYTES,
     IMAGE_MIMES,
-    DEFAULT_TYPE_NAME,
     listTypes,
     createType,
     updateType,

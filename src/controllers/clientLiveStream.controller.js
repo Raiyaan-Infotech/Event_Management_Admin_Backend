@@ -8,14 +8,14 @@ const listTypes = asyncHandler(async (req, res) => {
 });
 
 const createType = asyncHandler(async (req, res) => {
-    const { name, description, cover_image } = req.body;
-    const result = await service.createType(req.websiteClient.id, req.params.id, { name, description, cover_image });
+    const { name, description } = req.body;
+    const result = await service.createType(req.websiteClient.id, req.params.id, { name, description });
     return ApiResponse.created(res, result, 'Stream type added.');
 });
 
 const updateType = asyncHandler(async (req, res) => {
     const body = {};
-    for (const f of ['name', 'description', 'cover_image']) {
+    for (const f of ['name', 'description']) {
         if (Object.prototype.hasOwnProperty.call(req.body, f)) body[f] = req.body[f];
     }
     const result = await service.updateType(req.websiteClient.id, req.params.typeId, body);

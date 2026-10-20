@@ -2,11 +2,11 @@
  * Live Streaming — through the service (no server needed).
  *
  * ── WHAT THIS FILE IS GUARDING ──────────────────────────────────────────────
- *   · every event gets ONE built-in "Live Stream" type; it cannot be renamed or deleted
+ *   · an event starts with NO stream types (no built-in one)
  *   · the HOST adds / renames / reorders / deletes stream types; duplicate names refused
- *   · deleting a type moves its streams to the built-in type (never deletes them)
- *   · a stream needs title, platform, a http(s) link, date and time
- *   · a stream with no type lands in the built-in type; another event's type is refused
+ *   · deleting a type deletes its streams too
+ *   · a stream needs a type, title, platform, a http(s) link, date and time
+ *   · another event's type is refused
  *   · Disable / Enable (is_enabled) and the Enabled / Disabled counts
  *   · a participant sees ENABLED streams only, and only types that hold one;
  *     a disabled stream cannot be opened by them; they cannot write anything
@@ -68,8 +68,7 @@ const refused = async (fn) => {
 
         // ── Types ────────────────────────────────────────────────────────
         const t0 = await live.listTypes(host, event.id);
-        const def = t0.types.find((t) => t.is_default);
-        ok('built-in "Live Stream" type exists and leads', def && def.name === 'Live Stream' && t0.types[0].id === def.id);
+        ok('no built-in type: the list starts empty', t0.types.length === 0, JSON.stringify(t0.types.map((t) => t.name)));
         ok('host can_edit', t0.can_edit === true);
         ok('Live Streaming menu reported', !!t0.menu_id, JSON.stringify(t0.menu_id));
 
@@ -79,35 +78,31 @@ const refused = async (fn) => {
         ok('duplicate type name refused', /already a stream type/.test(await refused(() => live.createType(host, event.id, { name: 'ZzTest Ceremony' })) || ''));
         ok('empty type name refused', /mandatory/.test(await refused(() => live.createType(host, event.id, { name: '  ' })) || ''));
         ok('participant cannot add a type', !!(await refused(() => live.createType(guest, event.id, { name: 'X' }))));
-        ok('built-in type cannot be renamed', /cannot be renamed/.test(await refused(() => live.updateType(host, def.id, { name: 'Other' })) || ''));
-        ok('built-in type cannot be deleted', /cannot be deleted/.test(await refused(() => live.removeType(host, def.id)) || ''));
         const renamed = await live.updateType(host, ceremony.id, { name: 'ZzTest Wedding Ceremony' });
         ok('host renames a type', renamed.type.name === 'ZzTest Wedding Ceremony');
 
-        const re = await live.reorderTypes(host, event.id, { ids: [reception.id, ceremony.id, def.id] });
+        const re = await live.reorderTypes(host, event.id, { ids: [reception.id, ceremony.id] });
         const order = re.types.map((t) => t.id);
-        ok('reorder: built-in stays first, then the order sent',
-            order[0] === def.id && order.indexOf(reception.id) < order.indexOf(ceremony.id), order.join(','));
+        ok('reorder saves the order sent', order[0] === reception.id && order[1] === ceremony.id, order.join(','));
 
         // ── Streams ──────────────────────────────────────────────────────
         const s1 = await live.create(host, event.id, { ...base, type_id: ceremony.id });
         ok('host adds a stream in a type', s1.type_id === ceremony.id && s1.type_name === 'ZzTest Wedding Ceremony' && s1.is_enabled === true && s1.stream_time === '10:00');
         const s2 = await live.create(host, event.id, { ...base, title: 'Reception Live', platform: 'facebook', type_id: ceremony.id, is_enabled: false, stream_time: '19:00' });
         ok('stream saved disabled (Show in App off)', s2.is_enabled === false && s2.platform === 'facebook');
-        const s3 = await live.create(host, event.id, { ...base, title: 'No type given' });
-        ok('no type → built-in Live Stream type', s3.type_id === def.id);
+        ok('no type refused', /mandatory/.test(await refused(() => live.create(host, event.id, { ...base, title: 'No type' })) || ''));
 
-        ok('missing title refused', /mandatory/.test(await refused(() => live.create(host, event.id, { ...base, title: '' })) || ''));
-        ok('bad link refused', /valid link/.test(await refused(() => live.create(host, event.id, { ...base, stream_url: 'youtube.com/x' })) || ''));
-        ok('unknown platform refused', /platform/.test(await refused(() => live.create(host, event.id, { ...base, platform: 'myspace' })) || ''));
-        ok('bad date refused', /valid date/.test(await refused(() => live.create(host, event.id, { ...base, stream_date: '24-11-2024' })) || ''));
-        ok('missing time refused', /mandatory/.test(await refused(() => live.create(host, event.id, { ...base, stream_time: '' })) || ''));
+        const typed = { ...base, type_id: ceremony.id };
+        ok('missing title refused', /mandatory/.test(await refused(() => live.create(host, event.id, { ...typed, title: '' })) || ''));
+        ok('bad link refused', /valid link/.test(await refused(() => live.create(host, event.id, { ...typed, stream_url: 'youtube.com/x' })) || ''));
+        ok('unknown platform refused', /platform/.test(await refused(() => live.create(host, event.id, { ...typed, platform: 'myspace' })) || ''));
+        ok('bad date refused', /valid date/.test(await refused(() => live.create(host, event.id, { ...typed, stream_date: '24-11-2024' })) || ''));
+        ok('missing time refused', /mandatory/.test(await refused(() => live.create(host, event.id, { ...typed, stream_time: '' })) || ''));
         if (otherEvent) {
-            const foreign = await EventLiveStreamType.findOne({ where: { event_id: otherEvent.id }, attributes: ['id'] })
-                || await live.listTypes(otherEvent.website_client_id, otherEvent.id).then((r) => r.types[0]);
+            const foreign = (await live.createType(otherEvent.website_client_id, otherEvent.id, { name: 'ZzTest Foreign' })).type;
             ok("another event's type refused", /valid stream type/.test(await refused(() => live.create(host, event.id, { ...base, type_id: foreign.id })) || ''));
         }
-        ok('participant cannot add a stream', !!(await refused(() => live.create(guest, event.id, base))));
+        ok('participant cannot add a stream', !!(await refused(() => live.create(guest, event.id, typed))));
         ok('stranger cannot list', !!(await refused(() => live.list(stranger, event.id))));
 
         // Host list for the type: both, with counts.
@@ -136,15 +131,17 @@ const refused = async (fn) => {
         ok('edit changes only what was sent (title + type)', edited.title === 'Wedding Ceremony Live (HD)' && edited.type_id === reception.id && edited.stream_url === base.stream_url && edited.description === 'Join us live');
         ok('edit with a bad link refused', /valid link/.test(await refused(() => live.update(host, s1.id, { stream_url: 'ftp://x' })) || ''));
 
-        // Delete a type → its streams move to the built-in type.
-        const del = await live.removeType(host, ceremony.id);
-        const s2After = await EventLiveStream.findByPk(s2.id);
-        ok('deleting a type moves its streams to Live Stream', del.moved === 1 && s2After && s2After.type_id === def.id);
-
         // Delete a stream.
+        const s3 = await live.create(host, event.id, { ...base, title: 'Third', type_id: ceremony.id });
+        ok('participant cannot delete', !!(await refused(() => live.remove(guest, s1.id))));
         await live.remove(host, s3.id);
         ok('host deletes a stream', !(await EventLiveStream.findByPk(s3.id)));
-        ok('participant cannot delete', !!(await refused(() => live.remove(guest, s1.id))));
+
+        // Delete a type → its streams go with it (s2 is in ceremony; s1 moved to reception).
+        ok('participant cannot delete a type', !!(await refused(() => live.removeType(guest, ceremony.id))));
+        const del = await live.removeType(host, ceremony.id);
+        ok('deleting a type deletes its streams', del.streams_removed === 1 && !(await EventLiveStream.findByPk(s2.id)));
+        ok('the other type keeps its stream', !!(await EventLiveStream.findByPk(s1.id)));
     } catch (e) {
         fail++;
         console.log(`  FAIL  unexpected error: ${e.stack}`);
