@@ -32,7 +32,7 @@ const TIME = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
 const WEB_URL = /^https?:\/\/[^\s/$.?#][^\s]*$/i;
 const MEDIA_URL = /^(https?:\/\/|\/uploads\/)/i;
 
-const EVENT_ATTRS = ['id', 'name', 'company_id', 'website_client_id', 'menu_ids'];
+const EVENT_ATTRS = ['id', 'name', 'start_date', 'end_date', 'company_id', 'website_client_id', 'menu_ids'];
 const TYPE_ORDER = [['sort_order', 'ASC'], ['id', 'ASC']];
 const STREAM_ORDER = [['sort_order', 'ASC'], ['stream_date', 'ASC'], ['stream_time', 'ASC'], ['id', 'ASC']];
 
@@ -74,6 +74,20 @@ const resolveEventForView = async (clientId, rawId) => {
 const dropFile = (url, companyId) => (url
     ? mediaService.deleteByUrl(url, companyId || 1).catch(() => null)
     : Promise.resolve());
+
+/** The event's own days — a stream's date must fall inside them. */
+const eventRange = (event) => ({
+    event_start_date: event.start_date || null,
+    event_end_date: event.end_date || event.start_date || null,
+});
+
+/** Refuse a stream date outside the event's start..end (an event with no dates allows any). */
+const assertInEvent = (event, date) => {
+    const { event_start_date: first, event_end_date: last } = eventRange(event);
+    if ((first && date < first) || (last && date > last)) {
+        throw ApiError.badRequest('The live stream date must be within the event dates.');
+    }
+};
 
 /* ─────────────────────────── Stream Types ─────────────────────────────── */
 
@@ -129,7 +143,7 @@ const menuState = async (event) => {
 const listTypes = async (clientId, eventId) => {
     const { event, isOwner } = await resolveEventForView(clientId, eventId);
     const [types, menu] = await Promise.all([typesFor(event.id, { viewer: !isOwner }), menuState(event)]);
-    return { types, ...menu, can_edit: isOwner };
+    return { types, ...menu, ...eventRange(event), can_edit: isOwner };
 };
 
 const assertTypeNameFree = async (eventId, name, exceptId = null) => {
@@ -359,6 +373,7 @@ const getOne = async (clientId, streamId) => {
 const create = async (clientId, eventId, body = {}) => {
     const event = await resolveEvent(clientId, eventId);
     const data = normalise(body);
+    assertInEvent(event, data.stream_date);
     const typeId = await requireType(event.id, body.type_id);
     const last = await EventLiveStream.max('sort_order', { where: { event_id: event.id } });
     const row = await EventLiveStream.create({
@@ -376,6 +391,10 @@ const create = async (clientId, eventId, body = {}) => {
 const update = async (clientId, streamId, body = {}) => {
     const row = await resolveStream(clientId, streamId);
     const data = normalise(body, row);
+    if (data.stream_date) {
+        const event = await Event.findByPk(row.event_id, { attributes: ['start_date', 'end_date'] });
+        assertInEvent(event, data.stream_date);
+    }
     if (has(body, 'type_id')) data.type_id = await requireType(row.event_id, body.type_id);
     const oldCover = has(data, 'cover_image') && row.cover_image && row.cover_image !== data.cover_image
         ? row.cover_image : null;

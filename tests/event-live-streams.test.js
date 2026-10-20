@@ -37,7 +37,7 @@ const refused = async (fn) => {
 (async () => {
     const joined = await EventParticipant.findOne({
         where: { participant_client_id: { [Op.ne]: null } },
-        include: [{ model: Event, as: 'event', required: true, attributes: ['id', 'website_client_id'] }],
+        include: [{ model: Event, as: 'event', required: true, attributes: ['id', 'website_client_id', 'start_date', 'end_date'] }],
     });
     if (!joined || !joined.event) {
         console.log('SKIP  no event with a joined participant on this database');
@@ -57,7 +57,8 @@ const refused = async (fn) => {
         title: 'Wedding Ceremony Live',
         platform: 'youtube',
         stream_url: 'https://www.youtube.com/watch?v=abc123',
-        stream_date: '2024-11-24',
+        // A day of the event — a stream must fall inside the event's dates.
+        stream_date: event.start_date,
         stream_time: '10:00',
         description: 'Join us live',
         cover_image: '/uploads/test/live-cover.jpg',
@@ -70,6 +71,9 @@ const refused = async (fn) => {
         const t0 = await live.listTypes(host, event.id);
         ok('no built-in type: the list starts empty', t0.types.length === 0, JSON.stringify(t0.types.map((t) => t.name)));
         ok('host can_edit', t0.can_edit === true);
+        ok('event dates returned for the date picker',
+            t0.event_start_date === event.start_date && t0.event_end_date === (event.end_date || event.start_date),
+            `${t0.event_start_date} – ${t0.event_end_date}`);
         ok('Live Streaming menu reported', !!t0.menu_id, JSON.stringify(t0.menu_id));
 
         const { type: ceremony } = await live.createType(host, event.id, { name: 'ZzTest Ceremony' });
@@ -97,6 +101,13 @@ const refused = async (fn) => {
         ok('bad link refused', /valid link/.test(await refused(() => live.create(host, event.id, { ...typed, stream_url: 'youtube.com/x' })) || ''));
         ok('unknown platform refused', /platform/.test(await refused(() => live.create(host, event.id, { ...typed, platform: 'myspace' })) || ''));
         ok('bad date refused', /valid date/.test(await refused(() => live.create(host, event.id, { ...typed, stream_date: '24-11-2024' })) || ''));
+        ok('date before the event refused', /within the event dates/.test(await refused(() => live.create(host, event.id, { ...typed, stream_date: '2000-01-01' })) || ''));
+        ok('date after the event refused', /within the event dates/.test(await refused(() => live.create(host, event.id, { ...typed, stream_date: '2099-12-31' })) || ''));
+        if (event.end_date && event.end_date !== event.start_date) {
+            const last = await live.create(host, event.id, { ...typed, title: 'Last day', stream_date: event.end_date });
+            ok("the event's last day is allowed", last.stream_date === event.end_date);
+            await live.remove(host, last.id);
+        }
         ok('missing time refused', /mandatory/.test(await refused(() => live.create(host, event.id, { ...typed, stream_time: '' })) || ''));
         if (otherEvent) {
             const foreign = (await live.createType(otherEvent.website_client_id, otherEvent.id, { name: 'ZzTest Foreign' })).type;
@@ -129,6 +140,7 @@ const refused = async (fn) => {
         ok('host enables again', on.is_enabled === true);
         const edited = await live.update(host, s1.id, { title: 'Wedding Ceremony Live (HD)', type_id: reception.id });
         ok('edit changes only what was sent (title + type)', edited.title === 'Wedding Ceremony Live (HD)' && edited.type_id === reception.id && edited.stream_url === base.stream_url && edited.description === 'Join us live');
+        ok('edit to a date outside the event refused', /within the event dates/.test(await refused(() => live.update(host, s1.id, { stream_date: '2099-12-31' })) || ''));
         ok('edit with a bad link refused', /valid link/.test(await refused(() => live.update(host, s1.id, { stream_url: 'ftp://x' })) || ''));
 
         // Delete a stream.
