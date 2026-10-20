@@ -2,7 +2,8 @@
  * Jamal's menu decision of 2026-09-25 (session §591), applied as DATA:
  *
  *   Default (locked on every plan and every event): the ones below —
- *   seven from §591, plus Contact Us and Messages (Jamal, 2026-10-14).
+ *   seven from §591, plus Contact Us and Messages (Jamal, 2026-10-14), plus
+ *   Social Links (Jamal, 2026-10-20 — a Quick Link).
  *   Everything else: Add-on (optional per plan, switchable per event).
  *   Social Wall: set Inactive — off every menu, kept for a possible return.
  *                The app's screen for it is untouched.
@@ -33,7 +34,7 @@ const BACKUP_DIR = 'D:\\Jamal\\prod-backups';
 
 const DEFAULT_SLUGS = [
     'splash-screens', 'event-invitation', 'participants', 'venue', 'rsvp', 'agenda', 'guests',
-    'contact-us', 'messages',
+    'contact-us', 'messages', 'social-links',
 ];
 const INACTIVE_SLUGS = ['social-wall'];
 
@@ -73,7 +74,9 @@ const parseEnv = (file) => {
     for (const m of menus) {
         const isDefault = DEFAULT_SLUGS.includes(m.slug) ? 1 : 0;
         const isActive = INACTIVE_SLUGS.includes(m.slug) ? 0 : Number(m.is_active);
-        const group = isDefault ? 'core' : 'addon';
+        // Home Quick Action menus (menu_group `quick_action`, 2026-10-19) keep
+        // their group — they are not event menus, Default or Add-on.
+        const group = m.menu_group === 'quick_action' ? 'quick_action' : isDefault ? 'core' : 'addon';
         const diff = [];
         if (Number(m.is_default) !== isDefault) diff.push(`${isDefault ? 'Add-on -> DEFAULT' : 'Default -> add-on'}`);
         if (Number(m.is_active) !== isActive) diff.push('Active -> INACTIVE');
