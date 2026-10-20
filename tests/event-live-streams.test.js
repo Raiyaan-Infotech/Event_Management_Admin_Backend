@@ -101,8 +101,10 @@ const refused = async (fn) => {
         ok('bad link refused', /valid link/.test(await refused(() => live.create(host, event.id, { ...typed, stream_url: 'youtube.com/x' })) || ''));
         ok('unknown platform refused', /platform/.test(await refused(() => live.create(host, event.id, { ...typed, platform: 'myspace' })) || ''));
         ok('bad date refused', /valid date/.test(await refused(() => live.create(host, event.id, { ...typed, stream_date: '24-11-2024' })) || ''));
-        ok('date before the event refused', /within the event dates/.test(await refused(() => live.create(host, event.id, { ...typed, stream_date: '2000-01-01' })) || ''));
-        ok('date after the event refused', /within the event dates/.test(await refused(() => live.create(host, event.id, { ...typed, stream_date: '2099-12-31' })) || ''));
+        const early = await live.create(host, event.id, { ...typed, title: 'Before the event', stream_date: '2000-01-01' });
+        ok('a date BEFORE the event start is allowed', early.stream_date === '2000-01-01');
+        await live.remove(host, early.id);
+        ok('date after the event end refused', /after the event ends/.test(await refused(() => live.create(host, event.id, { ...typed, stream_date: '2099-12-31' })) || ''));
         if (event.end_date && event.end_date !== event.start_date) {
             const last = await live.create(host, event.id, { ...typed, title: 'Last day', stream_date: event.end_date });
             ok("the event's last day is allowed", last.stream_date === event.end_date);
@@ -140,7 +142,7 @@ const refused = async (fn) => {
         ok('host enables again', on.is_enabled === true);
         const edited = await live.update(host, s1.id, { title: 'Wedding Ceremony Live (HD)', type_id: reception.id });
         ok('edit changes only what was sent (title + type)', edited.title === 'Wedding Ceremony Live (HD)' && edited.type_id === reception.id && edited.stream_url === base.stream_url && edited.description === 'Join us live');
-        ok('edit to a date outside the event refused', /within the event dates/.test(await refused(() => live.update(host, s1.id, { stream_date: '2099-12-31' })) || ''));
+        ok('edit to a date after the event refused', /after the event ends/.test(await refused(() => live.update(host, s1.id, { stream_date: '2099-12-31' })) || ''));
         ok('edit with a bad link refused', /valid link/.test(await refused(() => live.update(host, s1.id, { stream_url: 'ftp://x' })) || ''));
 
         // Delete a stream.

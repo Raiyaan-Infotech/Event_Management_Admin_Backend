@@ -1992,6 +1992,29 @@ CREATE TABLE IF NOT EXISTS `event_live_streams` (
   CONSTRAINT `fk_live_stream_type` FOREIGN KEY (`type_id`) REFERENCES `event_live_stream_types` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Table structure for `event_social_links` (Social Links, 2026-10-20)
+CREATE TABLE IF NOT EXISTS `event_social_links` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `event_id` int unsigned NOT NULL,
+  `website_client_id` int unsigned NOT NULL COMMENT 'the event owner',
+  `platform_key` varchar(30) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'instagram / facebook / x / youtube = preset; NULL = custom',
+  `platform_name` varchar(60) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `title` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `url` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'NULL = not added yet (presets only)',
+  `description` varchar(300) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `icon_url` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'custom links only',
+  `sort_order` int NOT NULL DEFAULT '0',
+  `open_external` tinyint(1) NOT NULL DEFAULT '1' COMMENT '1 = open in the platform''s own app',
+  `show_in_app` tinyint(1) NOT NULL DEFAULT '1',
+  `company_id` int unsigned DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_social_link_preset` (`event_id`,`platform_key`),
+  KEY `idx_social_link_event` (`event_id`,`sort_order`),
+  CONSTRAINT `fk_social_link_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Table structure for `guest_food_preference_options`
 CREATE TABLE IF NOT EXISTS `guest_food_preference_options` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,

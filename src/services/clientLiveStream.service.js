@@ -75,17 +75,21 @@ const dropFile = (url, companyId) => (url
     ? mediaService.deleteByUrl(url, companyId || 1).catch(() => null)
     : Promise.resolve());
 
-/** The event's own days — a stream's date must fall inside them. */
+/** The event's own days; a stream's date may not be after the last one. */
 const eventRange = (event) => ({
     event_start_date: event.start_date || null,
     event_end_date: event.end_date || event.start_date || null,
 });
 
-/** Refuse a stream date outside the event's start..end (an event with no dates allows any). */
+/**
+ * Refuse a stream date AFTER the event's last day. Any day before it is fine —
+ * an Engagement stream comes before the wedding (Jamal, 2026-10-20), so the
+ * start date is not a limit. An event with no dates allows any day.
+ */
 const assertInEvent = (event, date) => {
-    const { event_start_date: first, event_end_date: last } = eventRange(event);
-    if ((first && date < first) || (last && date > last)) {
-        throw ApiError.badRequest('The live stream date must be within the event dates.');
+    const { event_end_date: last } = eventRange(event);
+    if (last && date > last) {
+        throw ApiError.badRequest('The live stream date cannot be after the event ends.');
     }
 };
 

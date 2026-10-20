@@ -19,6 +19,8 @@ const galleryService = require('../services/clientGallery.service');
 const agendaController = require('../controllers/clientAgenda.controller');
 const liveStreamController = require('../controllers/clientLiveStream.controller');
 const liveStreamService = require('../services/clientLiveStream.service');
+const socialLinkController = require('../controllers/clientSocialLink.controller');
+const socialLinkService = require('../services/clientSocialLink.service');
 const familyController = require('../controllers/clientFamily.controller');
 const wishController = require('../controllers/clientWish.controller');
 const wishService = require('../services/clientWish.service');
@@ -723,6 +725,46 @@ router.post(
 router.get('/live-streams/:streamId', liveStreamController.getOne);
 router.put('/live-streams/:streamId', liveStreamController.update);
 router.delete('/live-streams/:streamId', liveStreamController.remove);
+
+/**
+ * Social Links (2026-10-20). Four preset links (Instagram, Facebook, X,
+ * YouTube) exist for every event; others are custom with an uploaded icon.
+ * Reads: host + participants (participants get links with a URL that are
+ * shown in the app); writes: host-only, in the service. `/reorder` and `/icon`
+ * are literal paths with no `:id` sibling at the same depth.
+ */
+const socialIconUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: socialLinkService.MAX_ICON_BYTES },
+    fileFilter: (req, file, cb) => {
+        if (socialLinkService.ICON_MIMES.includes(file.mimetype)) return cb(null, true);
+        cb(new Error('Please choose a PNG, JPG or WEBP image.'), false);
+    },
+});
+
+router.get('/events/:id/social-links', socialLinkController.list);
+router.post('/events/:id/social-links', socialLinkController.create);
+router.put('/events/:id/social-links/reorder', socialLinkController.reorder);
+router.post(
+    '/events/:id/social-links/icon',
+    (req, res, next) => {
+        socialIconUpload.single('file')(req, res, (err) => {
+            if (err) {
+                return res.status(400).json({
+                    success: false,
+                    message: err.code === 'LIMIT_FILE_SIZE'
+                        ? 'That icon is larger than 1MB.'
+                        : err.message || 'That icon could not be uploaded.',
+                });
+            }
+            next();
+        });
+    },
+    socialLinkController.uploadIcon,
+);
+router.get('/social-links/:linkId', socialLinkController.getOne);
+router.put('/social-links/:linkId', socialLinkController.update);
+router.delete('/social-links/:linkId', socialLinkController.remove);
 
 /**
  * The organizer's notifications from the mobile app (Home → Send

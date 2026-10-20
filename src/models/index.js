@@ -163,6 +163,7 @@ db.EventWishBlock = require('./EventWishBlock')(sequelize, Sequelize);
 db.EventWishLike = require('./EventWishLike')(sequelize, Sequelize);
 db.EventLiveStreamType = require('./EventLiveStreamType')(sequelize, Sequelize);
 db.EventLiveStream = require('./EventLiveStream')(sequelize, Sequelize);
+db.EventSocialLink = require('./EventSocialLink')(sequelize, Sequelize);
 db.EventParticipant = require('./EventParticipant')(sequelize, Sequelize);
 // The client's phone book (§581). Participants are EventParticipant.
 db.Guest = require('./Guest')(sequelize, Sequelize);

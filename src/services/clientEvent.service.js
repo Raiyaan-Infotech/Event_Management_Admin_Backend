@@ -20,6 +20,7 @@ const subscriptionPlanService = require('./subscriptionPlan.service');
 const galleryService = require('./clientGallery.service');
 const wishService = require('./clientWish.service');
 const liveStreamService = require('./clientLiveStream.service');
+const socialLinkService = require('./clientSocialLink.service');
 
 /**
  * Events belonging to a signed-in website client.
@@ -1370,6 +1371,7 @@ const deleteEvent = async (clientId, eventId) => {
     await galleryService.purgeEvent(event.id).catch(() => null);
     await wishService.purgeEvent(event.id).catch(() => null);
     await liveStreamService.purgeEvent(event.id).catch(() => null);
+    await socialLinkService.purgeEvent(event.id).catch(() => null);
     return true;
 };
 
