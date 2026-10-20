@@ -17,6 +17,8 @@ const splashController = require('../controllers/clientSplashScreen.controller')
 const galleryController = require('../controllers/clientGallery.controller');
 const galleryService = require('../services/clientGallery.service');
 const agendaController = require('../controllers/clientAgenda.controller');
+const liveStreamController = require('../controllers/clientLiveStream.controller');
+const liveStreamService = require('../services/clientLiveStream.service');
 const familyController = require('../controllers/clientFamily.controller');
 const wishController = require('../controllers/clientWish.controller');
 const wishService = require('../services/clientWish.service');
@@ -677,6 +679,50 @@ router.get('/agenda/:itemId', agendaController.getOne);
 router.put('/agenda/:itemId', agendaController.update);
 router.post('/agenda/:itemId/duplicate', agendaController.duplicate);
 router.delete('/agenda/:itemId', agendaController.remove);
+
+/**
+ * Live Streaming (2026-10-20). Stream Types are per event, like gallery
+ * categories (one built-in "Live Stream" type). Reads: host + participants
+ * (participants get enabled streams only); writes: host-only, in the service.
+ * `/events/:id/live-streams/cover` and `/live-stream-types/reorder` are literal
+ * paths with no `:id` sibling at the same depth.
+ */
+const liveStreamCoverUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: liveStreamService.MAX_IMAGE_BYTES },
+    fileFilter: (req, file, cb) => {
+        if (liveStreamService.IMAGE_MIMES.includes(file.mimetype)) return cb(null, true);
+        cb(new Error('Please choose a JPG, PNG or WEBP image.'), false);
+    },
+});
+
+router.get('/events/:id/live-stream-types', liveStreamController.listTypes);
+router.post('/events/:id/live-stream-types', liveStreamController.createType);
+router.put('/events/:id/live-stream-types/reorder', liveStreamController.reorderTypes);
+router.put('/live-stream-types/:typeId', liveStreamController.updateType);
+router.delete('/live-stream-types/:typeId', liveStreamController.removeType);
+router.get('/events/:id/live-streams', liveStreamController.list);
+router.post('/events/:id/live-streams', liveStreamController.create);
+router.post(
+    '/events/:id/live-streams/cover',
+    (req, res, next) => {
+        liveStreamCoverUpload.single('file')(req, res, (err) => {
+            if (err) {
+                return res.status(400).json({
+                    success: false,
+                    message: err.code === 'LIMIT_FILE_SIZE'
+                        ? `That image is larger than ${Math.round(liveStreamService.MAX_IMAGE_BYTES / (1024 * 1024))}MB.`
+                        : err.message || 'That image could not be uploaded.',
+                });
+            }
+            next();
+        });
+    },
+    liveStreamController.uploadCover,
+);
+router.get('/live-streams/:streamId', liveStreamController.getOne);
+router.put('/live-streams/:streamId', liveStreamController.update);
+router.delete('/live-streams/:streamId', liveStreamController.remove);
 
 /**
  * The organizer's notifications from the mobile app (Home → Send

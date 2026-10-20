@@ -1,6 +1,7 @@
 const {
     Event, WebsiteClient, EventAgendaItem, EventNotification, EventFamilyMember,
     EventGalleryItem, EventGalleryCategory, EventParticipant, EventWish,
+    EventLiveStream, EventLiveStreamType,
 } = require('../models');
 
 /**
@@ -85,6 +86,8 @@ const ITEM_ROUTES = [
     [/^\/event-notifications\/(\d+)/, EventNotification],
     [/^\/family-members\/(\d+)/, EventFamilyMember],
     [/^\/wishes\/(\d+)/, EventWish],
+    [/^\/live-streams\/(\d+)/, EventLiveStream],
+    [/^\/live-stream-types\/(\d+)/, EventLiveStreamType],
     [/^\/gallery\/categories\/(\d+)/, EventGalleryCategory],
     [/^\/gallery\/(\d+)/, EventGalleryItem],
     [/^\/participants\/(\d+)/, EventParticipant],
