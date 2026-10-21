@@ -757,6 +757,8 @@ const eventIdOf = (raw) => {
  * `can_respond` is the one-time rule stated once, here, so the app never has
  * to re-derive it: true only while no answer is on the row.
  */
+const RSVP_EVENT_ATTRS = ['id', 'website_client_id', 'menu_ids', 'event_category_id', 'end_date', 'rsvp_settings'];
+
 const getMyRsvp = async (clientId, rawEventId) => {
     const eventId = eventIdOf(rawEventId);
     const where = await participantWhereForClient(clientId, eventId);
@@ -765,15 +767,30 @@ const getMyRsvp = async (clientId, rawEventId) => {
     if (!guest) {
         const owned = await Event.findOne({
             where: { id: eventId, website_client_id: clientId },
-            attributes: ['id'],
+            attributes: RSVP_EVENT_ATTRS,
         });
-        if (owned) return { is_host: true, can_respond: false, rsvp_enabled: false, rsvp: null };
-        throw ApiError.notFound('You are not a guest of this event.');
+        if (!owned) throw ApiError.notFound('You are not a guest of this event.');
+        /*
+          The HOST gets the guest's form as configured (Jamal, 2026-10-21) —
+          the app's Quick View previews it. Still `is_host` and never
+          `can_respond`: the host has no guest row, so there is nothing to
+          answer (submitMyRsvp refuses them as before).
+        */
+        return { ...(await rsvpFormFor(owned)), is_host: true, can_respond: false, rsvp: null };
     }
 
-    const event = await Event.findByPk(eventId, {
-        attributes: ['id', 'website_client_id', 'menu_ids', 'event_category_id', 'end_date', 'rsvp_settings'],
-    });
+    const event = await Event.findByPk(eventId, { attributes: RSVP_EVENT_ATTRS });
+    const form = await rsvpFormFor(event);
+    return {
+        ...form,
+        is_host: false,
+        can_respond: form.rsvp_enabled && !form.deadline_passed && guest.response_type === 'none',
+        rsvp: presentMyRsvp(guest),
+    };
+};
+
+/** The RSVP form an event asks its guests — switches, settings and options. */
+const rsvpFormFor = async (event) => {
     /*
       Two switches, both must be on: the plan + the event's RSVP menu
       (`rsvpEnabledFor`), and the organizer's own Enable RSVP. `settings` is
@@ -795,16 +812,13 @@ const getMyRsvp = async (clientId, rawEventId) => {
     ]);
 
     return {
-        is_host: false,
         rsvp_enabled: rsvpOn,
         deadline_passed: closed,
-        can_respond: rsvpOn && !closed && guest.response_type === 'none',
         settings,
         relationship_options: relationships.map((r) => ({ id: r.id, name: r.name })),
         food_preference_options: foods.map((r) => ({ id: r.id, name: r.name })),
         /** "No Preference" — the form starts on it when nothing is saved yet. */
         default_food_preference_option_id: rsvpDefaultFoodId(foods),
-        rsvp: presentMyRsvp(guest),
     };
 };
 

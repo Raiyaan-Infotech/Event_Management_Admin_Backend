@@ -24,9 +24,16 @@ const clientPortalService = require('./clientPortal.service');
  * only the ones the plan grants. Every Default menu is added after them.
  */
 const DEFAULT_SLUGS = [
-    'splash-screens', 'event-invitation', 'venue', 'agenda', 'family',
+    'event-invitation', 'venue', 'agenda', 'family',
     'participants', 'rsvp', 'gallery', 'contact-us',
 ];
+
+/**
+ * Never a Quick Action (Jamal, 2026-10-21): Splash Screens and Messages moved
+ * to the app's Quick View card, so they are left out here even though they are
+ * Default menus (same idea as the event page's `_notTiles`).
+ */
+const NOT_QUICK_ACTIONS = new Set(['splash-screens', 'splash-screen', 'messages']);
 
 const baseSlug = (slug) => String(slug || '').replace(/-\d+$/, '');
 
@@ -48,7 +55,7 @@ const availableFor = async (clientId) => {
     const out = [];
     for (const m of menus) {
         const slug = baseSlug(m.slug);
-        if (!slug || seen.has(slug)) continue;
+        if (!slug || seen.has(slug) || NOT_QUICK_ACTIONS.has(slug)) continue;
         seen.add(slug);
         out.push({
             slug,
@@ -127,4 +134,4 @@ const save = async (clientId, slugs) => {
     return shape(available, list);
 };
 
-module.exports = { get, save, DEFAULT_SLUGS, baseSlug };
+module.exports = { get, save, DEFAULT_SLUGS, NOT_QUICK_ACTIONS, baseSlug };

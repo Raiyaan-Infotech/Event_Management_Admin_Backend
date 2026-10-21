@@ -42,7 +42,8 @@ const ok = (label, cond, extra = '') => {
         const slugs = def.available.map((m) => m.slug);
         ok('available has one entry per base slug', new Set(slugs).size === slugs.length && slugs.every((s) => !/-\d+$/.test(s)));
         ok('the 4 Home Quick Action MENUS are offered (from Menu Management)', ['qr-code', 'notifications', 'my-plan', 'my-briefcase'].every((s) => def.available.some((m) => m.slug === s && m.kind === 'quick_action' && m.menu_id)));
-        ok('available follows Menu Management order (Splash, Invitation, Venue, Agenda, ...)', JSON.stringify(slugs.slice(0, 4)) === JSON.stringify(['splash-screens', 'event-invitation', 'venue', 'agenda']), JSON.stringify(slugs.slice(0, 6)));
+        ok('available follows Menu Management order (Invitation, Venue, Agenda, ...)', JSON.stringify(slugs.slice(0, 3)) === JSON.stringify(['event-invitation', 'venue', 'agenda']), JSON.stringify(slugs.slice(0, 6)));
+        ok('Splash Screens / Messages are never Quick Actions (moved to Quick View)', !slugs.some((s) => svc.NOT_QUICK_ACTIONS.has(s)) && !def.selected.some((s) => svc.NOT_QUICK_ACTIONS.has(s)), JSON.stringify(def.selected));
         ok('available entries carry name and icon', def.available.every((m) => m.name && 'icon' in m));
         ok('no saved list → default set, all granted', !def.is_custom && def.selected.every((s) => slugs.includes(s)), JSON.stringify(def.selected));
         const defaults = def.available.filter((m) => m.is_default).map((m) => m.slug);

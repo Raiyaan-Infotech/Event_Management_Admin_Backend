@@ -34,7 +34,7 @@ const BACKUP_DIR = 'D:\\Jamal\\prod-backups';
 
 const DEFAULT_SLUGS = [
     'splash-screens', 'event-invitation', 'participants', 'venue', 'rsvp', 'agenda', 'guests',
-    'contact-us', 'messages', 'social-links',
+    'contact-us', 'messages',
 ];
 const INACTIVE_SLUGS = ['social-wall'];
 
