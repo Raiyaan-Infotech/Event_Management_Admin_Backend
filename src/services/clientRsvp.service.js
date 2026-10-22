@@ -6,6 +6,7 @@ const {
 } = require('../models');
 const { Op, fn, col, literal } = Sequelize;
 const ApiError = require('../utils/apiError');
+const { checkMobile, invalidMobileMessage } = require('../utils/phone');
 const notifications = require('./clientNotification.service');
 
 /**
@@ -629,6 +630,34 @@ const update = async (clientId, id, body = {}) => {
         const value = String(body.accommodation || 'unknown').toLowerCase();
         if (!ACCOMMODATION.includes(value)) throw ApiError.badRequest('Invalid accommodation value.');
         data.accommodation = value;
+    }
+
+    /*
+      The phone number, from the app's Edit Response (Jamal, 2026-10-22): the
+      same country-code rule as Add Guest / Add Participant, stored as the bare
+      national number + dial_code, and never a number another participant of
+      this event already has.
+    */
+    if (body.mobile !== undefined || body.dial_code !== undefined) {
+        const dial = body.dial_code !== undefined ? body.dial_code : guest.dial_code;
+        const mobile = body.mobile !== undefined ? body.mobile : guest.mobile;
+        const res = checkMobile(dial || '+91', mobile);
+        if (!res.ok) throw ApiError.badRequest(invalidMobileMessage(dial || '+91'));
+        const key = res.national.slice(-10);
+        const clash = await EventParticipant.findOne({
+            where: {
+                event_id: guest.event_id,
+                id: { [Op.ne]: guest.id },
+                [Op.and]: Sequelize.where(
+                    fn('RIGHT', fn('REGEXP_REPLACE', col('mobile'), '[^0-9]', ''), 10),
+                    key,
+                ),
+            },
+            attributes: ['id', 'name'],
+        });
+        if (clash) throw ApiError.conflict(`${clash.name} is already a participant of this event with this mobile number.`);
+        data.mobile = res.national;
+        data.dial_code = res.dialCode;
     }
 
     if (!Object.keys(data).length) throw ApiError.badRequest('Nothing to update.');
