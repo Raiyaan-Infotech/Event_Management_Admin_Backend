@@ -1,5 +1,6 @@
 const { sequelize, Guest, GuestGroup } = require('../models');
 const ApiError = require('../utils/apiError');
+const { checkMobile } = require('../utils/phone');
 const guestService = require('./clientGuest.service');
 
 /**
@@ -255,6 +256,18 @@ const analyse = async (clientId, { content }) => {
         const whatsapp = cleanPhone(get('whatsapp'));
         if (mobile.error) rowErrors.push(mobile.error);
         if (whatsapp.error) rowErrors.push(whatsapp.error);
+        // Must be a real mobile for its country code (Jamal, 2026-10-22). A
+        // number without "+code" is read as India (+91), the import default.
+        let dialCode = '+91';
+        if (mobile.value) {
+            const res = checkMobile('+91', mobile.value);
+            if (!res.ok) {
+                rowErrors.push('Mobile number is not valid for its country code (a number without +code is read as India +91).');
+            } else {
+                dialCode = res.dialCode;
+                mobile.value = res.national;
+            }
+        }
 
         if (rowErrors.length) {
             errors.push({ row: rowNumber, name: firstName || email || `Row ${rowNumber}`, errors: rowErrors });
@@ -292,7 +305,7 @@ const analyse = async (clientId, { content }) => {
             last_name: get('last_name').trim().slice(0, 100) || null,
             name: guestService.composeName(firstName, get('last_name').trim(), firstName),
             email: email || null,
-            dial_code: '+91',
+            dial_code: dialCode,
             mobile: mobile.value,
             whatsapp: whatsapp.value,
             company: get('company').trim().slice(0, 200) || null,

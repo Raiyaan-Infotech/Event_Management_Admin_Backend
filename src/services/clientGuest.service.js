@@ -232,7 +232,7 @@ const getGuestCapacity = async (clientId) => {
 // ── Writes ─────────────────────────────────────────────────────────────────
 
 const createGuest = async (clientId, companyId, body) => {
-    const data = await normalisePerson(clientId, body, { partial: false });
+    const data = await normalisePerson(clientId, body, { partial: false, checkMobileCountry: true });
 
     const guest = await sequelize.transaction(async (transaction) => {
         await assertGuestCapacity(clientId, 1, { transaction });
@@ -276,7 +276,7 @@ const updateGuest = async (clientId, guestId, body) => {
     const guest = await Guest.findOne({ where: { id: guestId, website_client_id: clientId } });
     if (!guest) return null;
 
-    const data = await normalisePerson(clientId, body, { partial: true, existing: guest.toJSON() });
+    const data = await normalisePerson(clientId, body, { partial: true, existing: guest.toJSON(), checkMobileCountry: true });
     if (data.mobile) {
         const clash = await findByMobile(clientId, data.mobile, { excludeId: guest.id });
         if (clash) throw ApiError.conflict(`${clash.name} is already in your guest list with this mobile number.`);

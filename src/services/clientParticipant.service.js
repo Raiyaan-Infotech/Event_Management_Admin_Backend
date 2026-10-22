@@ -245,7 +245,7 @@ const clashOnEvent = (eventId, mobile, { excludeId = null, transaction } = {}) =
  * Max RSVP per event, linked to the phone-book guest with the same mobile.
  */
 const createParticipant = async (clientId, companyId, body = {}) => {
-    const person = await normalisePerson(clientId, body, { partial: false, withGroup: false });
+    const person = await normalisePerson(clientId, body, { partial: false, withGroup: false, checkMobileCountry: true });
     const attendance = normaliseAttendance(body);
 
     const guest = await sequelize.transaction(async (transaction) => {
@@ -307,7 +307,7 @@ const updateParticipant = async (clientId, id, body = {}) => {
     const guest = await EventParticipant.findOne({ where: { id: Number(id) || 0, website_client_id: clientId } });
     if (!guest) return null;
 
-    const person = await normalisePerson(clientId, body, { partial: true, existing: guest.toJSON(), withGroup: false });
+    const person = await normalisePerson(clientId, body, { partial: true, existing: guest.toJSON(), withGroup: false, checkMobileCountry: true });
     const attendance = normaliseAttendance(body, { existing: guest.toJSON() });
     const data = { ...person, ...attendance };
 

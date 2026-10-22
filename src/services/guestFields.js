@@ -5,6 +5,7 @@ const {
     GuestGroup,
 } = require('../models');
 const ApiError = require('../utils/apiError');
+const { checkMobile, invalidMobileMessage } = require('../utils/phone');
 const subscriptionPlanService = require('./subscriptionPlan.service');
 
 /**
@@ -75,7 +76,9 @@ const pick = (body, fields) => {
  * Email is OPTIONAL and mobile MANDATORY (§576): an invitation is shared to a
  * phone number, so that is the field a guest cannot be without.
  */
-const normalisePerson = async (clientId, body, { partial = false, existing = null, withGroup = true } = {}) => {
+const normalisePerson = async (clientId, body, {
+    partial = false, existing = null, withGroup = true, checkMobileCountry = false,
+} = {}) => {
     const data = {};
     // `withGroup: false` for an event PARTICIPANT: a participant has no guest
     // group (Jamal, 2026-10-12) — only the phone-book guest does.
@@ -150,6 +153,21 @@ const normalisePerson = async (clientId, body, { partial = false, existing = nul
             throw ApiError.badRequest('Please enter a valid phone number.');
         }
         data[field] = value;
+    }
+
+    // Guests AND participants (`checkMobileCountry`): the mobile must be a
+    // real mobile number for its country code (Jamal, 2026-10-22). Stored as
+    // the bare national number + dial_code. Family members keep the loose
+    // check above (their number is optional and never signed in with).
+    if (checkMobileCountry && (has('mobile') || has('dial_code'))) {
+        const mobile = data.mobile !== undefined ? data.mobile : existing?.mobile;
+        const dial = data.dial_code !== undefined ? data.dial_code : existing?.dial_code;
+        if (mobile) {
+            const res = checkMobile(dial || '+91', mobile);
+            if (!res.ok) throw ApiError.badRequest(invalidMobileMessage(dial || '+91'));
+            data.mobile = res.national;
+            data.dial_code = res.dialCode;
+        }
     }
 
     const optional = {

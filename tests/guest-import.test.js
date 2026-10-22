@@ -50,7 +50,7 @@ const ok = (l, c, x = '') => { if (c) { pass++; console.log(`  PASS  ${l}`); } e
     ok('Accepted -> accepted/yes', amit.rsvp_status === 'accepted' && amit.response_type === 'yes');
     ok('Plus One Yes/1 kept', amit.plus_one === 1 && amit.plus_one_count === 1);
     ok('address parsed', amit.city === 'Chennai' && amit.postal_code === '600001');
-    ok('phone kept intact', amit.mobile === '+919876543210', amit.mobile);
+    ok('phone stored as national + dial code', amit.mobile === '9876543210' && amit.dial_code === '+91', amit.mobile);
     ok('invite_source is import', amit.invite_source === 'import');
 
     // Row-level checks run only on rows that survived, since a duplicate skip is
