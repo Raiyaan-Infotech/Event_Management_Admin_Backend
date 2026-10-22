@@ -246,7 +246,15 @@ const clashOnEvent = (eventId, mobile, { excludeId = null, transaction } = {}) =
  */
 const createParticipant = async (clientId, companyId, body = {}) => {
     const person = await normalisePerson(clientId, body, { partial: false, withGroup: false, checkMobileCountry: true });
-    const attendance = normaliseAttendance(body);
+    // A participant the organizer adds signs straight in and is never shown
+    // the RSVP form, so they are saved as ATTENDING unless the request says
+    // otherwise (Jamal, 2026-10-22). The app no longer asks the status.
+    const given = (f) => body[f] !== undefined && body[f] !== null && body[f] !== '';
+    const attendance = normaliseAttendance(
+        given('response_type') || given('rsvp_status')
+            ? body
+            : { ...body, response_type: 'yes', rsvp_status: 'accepted' },
+    );
 
     const guest = await sequelize.transaction(async (transaction) => {
         const event = await ownEvent(clientId, body.event_id, transaction);
