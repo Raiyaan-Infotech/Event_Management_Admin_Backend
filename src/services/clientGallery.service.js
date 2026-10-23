@@ -668,6 +668,11 @@ const storeVideoPoster = async (videoFile, eventId, companyId) => {
  * its own caps (10 MB, 1 minute), a required title, an optional description,
  * an optional cover (the host's picture instead of the first frame) and
  * optional background music that REPLACES the clip's own sound.
+ *
+ * `short.asVideo` (2026-10-23): an ORDINARY video sent through the same
+ * pages (Upload Video) — music, cover, title and description as a short, but
+ * the video's own limits (5 MB, any shape), title optional, not marked
+ * `is_short`.
  */
 const uploadItem = async (clientId, eventId, file, body = {}, short = null) => {
     if (!file || !file.buffer) throw ApiError.badRequest('Please choose a file to upload.');
@@ -679,25 +684,27 @@ const uploadItem = async (clientId, eventId, file, body = {}, short = null) => {
     if (!isImage && !isVideo) {
         throw ApiError.badRequest('Please choose a JPG, PNG, WEBP or GIF image, or an MP4, WebM or MOV video.');
     }
-    if (short && !isVideo) throw ApiError.badRequest('A short must be an MP4, WebM or MOV video.');
+    if (short && !isVideo) throw ApiError.badRequest('Please choose an MP4, WebM or MOV video.');
+    // A real Short (its own caps and rules), not a video sent with details.
+    const isShortItem = Boolean(short) && !short.asVideo;
 
     const type = isImage ? 'image' : 'video';
     const size = Number(file.size || file.buffer.length || 0);
 
-    const perFileCap = isImage ? MAX_IMAGE_BYTES : short ? MAX_SHORT_BYTES : MAX_VIDEO_BYTES;
+    const perFileCap = isImage ? MAX_IMAGE_BYTES : isShortItem ? MAX_SHORT_BYTES : MAX_VIDEO_BYTES;
     if (size > perFileCap) {
         throw ApiError.badRequest(
-            `${isImage ? 'Images' : short ? 'Shorts' : 'Videos'} must be ${mb(perFileCap)}MB or smaller. This file is ${mb(size)}MB.`
+            `${isImage ? 'Images' : isShortItem ? 'Shorts' : 'Videos'} must be ${mb(perFileCap)}MB or smaller. This file is ${mb(size)}MB.`
         );
     }
 
-    // A short's own checks, before anything is counted or stored.
+    // The details' own checks, before anything is counted or stored.
     let shortTitle = null;
     let shortDescription = null;
     let shortSeconds = null;
     if (short) {
         shortTitle = cleanText(body.title, 150);
-        if (!shortTitle) throw ApiError.badRequest('Please enter a title for the short.');
+        if (isShortItem && !shortTitle) throw ApiError.badRequest('Please enter a title for the short.');
         shortDescription = cleanText(body.description, 500);
         if (short.cover && !IMAGE_MIMES.includes(short.cover.mimetype)) {
             throw ApiError.badRequest('The cover must be a JPG, PNG or WEBP image.');
@@ -708,10 +715,10 @@ const uploadItem = async (clientId, eventId, file, body = {}, short = null) => {
         // Unreadable length / shape (no ffmpeg) is let through: the app trims
         // to a minute and refuses landscape before it sends.
         const { duration: seconds, portrait } = await videoInfo(file.buffer);
-        if (portrait === false) {
+        if (isShortItem && portrait === false) {
             throw ApiError.badRequest('Shorts must be a vertical (portrait) video.');
         }
-        if (seconds !== null && seconds > MAX_SHORT_SECONDS + 1) {
+        if (isShortItem && seconds !== null && seconds > MAX_SHORT_SECONDS + 1) {
             throw ApiError.badRequest(`Shorts can be up to 1 minute long. This video is ${Math.round(seconds)} seconds.`);
         }
         shortSeconds = seconds === null ? null : Math.round(seconds);
@@ -769,10 +776,10 @@ const uploadItem = async (clientId, eventId, file, body = {}, short = null) => {
             const musicStart = Math.min(3600, Math.max(0, Number.parseInt(body.music_start, 10) || 0));
             out = await addMusic(file.buffer, file.mimetype, short.music.buffer, { start: musicStart });
         } catch (e) {
-            throw ApiError.badRequest('The music could not be added to this short. Please try another song.');
+            throw ApiError.badRequest(`The music could not be added to this ${isShortItem ? 'short' : 'video'}. Please try another song.`);
         }
         if (out.buffer.length > perFileCap) {
-            throw ApiError.badRequest(`Shorts must be ${mb(perFileCap)}MB or smaller once the music is added.`);
+            throw ApiError.badRequest(`${isShortItem ? 'Shorts' : 'Videos'} must be ${mb(perFileCap)}MB or smaller once the music is added.`);
         }
         toStore = {
             ...file,
@@ -802,7 +809,7 @@ const uploadItem = async (clientId, eventId, file, body = {}, short = null) => {
             };
         } else if (mute && out.applied) {
             // Muted but somehow over the cap — refuse rather than keep the sound.
-            throw ApiError.badRequest(`${short ? 'Shorts' : 'Videos'} must be ${mb(perFileCap)}MB or smaller.`);
+            throw ApiError.badRequest(`${isShortItem ? 'Shorts' : 'Videos'} must be ${mb(perFileCap)}MB or smaller.`);
         }
     }
 
@@ -838,7 +845,7 @@ const uploadItem = async (clientId, eventId, file, body = {}, short = null) => {
         size_bytes: Number(stored.size || size),
         category_id: await categoryIdOrDefault(event.id, body.category_id),
         caption: typeof body.caption === 'string' ? body.caption.slice(0, 300) : null,
-        is_short: Boolean(short),
+        is_short: isShortItem,
         title: shortTitle,
         description: shortDescription,
         duration_seconds: shortSeconds,
@@ -994,9 +1001,14 @@ module.exports = {
     removeCategory,
     uploadItem,
     /** Upload Shorts: multer `fields` → the clip, its music and its cover. */
+    // `kind: 'video'` = Upload Video through the same pages (video limits).
     uploadShort: (clientId, eventId, files = {}, body = {}) => uploadItem(
         clientId, eventId, files.file?.[0], body,
-        { music: files.music?.[0] || null, cover: files.cover?.[0] || null },
+        {
+            music: files.music?.[0] || null,
+            cover: files.cover?.[0] || null,
+            asVideo: body.kind === 'video',
+        },
     ),
     updateItem,
     reorderItems,
