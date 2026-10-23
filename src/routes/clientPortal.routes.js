@@ -659,6 +659,22 @@ router.post(
 );
 router.put('/events/:id/gallery/reorder', galleryController.reorder);
 router.put('/gallery/:itemId', galleryController.update);
+// A video's / short's cover, changed after upload (image ≤ the photo cap).
+router.post(
+    '/gallery/:itemId/cover',
+    (req, res, next) => {
+        galleryUpload.single('file')(req, res, (err) => {
+            if (err) {
+                return res.status(400).json({
+                    success: false,
+                    message: err.message || 'That picture could not be uploaded.',
+                });
+            }
+            next();
+        });
+    },
+    galleryController.replaceCover,
+);
 router.delete('/gallery/:itemId', galleryController.remove);
 
 // Gallery categories — per event, host-authored. Declared after the item routes

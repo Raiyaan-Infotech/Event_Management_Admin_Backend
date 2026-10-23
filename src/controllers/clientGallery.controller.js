@@ -19,6 +19,12 @@ const upload = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, result, 'Uploaded.');
 });
 
+/** Change a video's / short's cover: `file` = the picture. */
+const replaceCover = asyncHandler(async (req, res) => {
+    const result = await service.replaceCover(req.websiteClient.id, req.params.itemId, req.file);
+    return ApiResponse.success(res, result, 'Cover updated.');
+});
+
 /** Upload Shorts: `file` (the clip) + optional `music` and `cover`. */
 const uploadShort = asyncHandler(async (req, res) => {
     const result = await service.uploadShort(
@@ -68,6 +74,6 @@ const reorder = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
-    list, usage, upload, uploadShort, update, reorder, remove,
+    list, usage, upload, uploadShort, replaceCover, update, reorder, remove,
     listCategories, createCategory, updateCategory, uploadCategoryCover, removeCategory,
 };

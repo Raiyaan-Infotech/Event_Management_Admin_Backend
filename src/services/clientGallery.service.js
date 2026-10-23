@@ -927,6 +927,16 @@ const updateItem = async (clientId, itemId, body = {}) => {
     if (!item) throw ApiError.notFound('That gallery item was not found.');
 
     if (body.caption !== undefined) item.caption = cleanText(body.caption, 300);
+    // A short's / video's details, edited after upload (Jamal, 2026-10-24).
+    // A short keeps a title — it is what its card shows.
+    if (item.type === 'video' && body.title !== undefined) {
+        const title = cleanText(body.title, 150);
+        if (!title && item.is_short) throw ApiError.badRequest('Please enter a title for the short.');
+        item.title = title;
+    }
+    if (item.type === 'video' && body.description !== undefined) {
+        item.description = cleanText(body.description, 500);
+    }
     if (body.show_in_app !== undefined) {
         item.show_in_app = [true, 'true', 1, '1'].includes(body.show_in_app);
     }
@@ -945,6 +955,34 @@ const updateItem = async (clientId, itemId, body = {}) => {
     await item.save();
 
     return { item: present(item), categories: await listCategories(clientId, item.event_id) };
+};
+
+/**
+ * Change a video's / short's cover after upload (Jamal, 2026-10-24): the
+ * picture becomes its thumbnail (~480 px, like every gallery thumbnail) and
+ * the old thumbnail file is deleted. Host only; videos only — a photo IS its
+ * own picture.
+ */
+const replaceCover = async (clientId, itemId, file) => {
+    if (!file || !file.buffer) throw ApiError.badRequest('Please choose a picture.');
+    if (!IMAGE_MIMES.includes(file.mimetype)) {
+        throw ApiError.badRequest('The cover must be a JPG, PNG or WEBP image.');
+    }
+    const item = await EventGalleryItem.findOne({
+        where: { id: Number(itemId) || 0, website_client_id: clientId },
+    });
+    if (!item) throw ApiError.notFound('That gallery item was not found.');
+    if (item.type !== 'video') throw ApiError.badRequest('Only a video has a cover to change.');
+
+    const url = await storeImageThumb(file, item.event_id, item.company_id || 1);
+    if (!url) throw ApiError.badRequest('That picture could not be stored.');
+
+    const old = item.thumbnail_url;
+    item.thumbnail_url = url;
+    await item.save();
+    if (old && old !== url && old !== item.url) await dropFile(old, item.company_id);
+
+    return { item: present(item) };
 };
 
 /**
@@ -1011,6 +1049,7 @@ module.exports = {
         },
     ),
     updateItem,
+    replaceCover,
     reorderItems,
     removeItem,
     purgeEvent,
