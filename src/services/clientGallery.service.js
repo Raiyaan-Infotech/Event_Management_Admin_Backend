@@ -765,7 +765,9 @@ const uploadItem = async (clientId, eventId, file, body = {}, short = null) => {
         // The song replaces the clip's sound, fitted to its length.
         let out;
         try {
-            out = await addMusic(file.buffer, file.mimetype, short.music.buffer);
+            // The music trim: where in the song the short's music starts.
+            const musicStart = Math.min(3600, Math.max(0, Number.parseInt(body.music_start, 10) || 0));
+            out = await addMusic(file.buffer, file.mimetype, short.music.buffer, { start: musicStart });
         } catch (e) {
             throw ApiError.badRequest('The music could not be added to this short. Please try another song.');
         }

@@ -230,7 +230,7 @@ const videoDuration = async (buffer) => (await videoInfo(buffer)).duration;
  * THROWS on failure — unlike processVideo, a short the host asked to carry
  * music must not quietly go up without it. The caller turns it into a 400.
  */
-const addMusic = async (videoBuffer, videoMime, musicBuffer) => {
+const addMusic = async (videoBuffer, videoMime, musicBuffer, { start = 0 } = {}) => {
     if (!ffmpegPath) throw new Error('ffmpeg is not available');
     const [vIn, outFile] = tempPaths('vm', 'mp4');
     const [mIn] = tempPaths('vm-music', 'audio');
@@ -243,11 +243,19 @@ const addMusic = async (videoBuffer, videoMime, musicBuffer) => {
 
         const playable = videoMime !== 'video/webm' && codec === 'h264' && pixFmt === 'yuv420p';
         const fade = Math.min(1.5, duration / 4);
+        // The music trim: the song starts this far in. Ignored when it would
+        // leave less song than the clip (the app sends 0 then).
+        const from = Number(start) > 0 && music.duration && Number(start) + duration <= music.duration + 0.5
+            ? Number(start)
+            : 0;
         await run([
             '-y',
             '-i', vIn,
-            // Loop the song for as long as the picture needs it.
-            '-stream_loop', '-1', '-i', mIn,
+            // Loop the song for as long as the picture needs it, starting at
+            // the chosen second.
+            '-stream_loop', '-1',
+            ...(from > 0 ? ['-ss', from.toFixed(2)] : []),
+            '-i', mIn,
             '-map', '0:v:0', '-map', '1:a:0',
             ...(playable
                 ? ['-c:v', 'copy']
