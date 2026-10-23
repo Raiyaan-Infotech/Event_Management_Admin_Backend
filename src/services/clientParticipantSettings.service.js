@@ -15,7 +15,11 @@ const DEFAULTS = Object.freeze({
     profile_photo: true,
     name: true,
     relationship: true,
-    attendance_status: true,
+    // Guests' Participants list / profile: the participant's mobile and
+    // email (Jamal, 2026-10-24). OFF unless the host turns them on — they
+    // are personal contact details.
+    mobile: false,
+    email: false,
 });
 
 const parse = (raw) => {
@@ -42,7 +46,11 @@ const settingsOf = (event) => {
         profile_photo: bool(stored.profile_photo, DEFAULTS.profile_photo),
         name: true, // Always true — a row without a name cannot be identified
         relationship: bool(stored.relationship, DEFAULTS.relationship),
-        attendance_status: bool(stored.attendance_status, DEFAULTS.attendance_status),
+        mobile: bool(stored.mobile, DEFAULTS.mobile),
+        email: bool(stored.email, DEFAULTS.email),
+        // Removed (Jamal, 2026-10-24): guests never see another participant's
+        // RSVP. Always false, so an older app build hides it too.
+        attendance_status: false,
     };
 };
 
@@ -112,7 +120,9 @@ const update = async (clientId, rawEventId, body = {}) => {
         profile_photo: bool(body.profile_photo, current.profile_photo),
         name: true,
         relationship: bool(body.relationship, current.relationship),
-        attendance_status: bool(body.attendance_status, current.attendance_status),
+        mobile: bool(body.mobile, current.mobile),
+        email: bool(body.email, current.email),
+        attendance_status: false,
     };
 
     await event.update({ participant_settings: next });

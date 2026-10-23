@@ -14,10 +14,10 @@ const getSettings = asyncHandler(async (req, res) => {
 
 const updateSettings = asyncHandler(async (req, res) => {
     const {
-        profile_screen, profile_photo, name, relationship, attendance_status,
+        profile_screen, profile_photo, name, relationship, mobile, email,
     } = req.body;
     const data = await participantSettingsService.update(req.websiteClient.id, req.params.id, {
-        profile_screen, profile_photo, name, relationship, attendance_status,
+        profile_screen, profile_photo, name, relationship, mobile, email,
     });
     logger.logRequest(req, `Client ${req.websiteClient.id} updated participant settings of event ${req.params.id}`);
     return ApiResponse.success(res, data, 'Participant settings saved');

@@ -28,6 +28,7 @@ const notificationTrigger = require('./notificationTrigger.service');
 const participantService = require('./clientParticipant.service');
 const guestService = require('./clientGuest.service');
 const rsvpSettings = require('./clientRsvpSettings.service');
+const participantSettings = require('./clientParticipantSettings.service');
 const rsvpService = require('./clientRsvp.service');
 const notifications = require('./clientNotification.service');
 const clientPortalService = require('./clientPortal.service');
@@ -863,14 +864,14 @@ const participantsDirectory = async (clientId, rawEventId, viewer = null) => {
     // check refuses — a read, so nothing leaks, and the guest waits one round
     // trip instead of two.
     const [event, membership, guests] = await Promise.all([
-        Event.findOne({ where: { id: eventId }, attributes: ['id', 'website_client_id'] }),
+        Event.findOne({ where: { id: eventId }, attributes: ['id', 'website_client_id', 'participant_settings'] }),
         EventParticipant.findOne({
             where,
             attributes: ['id'],
         }),
         EventParticipant.findAll({
             where: { event_id: eventId, participant_client_id: { [Op.ne]: null } },
-            attributes: ['id', 'name', 'title', 'photo', 'relationship', 'rsvp_status'],
+            attributes: ['id', 'name', 'title', 'photo', 'relationship', 'mobile', 'email'],
             order: [['name', 'ASC']],
         }),
     ]);
@@ -881,13 +882,17 @@ const participantsDirectory = async (clientId, rawEventId, viewer = null) => {
         throw ApiError.notFound('You are not a guest of this event.');
     }
 
+    // Mobile / email only when the host switched them on in Participant
+    // Settings; RSVP status never (Jamal, 2026-10-24).
+    const shown = participantSettings.settingsOf(event);
     return guests.map((g) => ({
         id: g.id,
         full_name: g.name,
         title: g.title,
         photo: g.photo,
         relationship: g.relationship,
-        rsvp_status: g.rsvp_status,
+        ...(shown.mobile ? { mobile: g.mobile } : {}),
+        ...(shown.email ? { email: g.email } : {}),
         has_joined: true,
     }));
 };
