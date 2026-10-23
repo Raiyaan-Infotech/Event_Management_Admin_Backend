@@ -70,7 +70,20 @@ const probe = (file) => new Promise((resolve) => {
         const a = err.match(/Audio: (\w+)/);
         const d = err.match(/Duration: (\d+):(\d+):(\d+(?:\.\d+)?)/);
         const duration = d ? Number(d[1]) * 3600 + Number(d[2]) * 60 + Number(d[3]) : null;
-        resolve({ codec: v && v[1], pixFmt: v && v[2], audio: a ? a[1] : null, duration });
+        // The picture's stored size, and the turn a phone applies when it
+        // plays it ("rotate: 90" / "displaymatrix: rotation of -90.00").
+        const line = (err.match(/Video: [^\n]*/) || [''])[0];
+        const size = line.match(/, (\d{2,5})x(\d{2,5})/);
+        const turn = err.match(/rotation of (-?\d+(?:\.\d+)?) degrees/) || err.match(/rotate\s*:\s*(-?\d+)/);
+        resolve({
+            codec: v && v[1],
+            pixFmt: v && v[2],
+            audio: a ? a[1] : null,
+            duration,
+            width: size ? Number(size[1]) : null,
+            height: size ? Number(size[2]) : null,
+            rotation: turn ? Math.round(Number(turn[1])) : 0,
+        });
     });
 });
 
@@ -179,22 +192,33 @@ const videoPoster = async (buffer) => {
 };
 
 /**
- * A video's length in seconds, or null when it cannot be read (never throws).
- * Shorts are refused over a minute.
+ * A video's length in seconds and whether it plays PORTRAIT (taller than
+ * wide, the phone's rotation counted). Either is null when it cannot be read
+ * (never throws). Shorts are refused over a minute or when landscape.
  */
-const videoDuration = async (buffer) => {
-    if (!ffmpegPath || !buffer || !buffer.length) return null;
-    const [inFile] = tempPaths('vdur', 'mp4');
+const videoInfo = async (buffer) => {
+    const none = { duration: null, portrait: null };
+    if (!ffmpegPath || !buffer || !buffer.length) return none;
+    const [inFile] = tempPaths('vinfo', 'mp4');
     try {
         fs.writeFileSync(inFile, buffer);
-        const { duration } = await probe(inFile);
-        return Number.isFinite(duration) ? duration : null;
+        const { duration, width, height, rotation } = await probe(inFile);
+        const turned = Math.abs(rotation || 0) % 180 === 90;
+        const shownW = turned ? height : width;
+        const shownH = turned ? width : height;
+        return {
+            duration: Number.isFinite(duration) ? duration : null,
+            portrait: shownW && shownH ? shownH > shownW : null,
+        };
     } catch (_) {
-        return null;
+        return none;
     } finally {
         cleanup(inFile);
     }
 };
+
+/** A video's length in seconds, or null when it cannot be read. */
+const videoDuration = async (buffer) => (await videoInfo(buffer)).duration;
 
 /**
  * A short's background music (Jamal, 2026-10-23): the song REPLACES the
@@ -257,4 +281,4 @@ const selfCheck = () => {
 };
 ensureBinary().then(selfCheck);
 
-module.exports = { processVideo, videoPoster, videoDuration, addMusic };
+module.exports = { processVideo, videoPoster, videoDuration, videoInfo, addMusic };

@@ -4,7 +4,7 @@ const {
 const { Op } = Sequelize;
 const ApiError = require('../utils/apiError');
 const mediaService = require('./media.service');
-const { processVideo, videoPoster, videoDuration, addMusic } = require('../utils/videoProcess');
+const { processVideo, videoPoster, videoInfo, addMusic } = require('../utils/videoProcess');
 const subscriptionPlanService = require('./subscriptionPlan.service');
 const notificationTrigger = require('./notificationTrigger.service');
 
@@ -705,9 +705,12 @@ const uploadItem = async (clientId, eventId, file, body = {}, short = null) => {
         if (short.music && Number(short.music.size || short.music.buffer?.length || 0) > MAX_MUSIC_BYTES) {
             throw ApiError.badRequest(`The music must be ${mb(MAX_MUSIC_BYTES)}MB or smaller.`);
         }
-        // Unreadable length (no ffmpeg) is let through: the app trims to a
-        // minute before it sends.
-        const seconds = await videoDuration(file.buffer);
+        // Unreadable length / shape (no ffmpeg) is let through: the app trims
+        // to a minute and refuses landscape before it sends.
+        const { duration: seconds, portrait } = await videoInfo(file.buffer);
+        if (portrait === false) {
+            throw ApiError.badRequest('Shorts must be a vertical (portrait) video.');
+        }
         if (seconds !== null && seconds > MAX_SHORT_SECONDS + 1) {
             throw ApiError.badRequest(`Shorts can be up to 1 minute long. This video is ${Math.round(seconds)} seconds.`);
         }
