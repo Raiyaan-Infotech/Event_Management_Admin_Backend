@@ -611,6 +611,52 @@ router.post(
     },
     galleryController.upload,
 );
+/**
+ * Upload Shorts (2026-10-23): the clip (`file`, up to 10 MB), optional
+ * background music (`music`, any audio — ffmpeg proves it is sound) and an
+ * optional cover picture (`cover`). The service checks each one's own rules.
+ */
+const shortUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: Math.max(galleryService.MAX_SHORT_BYTES, galleryService.MAX_MUSIC_BYTES), files: 3 },
+    fileFilter: (req, file, cb) => {
+        const ok = file.fieldname === 'file'
+            ? galleryService.VIDEO_MIMES.includes(file.mimetype)
+            : file.fieldname === 'cover'
+                ? galleryService.IMAGE_MIMES.includes(file.mimetype)
+                // Phones label songs many ways (audio/*, an .m4a as video/mp4,
+                // or no type at all).
+                : file.fieldname === 'music'
+                    && (/^audio\//.test(file.mimetype) || ['video/mp4', 'application/octet-stream'].includes(file.mimetype));
+        if (ok) return cb(null, true);
+        cb(new Error(
+            file.fieldname === 'music' ? 'Please choose a song (MP3, M4A, AAC, WAV or OGG).'
+                : file.fieldname === 'cover' ? 'The cover must be a JPG, PNG or WEBP image.'
+                    : 'Please choose an MP4, WebM or MOV video.'
+        ), false);
+    },
+});
+router.post(
+    '/events/:id/gallery/shorts',
+    (req, res, next) => {
+        shortUpload.fields([
+            { name: 'file', maxCount: 1 },
+            { name: 'music', maxCount: 1 },
+            { name: 'cover', maxCount: 1 },
+        ])(req, res, (err) => {
+            if (err) {
+                return res.status(400).json({
+                    success: false,
+                    message: err.code === 'LIMIT_FILE_SIZE'
+                        ? `That file is larger than ${Math.round(galleryService.MAX_SHORT_BYTES / (1024 * 1024))}MB.`
+                        : err.message || 'That short could not be uploaded.',
+                });
+            }
+            next();
+        });
+    },
+    galleryController.uploadShort,
+);
 router.put('/events/:id/gallery/reorder', galleryController.reorder);
 router.put('/gallery/:itemId', galleryController.update);
 router.delete('/gallery/:itemId', galleryController.remove);

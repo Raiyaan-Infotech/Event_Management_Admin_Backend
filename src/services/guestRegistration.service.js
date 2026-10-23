@@ -56,15 +56,19 @@ const rsvpEnabledFor = async (event) => {
     // Slugs are unique per company, so the same menu in another event category
     // gets a numeric suffix: RSVP is `rsvp`, `rsvp-2`… — any of them on the
     // event counts (the app's Explore grid strips the same suffix).
-    const onEvent = await EventMenu.findAll({
-        where: { id: { [Op.in]: menuIds.map(Number) }, is_active: 1 },
-        attributes: ['id', 'slug'],
-        raw: true,
-    });
+    // The event's menus and the owner's plan grants are independent reads —
+    // fetched together (the grants are usually cached anyway).
+    const [onEvent, granted] = await Promise.all([
+        EventMenu.findAll({
+            where: { id: { [Op.in]: menuIds.map(Number) }, is_active: 1 },
+            attributes: ['id', 'slug'],
+            raw: true,
+        }),
+        clientPortalService.ownerGrantedMenuIds(event.website_client_id),
+    ]);
     const rsvpIds = onEvent.filter((m) => /^rsvp(-\d+)?$/.test(m.slug)).map((m) => Number(m.id));
     if (!rsvpIds.length) return false;
 
-    const granted = await clientPortalService.ownerGrantedMenuIds(event.website_client_id);
     return rsvpIds.some((id) => granted.includes(id));
 };
 
@@ -625,8 +629,12 @@ const join = async (client, payload = {}) => {
 };
 
 /** Helper to match participant by participant_client_id OR mobile number */
-const participantWhereForClient = async (clientId, eventId = null) => {
-    const client = await WebsiteClient.findByPk(clientId, { attributes: ['id', 'mobile'] });
+const participantWhereForClient = async (clientId, eventId = null, viewer = null) => {
+    // `viewer`: the client row the auth middleware already read — reused when
+    // it is this client, which saves a round trip.
+    const client = viewer && Number(viewer.id) === Number(clientId)
+        ? viewer
+        : await WebsiteClient.findByPk(clientId, { attributes: ['id', 'mobile'] });
     const clientDigits = digitsOnly(client?.mobile);
     const candidates = clientDigits ? [...new Set([clientDigits, clientDigits.slice(-10)])].filter((d) => d.length >= 7) : [];
     const condition = candidates.length > 0
@@ -646,8 +654,8 @@ const participantWhereForClient = async (clientId, eventId = null) => {
  * Distinct from the events they OWN, which is `events.website_client_id`. A
  * host who also scanned somebody else's invitation legitimately appears in both.
  */
-const myEvents = async (clientId) => {
-    const where = await participantWhereForClient(clientId);
+const myEvents = async (clientId, viewer = null) => {
+    const where = await participantWhereForClient(clientId, null, viewer);
     const rows = await EventParticipant.findAll({
         where,
         attributes: ['id', 'event_id', 'response_type', 'rsvp_status', 'party_size'],
@@ -759,16 +767,18 @@ const eventIdOf = (raw) => {
  */
 const RSVP_EVENT_ATTRS = ['id', 'website_client_id', 'menu_ids', 'event_category_id', 'end_date', 'rsvp_settings'];
 
-const getMyRsvp = async (clientId, rawEventId) => {
+const getMyRsvp = async (clientId, rawEventId, viewer = null) => {
     const eventId = eventIdOf(rawEventId);
-    const where = await participantWhereForClient(clientId, eventId);
+    // The event does not depend on who is asking, so it is read beside the
+    // client lookup — the guest and host paths both use this one row.
+    const [where, event] = await Promise.all([
+        participantWhereForClient(clientId, eventId, viewer),
+        Event.findByPk(eventId, { attributes: RSVP_EVENT_ATTRS }),
+    ]);
 
     const guest = await EventParticipant.findOne({ where });
     if (!guest) {
-        const owned = await Event.findOne({
-            where: { id: eventId, website_client_id: clientId },
-            attributes: RSVP_EVENT_ATTRS,
-        });
+        const owned = event && Number(event.website_client_id) === Number(clientId) ? event : null;
         if (!owned) throw ApiError.notFound('You are not a guest of this event.');
         /*
           The HOST gets the guest's form as configured (Jamal, 2026-10-21) —
@@ -779,7 +789,6 @@ const getMyRsvp = async (clientId, rawEventId) => {
         return { ...(await rsvpFormFor(owned)), is_host: true, can_respond: false, rsvp: null };
     }
 
-    const event = await Event.findByPk(eventId, { attributes: RSVP_EVENT_ATTRS });
     const form = await rsvpFormFor(event);
     return {
         ...form,
@@ -798,11 +807,12 @@ const rsvpFormFor = async (event) => {
       head count, special requests, and the groom / bride side + relationship.
     */
     const settings = rsvpSettings.settingsOf(event);
-    const rsvpOn = (await rsvpEnabledFor(event)) && settings.enabled;
     const closed = rsvpSettings.deadlinePassed(settings);
 
-    // Only fetched when the form will ask for them — and together.
-    const [relationships, foods] = await Promise.all([
+    // The options are only fetched when the form will ask for them — and all
+    // three reads go together, the RSVP switch check included.
+    const [enabled, relationships, foods] = await Promise.all([
+        rsvpEnabledFor(event),
         settings.allow_relationship
             ? relationshipOptions.listForCategory(event.event_category_id, DEFAULT_COMPANY_ID)
             : [],
@@ -810,6 +820,7 @@ const rsvpFormFor = async (event) => {
             ? foodOptions.listForCategory(event.event_category_id, DEFAULT_COMPANY_ID)
             : [],
     ]);
+    const rsvpOn = enabled && settings.enabled;
 
     return {
         rsvp_enabled: rsvpOn,
@@ -844,15 +855,23 @@ const rsvpFormFor = async (event) => {
  * status badge on every row); leaving it out would make every row read
  * "Pending" regardless of the real answer. Still no mobile, email or notes.
  */
-const participantsDirectory = async (clientId, rawEventId) => {
+const participantsDirectory = async (clientId, rawEventId, viewer = null) => {
     const eventId = eventIdOf(rawEventId);
-    const where = await participantWhereForClient(clientId, eventId);
+    const where = await participantWhereForClient(clientId, eventId, viewer);
 
-    const [event, membership] = await Promise.all([
+    // The list is read beside the access check and simply discarded when the
+    // check refuses — a read, so nothing leaks, and the guest waits one round
+    // trip instead of two.
+    const [event, membership, guests] = await Promise.all([
         Event.findOne({ where: { id: eventId }, attributes: ['id', 'website_client_id'] }),
         EventParticipant.findOne({
             where,
             attributes: ['id'],
+        }),
+        EventParticipant.findAll({
+            where: { event_id: eventId, participant_client_id: { [Op.ne]: null } },
+            attributes: ['id', 'name', 'title', 'photo', 'relationship', 'rsvp_status'],
+            order: [['name', 'ASC']],
         }),
     ]);
     if (!event) throw ApiError.notFound('Event not found.');
@@ -861,12 +880,6 @@ const participantsDirectory = async (clientId, rawEventId) => {
     if (!isOwner && !membership) {
         throw ApiError.notFound('You are not a guest of this event.');
     }
-
-    const guests = await EventParticipant.findAll({
-        where: { event_id: eventId, participant_client_id: { [Op.ne]: null } },
-        attributes: ['id', 'name', 'title', 'photo', 'relationship', 'rsvp_status'],
-        order: [['name', 'ASC']],
-    });
 
     return guests.map((g) => ({
         id: g.id,

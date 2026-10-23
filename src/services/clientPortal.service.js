@@ -436,7 +436,36 @@ const ownerGrantedMenuIds = async (ownerClientId) => {
  * grants, which is the same everywhere.
  */
 const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
-    const client = await WebsiteClient.findByPk(clientId);
+    // What the client has already spent against `max_events`, counted the same
+    // way createEvent counts it — deleted events included. Sent here so the
+    // wizard can refuse before the first field instead of after the last one,
+    // and so it cannot disagree with the answer the create will give.
+    // Started alongside the client read: it needs nothing else, and production
+    // pays ~370ms for every round trip that waits on another.
+    const eventsUsedP = Event.count({
+        where: { website_client_id: clientId },
+        paranoid: false,
+    });
+    // Not awaited on the early returns below — never leave it unhandled.
+    eventsUsedP.catch(() => {});
+
+    // The plan is reached through the client row inside its own query, so the
+    // two reads go together instead of one after the other.
+    const [client, clientPlan] = await Promise.all([
+        WebsiteClient.findByPk(clientId),
+        SubscriptionPlan.findOne({
+            where: {
+                // Op.eq is required: a bare literal as the value is rendered as
+                // a condition of its own (matching every plan), not `id = (…)`.
+                id: {
+                    [Op.eq]: Sequelize.literal(
+                        `(SELECT subscription_plan_id FROM website_clients WHERE id = ${Number(clientId)} AND deleted_at IS NULL)`
+                    ),
+                },
+            },
+            attributes: PLAN_ATTRS,
+        }),
+    ]);
     if (!client) {
         return { plan: null, reason: 'Account not found.', categories: [], menus: [], portal_sections: [], app_features: [], templates: [] };
     }
@@ -451,7 +480,7 @@ const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
         };
     }
 
-    const plan = await SubscriptionPlan.findByPk(client.subscription_plan_id, { attributes: PLAN_ATTRS });
+    const plan = clientPlan;
     if (!plan) {
         return {
             plan: null,
@@ -471,23 +500,35 @@ const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
     const catWhere = activeWhere(companyId);
     if (plan.event_category_id) catWhere.id = plan.event_category_id;
 
-    const categories = await EventCategory.findAll({
-        where: catWhere, attributes: TAXONOMY_ATTRS, order: [['sort_order', 'ASC'], ['id', 'ASC']],
-    });
-
-    // The menus the PLAN grants — not the catalogue. Read through the join so a
-    // menu the admin later deselects from the plan disappears here too.
-    const menuIds = await grantedMenuIds(plan.id);
-
-    const granted = menuIds.length
-        ? await EventMenu.findAll({
-            where: activeWhere(companyId, { id: { [Op.in]: menuIds } }),
-            // A menu is scoped by category only (NULL = every category), so the
-            // wizard offers just the menus that suit the category picked in step 1.
-            attributes: [...TAXONOMY_ATTRS, 'slug', 'menu_group', 'is_default', 'event_category_id'],
-            order: [['sort_order', 'ASC'], ['id', 'ASC']],
-        })
-        : [];
+    // Everything below depends only on the plan, so it is read in ONE round
+    // trip rather than five in a row (2.9s on production before).
+    const [categories, granted, templates, fonts, eventsUsed] = await Promise.all([
+        EventCategory.findAll({
+            where: catWhere, attributes: TAXONOMY_ATTRS, order: [['sort_order', 'ASC'], ['id', 'ASC']],
+        }),
+        // The menus the PLAN grants — not the catalogue. Read through the join so
+        // a menu the admin later deselects from the plan disappears here too.
+        grantedMenuIds(plan.id).then((menuIds) => (menuIds.length
+            ? EventMenu.findAll({
+                where: activeWhere(companyId, { id: { [Op.in]: menuIds } }),
+                // A menu is scoped by category only (NULL = every category), so
+                // the wizard offers just the menus that suit the category picked
+                // in step 1.
+                attributes: [...TAXONOMY_ATTRS, 'slug', 'menu_group', 'is_default', 'event_category_id'],
+                order: [['sort_order', 'ASC'], ['id', 'ASC']],
+            })
+            : [])),
+        // The admin-authored invitation templates this plan entitles them to.
+        // The wizard narrows these further by the category actually chosen in
+        // step 1 — done there rather than here so changing the category does
+        // not cost a round trip mid-wizard.
+        templatesForPlan(companyId, plan),
+        // Fonts the admin added (Templates → Fonts). A template names its fonts;
+        // the portal needs to know where to load an added one from, or the
+        // invitation falls back to a default face. Guarded inside: never throws.
+        require('./templateFont.service').listForRender(companyId),
+        eventsUsedP,
+    ]);
 
     // EVERY menu the plan grants is an event menu (Jamal, 2026-09-25): no slug
     // lists deciding what the wizard may offer. What the admin ticks on the plan
@@ -496,26 +537,6 @@ const getEventOptions = async (clientId, { platform = 'website' } = {}) => {
     // ...except Home Quick Action menus (QR Code, My Plan, ...), which are
     // not event features — Home's Quick Actions read them on their own.
     const menus = granted.filter((m) => m.menu_group !== 'quick_action');
-
-    // The admin-authored invitation templates this plan entitles them to. The
-    // wizard narrows these further by the category actually chosen in
-    // step 1 — done there rather than here so changing the category does not
-    // cost a round trip mid-wizard.
-    const templates = await templatesForPlan(companyId, plan);
-
-    // Fonts the admin added (Templates → Fonts). A template names its fonts;
-    // the portal needs to know where to load an added one from, or the
-    // invitation falls back to a default face. Guarded inside: never throws.
-    const fonts = await require('./templateFont.service').listForRender(companyId);
-
-    // What the client has already spent against `max_events`, counted the same
-    // way createEvent counts it — deleted events included. Sent here so the
-    // wizard can refuse before the first field instead of after the last one,
-    // and so it cannot disagree with the answer the create will give.
-    const eventsUsed = await Event.count({
-        where: { website_client_id: clientId },
-        paranoid: false,
-    });
 
     return {
         plan: plan.toJSON(),

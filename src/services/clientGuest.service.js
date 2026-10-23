@@ -219,8 +219,11 @@ const assertGuestCapacity = async (hostId, adding = 1, { transaction, message } 
 
 /** For the Add Guest gate — the guest twin of `events_used` on event-options. */
 const getGuestCapacity = async (clientId) => {
-    const limit = await guestLimitFor({ website_client_id: clientId });
-    const used = await countHostGuests(clientId);
+    // Read-only, no transaction — the limit and the count go out together.
+    const [limit, used] = await Promise.all([
+        guestLimitFor({ website_client_id: clientId }),
+        countHostGuests(clientId),
+    ]);
     return {
         limit,
         used,

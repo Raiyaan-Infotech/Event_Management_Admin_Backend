@@ -630,7 +630,12 @@ const getEventForViewer = async (clientId, eventId, opts = {}) => {
       `website_client_id` — that column names the HOST, and reading it here would
       let every guest read every event of their own host.
     */
-    const client = await WebsiteClient.findByPk(clientId, { attributes: ['id', 'mobile'] });
+    // `opts.viewer` is the row the auth middleware already read for this
+    // request — reused when it is the same client, saving a round trip on
+    // every event open. Anything else falls back to reading it.
+    const client = opts.viewer && Number(opts.viewer.id) === Number(clientId)
+        ? opts.viewer
+        : await WebsiteClient.findByPk(clientId, { attributes: ['id', 'mobile'] });
     const mobileDigits = String(client?.mobile || '').replace(/\D/g, '');
     const candidates = mobileDigits ? [...new Set([mobileDigits, mobileDigits.slice(-10)])].filter((d) => d.length >= 7) : [];
 
@@ -1505,10 +1510,12 @@ const readWishlistIds = (client) => {
  * A transient read failure must not quietly empty somebody's wishlist; the
  * only thing that removes an id is the client un-hearting it.
  */
-const getWishlist = async (clientId, { platform = 'website' } = {}) => {
-    const client = await WebsiteClient.findByPk(clientId, {
-        attributes: ['id', 'favourite_events'],
-    });
+const getWishlist = async (clientId, { platform = 'website', viewer = null } = {}) => {
+    // `viewer`: the row the auth middleware already read — reused when it is
+    // this client (it carries `favourite_events`), saving a round trip.
+    const client = viewer && Number(viewer.id) === Number(clientId) && viewer.favourite_events !== undefined
+        ? viewer
+        : await WebsiteClient.findByPk(clientId, { attributes: ['id', 'favourite_events'] });
     if (!client) return [];
 
     const ids = readWishlistIds(client);

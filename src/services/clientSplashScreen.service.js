@@ -269,45 +269,55 @@ const HOST_ONLY_FIELDS = ['website_client_id', 'company_id', 'name', 'deleted_at
  * The splash is matched on the event's own owner as well as its id, so a row
  * can only ever be served for an event its author actually owns.
  */
-const getActiveSplashForEvent = async (clientId, rawEventId) => {
+const getActiveSplashForEvent = async (clientId, rawEventId, viewer = null) => {
     const eventId = Number(rawEventId);
     if (!eventId) return null;
 
-    const event = await Event.findOne({
-        where: { id: eventId },
-        attributes: ['id', 'website_client_id', 'company_id'],
-    });
+    // `viewer`: the row the auth middleware already read — reused when it is
+    // this client, so the membership probe needs no lookup of its own.
+    const client = viewer && Number(viewer.id) === Number(clientId)
+        ? viewer
+        : await WebsiteClient.findByPk(clientId, { attributes: ['id', 'mobile'] });
+    const mobileDigits = String(client?.mobile || '').replace(/\D/g, '');
+    const candidates = mobileDigits ? [...new Set([mobileDigits, mobileDigits.slice(-10)])].filter((d) => d.length >= 7) : [];
+    const participantWhere = candidates.length > 0
+        ? {
+            event_id: eventId,
+            [Op.or]: [
+                { participant_client_id: clientId },
+                { mobile: { [Op.in]: candidates } },
+            ],
+        }
+        : { event_id: eventId, participant_client_id: clientId };
+
+    /*
+      The event, the membership probe and the active splash all key on the
+      event id alone, so they are read together (they were four round trips
+      in a row for a guest, before every event opens). The splash is matched
+      to the event's owner below, which is what its `website_client_id`
+      condition did inside the query.
+    */
+    const [event, membership, candidate] = await Promise.all([
+        Event.findOne({
+            where: { id: eventId },
+            attributes: ['id', 'website_client_id', 'company_id'],
+        }),
+        EventParticipant.findOne({
+            where: participantWhere,
+            attributes: ['id'],
+        }),
+        SplashScreen.findOne({
+            where: { event_id: eventId, status: 'active' },
+        }),
+    ]);
     if (!event) return null;
 
     const isOwner = Number(event.website_client_id) === Number(clientId);
-    if (!isOwner) {
-        const client = await WebsiteClient.findByPk(clientId, { attributes: ['id', 'mobile'] });
-        const mobileDigits = String(client?.mobile || '').replace(/\D/g, '');
-        const candidates = mobileDigits ? [...new Set([mobileDigits, mobileDigits.slice(-10)])].filter((d) => d.length >= 7) : [];
-        const participantWhere = candidates.length > 0
-            ? {
-                event_id: event.id,
-                [Op.or]: [
-                    { participant_client_id: clientId },
-                    { mobile: { [Op.in]: candidates } },
-                ],
-            }
-            : { event_id: event.id, participant_client_id: clientId };
+    if (!isOwner && !membership) return null;
 
-        const membership = await EventParticipant.findOne({
-            where: participantWhere,
-            attributes: ['id'],
-        });
-        if (!membership) return null;
-    }
-
-    const splash = await SplashScreen.findOne({
-        where: {
-            event_id: event.id,
-            website_client_id: event.website_client_id,
-            status: 'active',
-        },
-    });
+    const splash = candidate && Number(candidate.website_client_id) === Number(event.website_client_id)
+        ? candidate
+        : null;
     if (!splash) return null;
 
     const presented = splash.toJSON();

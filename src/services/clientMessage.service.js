@@ -479,7 +479,8 @@ const getComposer = async (client, { eventId } = {}) => {
     let guestCount = 0;
 
     if (chosen) {
-        groups = await GuestGroup.findAll({
+        // Independent reads for the chosen event — one round trip, not two.
+        [groups, guestCount] = await Promise.all([GuestGroup.findAll({
             where: { website_client_id: client.id },
             attributes: [
                 'id', 'name', 'color',
@@ -491,10 +492,9 @@ const getComposer = async (client, { eventId } = {}) => {
                               AND g.deleted_at IS NULL)`), 'guest_count'],
             ],
             order: [['name', 'ASC']],
-        });
-        guestCount = await EventParticipant.count({
+        }), EventParticipant.count({
             where: { website_client_id: client.id, event_id: chosen.id },
-        });
+        })]);
     }
 
     return {

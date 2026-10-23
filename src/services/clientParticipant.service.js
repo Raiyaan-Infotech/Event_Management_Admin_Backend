@@ -81,8 +81,8 @@ const participantLimitFor = async (eventId, transaction) => {
 
 /** { limit, used, full } for one event — for the QR screens to warn early. */
 const getParticipantStatus = async (eventId) => {
-    const limit = await participantLimitFor(eventId);
-    const used = await countParticipants(eventId);
+    // Read-only, no transaction — the limit and the count go out together.
+    const [limit, used] = await Promise.all([participantLimitFor(eventId), countParticipants(eventId)]);
     return { limit, used, full: limit !== null && used >= limit };
 };
 
@@ -209,7 +209,13 @@ const getParticipantStats = async (clientId, query = {}) => {
 /** getParticipantStatus for one of the CALLER's own events. */
 const getParticipantCapacity = async (clientId, eventId) => {
     const event = await ownEvent(clientId, eventId);
-    return getParticipantStatus(event.id);
+    // `event` already carries the plan fields participantLimitFor would re-read,
+    // so its limit is asked of planLimitFor directly, beside the count.
+    const [limit, used] = await Promise.all([
+        planLimitFor(event, 'max_rsvp_per_event'),
+        countParticipants(event.id),
+    ]);
+    return { limit, used, full: limit !== null && used >= limit };
 };
 
 const getParticipantById = async (clientId, id) => {

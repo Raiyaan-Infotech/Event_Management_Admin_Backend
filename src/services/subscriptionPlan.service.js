@@ -113,6 +113,41 @@ const getPlanLimit = async (planId, key) => {
 };
 
 /**
+ * Several limits of one plan in a single read — `getPlanLimit` is one round
+ * trip per key, ~370ms each on production. Same rule per key: a positive
+ * integer, else null (= no limit). Returns `{ [key]: n | null }`.
+ */
+const getPlanLimits = async (planId, keys) => {
+    const wanted = keys.filter((k) => LIMIT_KEYS.includes(k));
+    const out = Object.fromEntries(keys.map((k) => [k, null]));
+    if (!planId || !wanted.length) return out;
+    const plan = await SubscriptionPlan.findByPk(planId, { attributes: ['id', ...wanted] });
+    for (const k of wanted) {
+        const n = Number(plan?.[k]);
+        out[k] = Number.isInteger(n) && n > 0 ? n : null;
+    }
+    return out;
+};
+
+/**
+ * A client's CURRENT plan, storage fields only, in ONE read: the plan is
+ * reached through the client row inside the query, and none of getById's menu
+ * and audit joins are loaded. Null when the client has no (live) plan.
+ */
+const getClientStoragePlan = (clientId) => SubscriptionPlan.findOne({
+    where: {
+        // Op.eq is required: a bare literal as the value is rendered as a
+        // condition of its own (matching every plan), not as `id = (…)`.
+        id: {
+            [Op.eq]: SubscriptionPlan.sequelize.literal(
+                `(SELECT subscription_plan_id FROM website_clients WHERE id = ${Number(clientId)} AND deleted_at IS NULL)`
+            ),
+        },
+    },
+    attributes: ['id', 'storage_limit', 'storage_unit'],
+});
+
+/**
  * Reason options for the Deactivate / Delete confirm screens. In code rather
  * than a table: they are a fixed list the UI renders, not data an admin curates.
  */
@@ -602,6 +637,8 @@ module.exports = {
     getReasons,
     REASONS,
     getPlanLimit,
+    getPlanLimits,
+    getClientStoragePlan,
     LIMIT_FIELDS,
     LIMIT_KEYS,
     // Alias used by approval.service.js executeApprovedAction

@@ -56,16 +56,20 @@ const resolveEvent = async (clientId, rawId) => {
 const resolveEventForView = async (clientId, rawId) => {
     const eventId = Number(rawId);
     if (!eventId) throw ApiError.badRequest('Please choose an event.');
-    const event = await Event.findByPk(eventId, { attributes: EVENT_ATTRS });
+    // The event and the membership probe do not depend on each other — read
+    // together, so a guest pays one round trip here, not two.
+    const [event, membership] = await Promise.all([
+        Event.findByPk(eventId, { attributes: EVENT_ATTRS }),
+        EventParticipant.findOne({
+            where: { event_id: eventId, participant_client_id: clientId },
+            attributes: ['id'],
+        }),
+    ]);
     if (!event) throw ApiError.notFound('That event was not found.');
 
     const isOwner = Number(event.website_client_id) === Number(clientId);
     if (isOwner) return { event, isOwner };
 
-    const membership = await EventParticipant.findOne({
-        where: { event_id: event.id, participant_client_id: clientId },
-        attributes: ['id'],
-    });
     if (!membership) throw ApiError.notFound('That event is not on your account.');
     return { event, isOwner: false };
 };
@@ -330,18 +334,21 @@ const countsOf = (list) => ({
  */
 const list = async (clientId, eventId, query = {}) => {
     const { event, isOwner } = await resolveEventForView(clientId, eventId);
-    const types = await typesFor(event.id, { viewer: !isOwner });
     const where = { event_id: event.id };
     const typeId = Number(query.type_id) || null;
     if (typeId) where.type_id = typeId;
     if (!isOwner) where.is_enabled = true;
 
-    const [rows, menu] = await Promise.all([
+    // Every read needs only the event — one round trip for all of them. A
+    // guest's list hides empty types, so the names come from a full read.
+    const [types, allTypesForViewer, rows, menu] = await Promise.all([
+        typesFor(event.id, { viewer: !isOwner }),
+        isOwner ? null : typesFor(event.id),
         EventLiveStream.findAll({ where, order: STREAM_ORDER }),
         menuState(event),
     ]);
     // Names from the types already read — no join per row.
-    const allTypes = isOwner ? types : await typesFor(event.id);
+    const allTypes = isOwner ? types : allTypesForViewer;
     const nameOf = new Map(allTypes.map((t) => [t.id, t.name]));
     const streams = rows.map((r) => present(r, nameOf.get(r.type_id) || null));
     return {

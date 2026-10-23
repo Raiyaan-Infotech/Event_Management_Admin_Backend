@@ -22,6 +22,15 @@ module.exports = (sequelize) => {
             allowNull: false,
             defaultValue: 'image',
         },
+        /**
+         * A Short (2026-10-23): a vertical clip of at most a minute, uploaded
+         * from the app's Upload Shorts. Still type 'video' — it counts against
+         * the video limit and storage like any video.
+         */
+        is_short: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+        title: { type: DataTypes.STRING(150), allowNull: true },
+        description: { type: DataTypes.STRING(500), allowNull: true },
+        duration_seconds: { type: DataTypes.SMALLINT.UNSIGNED, allowNull: true },
         /** NULL = Uncategorised. Set null when its category is deleted. */
         category_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
         url: { type: DataTypes.STRING(500), allowNull: false },

@@ -280,7 +280,8 @@ const list = async (clientId, query = {}) => {
     const page = Math.max(1, Number(query.page) || 1);
     const limit = Math.min(100, Math.max(1, Number(query.limit) || 10));
 
-    const { rows, count } = await EventParticipant.findAndCountAll({
+    // The page and the stats tiles are independent — read together.
+    const [{ rows, count }, stats] = await Promise.all([EventParticipant.findAndCountAll({
         where: buildWhere(clientId, query),
         attributes: GUEST_ATTRS,
         include: INCLUDE,
@@ -294,12 +295,12 @@ const list = async (clientId, query = {}) => {
         offset: (page - 1) * limit,
         limit,
         distinct: true,
-    });
+    }), getStats(clientId, query)]);
 
     return {
         rsvps: rows.map(shape),
         pagination: { page, limit, totalItems: count, totalPages: Math.ceil(count / limit) || 1 },
-        stats: await getStats(clientId, query),
+        stats,
     };
 };
 
@@ -388,20 +389,23 @@ function buildTimeline(guest, messages) {
 const getById = async (clientId, id) => {
     const guest = await own(clientId, id);
 
-    const messages = await EventMessage.findAll({
-        where: { website_client_id: clientId, participant_id: guest.id },
-        attributes: ['id', 'channel', 'kind', 'status', 'sent_at', 'delivered_at', 'opened_at', 'created_at'],
-        order: [['created_at', 'ASC']],
-        limit: 100,
-    });
+    // The three reads below need only the guest — sent together, one round
+    // trip instead of three.
+    const [messages, linked, history] = await Promise.all([
+        EventMessage.findAll({
+            where: { website_client_id: clientId, participant_id: guest.id },
+            attributes: ['id', 'channel', 'kind', 'status', 'sent_at', 'delivered_at', 'opened_at', 'created_at'],
+            order: [['created_at', 'ASC']],
+            limit: 100,
+        }),
 
-    /*
-      The same PERSON at other events, matched on email — the only link this
-      schema has. See the header: a typo'd address splits one person in two and
-      nothing here can tell.
-    */
-    const linked = guest.email
-        ? await EventParticipant.findAll({
+        /*
+          The same PERSON at other events, matched on email — the only link this
+          schema has. See the header: a typo'd address splits one person in two
+          and nothing here can tell.
+        */
+        guest.email
+            ? EventParticipant.findAll({
             where: {
                 website_client_id: clientId,
                 email: guest.email,
@@ -412,19 +416,20 @@ const getById = async (clientId, id) => {
             order: [['id', 'DESC']],
             limit: 25,
         })
-        : [];
+            : [],
 
-    /*
-      Capped at 50. A history is read newest-first and nobody scrolls past the
-      last few; an uncapped list would grow without bound on a guest whose
-      answer keeps changing.
-    */
-    const history = await EventParticipantResponseLog.findAll({
-        where: { website_client_id: clientId, participant_id: guest.id },
-        include: [{ association: 'event', attributes: ['id', 'name', 'start_date'], required: false }],
-        order: [['changed_at', 'DESC'], ['id', 'DESC']],
-        limit: 50,
-    });
+        /*
+          Capped at 50. A history is read newest-first and nobody scrolls past the
+          last few; an uncapped list would grow without bound on a guest whose
+          answer keeps changing.
+        */
+        EventParticipantResponseLog.findAll({
+            where: { website_client_id: clientId, participant_id: guest.id },
+            include: [{ association: 'event', attributes: ['id', 'name', 'start_date'], required: false }],
+            order: [['changed_at', 'DESC'], ['id', 'DESC']],
+            limit: 50,
+        }),
+    ]);
 
     return {
         rsvp: shape(guest),

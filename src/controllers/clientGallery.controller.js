@@ -19,6 +19,14 @@ const upload = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, result, 'Uploaded.');
 });
 
+/** Upload Shorts: `file` (the clip) + optional `music` and `cover`. */
+const uploadShort = asyncHandler(async (req, res) => {
+    const result = await service.uploadShort(
+        req.websiteClient.id, req.params.id, req.files || {}, req.body
+    );
+    return ApiResponse.success(res, result, 'Short uploaded.');
+});
+
 const remove = asyncHandler(async (req, res) => {
     const result = await service.removeItem(req.websiteClient.id, req.params.itemId);
     return ApiResponse.success(res, result, 'Removed.');
@@ -60,6 +68,6 @@ const reorder = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
-    list, usage, upload, update, reorder, remove,
+    list, usage, upload, uploadShort, update, reorder, remove,
     listCategories, createCategory, updateCategory, uploadCategoryCover, removeCategory,
 };

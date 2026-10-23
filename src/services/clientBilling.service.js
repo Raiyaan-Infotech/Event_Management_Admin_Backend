@@ -337,14 +337,18 @@ const reconcile = async (sub) => {
  * this, Billing would tell somebody plainly on a plan that they have none.
  */
 const getCurrentSubscription = async (clientId) => {
-    const client = await WebsiteClient.findByPk(clientId);
+    // Neither read needs the other — one round trip, not two.
+    const [client, latest] = await Promise.all([
+        WebsiteClient.findByPk(clientId),
+        ClientSubscription.findOne({
+            where: { website_client_id: clientId },
+            include: SUBSCRIPTION_INCLUDE,
+            order: [['created_at', 'DESC']],
+        }),
+    ]);
     if (!client) throw ApiError.notFound('Account not found.');
 
-    let sub = await ClientSubscription.findOne({
-        where: { website_client_id: clientId },
-        include: SUBSCRIPTION_INCLUDE,
-        order: [['created_at', 'DESC']],
-    });
+    let sub = latest;
 
     if (!sub && client.subscription_plan_id) {
         const plan = await SubscriptionPlan.findByPk(client.subscription_plan_id, { attributes: PLAN_ATTRS });
@@ -446,36 +450,37 @@ const getUsage = async (clientId, subscription) => {
             : { [Op.gte]: periodStart };
     }
 
-    // Deleted events are counted, because they still spend a slot against
-    // `max_events` (see clientEvent.createEvent). If this counted only live rows
-    // the usage tile would read 4 of 5 while the next create was refused.
-    const events = await Event.count({ where: eventWhere, paranoid: false });
-
-    // Guests are counted in HEADS (party_size), which is what a caterer means
-    // and what the guest module's own Total Guests tile reports. Scoped to the
-    // client's events in this period, via a subquery rather than a per-event
-    // loop — production is ~374ms a round trip.
-    const guestRow = await EventParticipant.findOne({
-        attributes: [[Sequelize.fn('COALESCE', Sequelize.fn('SUM', Sequelize.col('party_size')), 0), 'heads']],
-        where: {
-            event_id: {
-                [Op.in]: Sequelize.literal(
-                    `(SELECT id FROM events WHERE website_client_id = ${Number(clientId)} AND deleted_at IS NULL)`,
-                ),
+    // Five independent reads, sent together — they were five round trips in a
+    // row (~1.9s on production).
+    const [events, guestRow, guestRows, limits, storageBytes] = await Promise.all([
+        // Deleted events are counted, because they still spend a slot against
+        // `max_events` (see clientEvent.createEvent). If this counted only live
+        // rows the usage tile would read 4 of 5 while the next create was refused.
+        Event.count({ where: eventWhere, paranoid: false }),
+        // Guests are counted in HEADS (party_size), which is what a caterer means
+        // and what the guest module's own Total Guests tile reports. Scoped to the
+        // client's events in this period, via a subquery rather than a per-event
+        // loop — production is ~374ms a round trip.
+        EventParticipant.findOne({
+            attributes: [[Sequelize.fn('COALESCE', Sequelize.fn('SUM', Sequelize.col('party_size')), 0), 'heads']],
+            where: {
+                event_id: {
+                    [Op.in]: Sequelize.literal(
+                        `(SELECT id FROM events WHERE website_client_id = ${Number(clientId)} AND deleted_at IS NULL)`,
+                    ),
+                },
             },
-        },
-        raw: true,
-    });
-
-    // Max Guests counts the PHONE BOOK (§569, §581) — the same rows Add Guest refuses at.
-    const guestRows = await Guest.count({ where: { website_client_id: clientId } });
-    const limits = await resolvePlanLimits(subscription?.subscription_plan_id);
-
-    // Bytes held by this account's gallery, shown in the plan's own unit
-    // (MB unless the plan is set in GB), two decimals.
-    // Live events only — the same count the gallery upload checks against.
-    // Gallery files AND Wed Wishes media ("Max Storage") — the gallery's own sum.
-    const storageBytes = await galleryService.storageUsedFor(clientId);
+            raw: true,
+        }),
+        // Max Guests counts the PHONE BOOK (§569, §581) — the same rows Add Guest refuses at.
+        Guest.count({ where: { website_client_id: clientId } }),
+        resolvePlanLimits(subscription?.subscription_plan_id),
+        // Bytes held by this account's gallery, shown in the plan's own unit
+        // (MB unless the plan is set in GB), two decimals.
+        // Live events only — the same count the gallery upload checks against.
+        // Gallery files AND Wed Wishes media ("Max Storage") — the gallery's own sum.
+        galleryService.storageUsedFor(clientId),
+    ]);
     const storageUnit = limits.storage_unit === 'GB' ? 'GB' : 'MB';
     const storageUsed = Math.round((storageBytes / (storageUnit === 'GB' ? 1024 ** 3 : 1024 ** 2)) * 100) / 100;
 

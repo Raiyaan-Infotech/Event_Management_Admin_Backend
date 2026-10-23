@@ -170,16 +170,20 @@ const notifyFlagged = async (event, wish) => {
 const resolveEvent = async (clientId, rawId) => {
     const eventId = Number(rawId);
     if (!eventId) throw ApiError.badRequest('Please choose an event.');
-    const event = await Event.findByPk(eventId, { attributes: EVENT_ATTRS });
+    // The event and the participant row do not depend on each other — read
+    // together, so a guest pays one round trip here, not two.
+    const [event, participant] = await Promise.all([
+        Event.findByPk(eventId, { attributes: EVENT_ATTRS }),
+        EventParticipant.findOne({
+            where: { event_id: eventId, participant_client_id: clientId },
+            attributes: ['id', 'name', 'mobile', 'photo'],
+        }),
+    ]);
     if (!event) throw ApiError.notFound('That event was not found.');
 
     if (Number(event.website_client_id) === Number(clientId)) {
         return { event, isOwner: true, participant: null };
     }
-    const participant = await EventParticipant.findOne({
-        where: { event_id: event.id, participant_client_id: clientId },
-        attributes: ['id', 'name', 'mobile', 'photo'],
-    });
     if (!participant) throw ApiError.notFound('That event is not on your account.');
     return { event, isOwner: false, participant };
 };
@@ -247,14 +251,23 @@ const storeMedia = async (event, file, body = {}, replacing = null) => {
         throw ApiError.badRequest(`${isImage ? 'Images' : 'Videos'} must be ${mb(cap)}MB or smaller. This file is ${mb(size)}MB.`);
     }
 
+    // Every limit and count in ONE round trip (six in a row before — ~2s on
+    // production ahead of the upload itself).
+    const ownerId = event.website_client_id;
+    const [limit, usedCount, owner, plan, usedStorage] = await Promise.all([
+        subscriptionPlanService.getPlanLimit(event.subscription_plan_id, isVideo ? 'max_videos' : 'max_photos'),
+        isVideo ? gallery.videosUsedFor(event.id) : gallery.photosUsedFor(event.id),
+        WebsiteClient.findByPk(ownerId, { attributes: ['subscription_plan_id', 'company_id'] }),
+        subscriptionPlanService.getClientStoragePlan(ownerId).catch(() => null),
+        gallery.storageUsedFor(ownerId),
+    ]);
+
     // Max Photos / Max Videos — per event, gallery and wishes together.
     const kind = isVideo ? 'video' : 'image';
     let countBefore = null;
     let countLimit = null;
-    const limit = await subscriptionPlanService.getPlanLimit(event.subscription_plan_id, isVideo ? 'max_videos' : 'max_photos');
     if (limit !== null) {
-        const used = (isVideo ? await gallery.videosUsedFor(event.id) : await gallery.photosUsedFor(event.id))
-            - (replacing && replacing.post_type === kind ? 1 : 0);
+        const used = usedCount - (replacing && replacing.post_type === kind ? 1 : 0);
         countBefore = used;
         countLimit = limit;
         if (used >= limit) {
@@ -265,15 +278,10 @@ const storeMedia = async (event, file, body = {}, replacing = null) => {
     }
 
     // Max Storage — per account (the event's owner), gallery and wishes together.
-    const ownerId = event.website_client_id;
-    const owner = await WebsiteClient.findByPk(ownerId, { attributes: ['subscription_plan_id', 'company_id'] });
-    const plan = owner?.subscription_plan_id
-        ? await subscriptionPlanService.getById(owner.subscription_plan_id).catch(() => null)
-        : null;
     const storageLimit = gallery.storageBytesFor(plan);
     let storageBefore = null;
     if (storageLimit !== null) {
-        const used = await gallery.storageUsedFor(ownerId) - Number(replacing?.size_bytes || 0);
+        const used = usedStorage - Number(replacing?.size_bytes || 0);
         storageBefore = used;
         if (used + size > storageLimit) {
             const left = Math.max(0, storageLimit - used);

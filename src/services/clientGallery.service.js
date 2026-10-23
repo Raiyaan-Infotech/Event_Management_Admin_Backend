@@ -4,7 +4,7 @@ const {
 const { Op } = Sequelize;
 const ApiError = require('../utils/apiError');
 const mediaService = require('./media.service');
-const { processVideo, videoPoster } = require('../utils/videoProcess');
+const { processVideo, videoPoster, videoDuration, addMusic } = require('../utils/videoProcess');
 const subscriptionPlanService = require('./subscriptionPlan.service');
 const notificationTrigger = require('./notificationTrigger.service');
 
@@ -24,6 +24,12 @@ const notificationTrigger = require('./notificationTrigger.service');
 /** Product rule, deliberately not a plan column: nobody sells a bigger photo. */
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 5 * 1024 * 1024;
+
+/** Shorts (2026-10-23): a vertical clip of up to a minute and 10 MB. */
+const MAX_SHORT_BYTES = 10 * 1024 * 1024;
+const MAX_SHORT_SECONDS = 60;
+/** A short's background music, before it is fitted to the clip. */
+const MAX_MUSIC_BYTES = 10 * 1024 * 1024;
 
 const IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 const VIDEO_MIMES = ['video/mp4', 'video/webm', 'video/quicktime'];
@@ -76,18 +82,22 @@ const resolveEventForView = async (clientId, rawId) => {
     const eventId = Number(rawId);
     if (!eventId) throw ApiError.badRequest('Please choose an event.');
 
-    const event = await Event.findByPk(eventId, {
-        attributes: ['id', 'name', 'subscription_plan_id', 'company_id', 'website_client_id'],
-    });
+    // The event and the membership probe do not depend on each other — read
+    // together, so a guest's gallery costs one round trip here, not two.
+    const [event, membership] = await Promise.all([
+        Event.findByPk(eventId, {
+            attributes: ['id', 'name', 'subscription_plan_id', 'company_id', 'website_client_id'],
+        }),
+        EventParticipant.findOne({
+            where: { event_id: eventId, participant_client_id: clientId },
+            attributes: ['id'],
+        }),
+    ]);
     if (!event) throw ApiError.notFound('That event was not found.');
 
     const isOwner = Number(event.website_client_id) === Number(clientId);
     if (isOwner) return { event, isOwner };
 
-    const membership = await EventParticipant.findOne({
-        where: { event_id: event.id, participant_client_id: clientId },
-        attributes: ['id'],
-    });
     if (!membership) throw ApiError.notFound('That event is not on your account.');
 
     return { event, isOwner: false };
@@ -163,6 +173,10 @@ const present = (row) => {
         category_id: item.category_id ?? null,
         caption: item.caption,
         show_in_app: item.show_in_app !== false && item.show_in_app !== 0,
+        is_short: item.is_short === true || item.is_short === 1,
+        title: item.title || null,
+        description: item.description || null,
+        duration_seconds: item.duration_seconds ?? null,
         sort_order: item.sort_order,
         created_at: item.created_at,
     };
@@ -249,30 +263,28 @@ const purgeEvent = async (eventId) => {
  * What the gallery screen needs to draw itself before anything is chosen:
  * the counts, the limits and what is left.
  */
-const getUsage = async (clientId, eventId) => {
-    const { event } = await resolveEventForView(clientId, eventId);
-
-    // The plan the EVENT was created under, matching how the guest limit is
-    // read — an event keeps the limits it was built against.
-    const planId = event.subscription_plan_id;
-    const [maxPhotos, maxVideos] = await Promise.all([
-        subscriptionPlanService.getPlanLimit(planId, 'max_photos'),
-        subscriptionPlanService.getPlanLimit(planId, 'max_videos'),
-    ]);
+/**
+ * Every read here is independent, so they go out together: production pays
+ * ~370ms per round trip and this used to take five in a row. Pass `resolved`
+ * when the caller has already checked the viewer, to skip checking it again.
+ */
+const getUsage = async (clientId, eventId, resolved = null) => {
+    const { event } = resolved || await resolveEventForView(clientId, eventId);
 
     // Storage and plan belong to the event's OWNER, not to whoever is looking:
     // a participant reading the gallery must see the host's quota, not their own.
     const ownerId = event.website_client_id ?? clientId;
-    const [photos, videos, storageUsed, client] = await Promise.all([
+    const [limits, photos, videos, storageUsed, plan] = await Promise.all([
+        // The plan the EVENT was created under, matching how the guest limit is
+        // read — an event keeps the limits it was built against.
+        subscriptionPlanService.getPlanLimits(event.subscription_plan_id, ['max_photos', 'max_videos']),
         photosUsedFor(event.id),
         videosUsedFor(event.id),
         storageUsedFor(ownerId),
-        WebsiteClient.findByPk(ownerId, { attributes: ['subscription_plan_id'] }),
+        subscriptionPlanService.getClientStoragePlan(ownerId).catch(() => null),
     ]);
-
-    const plan = client?.subscription_plan_id
-        ? await subscriptionPlanService.getById(client.subscription_plan_id).catch(() => null)
-        : null;
+    const maxPhotos = limits.max_photos;
+    const maxVideos = limits.max_videos;
     const storageLimit = storageBytesFor(plan);
 
     return {
@@ -305,15 +317,18 @@ const listItems = async (clientId, eventId, query = {}) => {
     // receives it.
     if (!isOwner) where.show_in_app = true;
 
-    const items = await EventGalleryItem.findAll({
-        where,
-        order: ITEM_ORDER,
-    });
+    // Independent once the viewer is checked and the default category exists —
+    // one round trip for all three instead of one after another.
+    const [items, categories, usage] = await Promise.all([
+        EventGalleryItem.findAll({ where, order: ITEM_ORDER }),
+        listCategories(clientId, event.id, { visibleOnly: !isOwner, defaultReady: true }),
+        getUsage(clientId, eventId, { event, isOwner }),
+    ]);
 
     return {
         items: items.map(present),
-        categories: await listCategories(clientId, event.id, { visibleOnly: !isOwner }),
-        usage: await getUsage(clientId, eventId),
+        categories,
+        usage,
         /** Participants view only — the app hides its Upload button on this. */
         can_upload: isOwner,
     };
@@ -326,37 +341,39 @@ const listItems = async (clientId, eventId, query = {}) => {
  * computed here rather than trusted to a stored counter that drifts the first
  * time an item is deleted by any other path.
  */
-const listCategories = async (clientId, eventId, { visibleOnly = false } = {}) => {
-    await ensureDefaultCategory(eventId);
-    // The default Gallery always leads the list.
-    const rows = await EventGalleryCategory.findAll({
-        where: { event_id: eventId },
-        order: [
-            [Sequelize.literal('is_default IS NULL'), 'ASC'],
-            ['sort_order', 'ASC'], ['id', 'ASC'],
-        ],
-    });
+const listCategories = async (clientId, eventId, { visibleOnly = false, defaultReady = false } = {}) => {
+    // `defaultReady`: the caller has just run ensureDefaultCategory itself.
+    if (!defaultReady) await ensureDefaultCategory(eventId);
 
     // A guest's counts and covers leave out what the host has hidden, so a
     // chip never promises a photo the grid will not show.
     const visible = visibleOnly ? { show_in_app: true } : {};
 
-    const counts = await EventGalleryItem.findAll({
-        where: { event_id: eventId, ...visible },
-        attributes: ['category_id', [Sequelize.fn('COUNT', Sequelize.col('id')), 'n']],
-        group: ['category_id'],
-        raw: true,
-    });
+    const [rows, counts, photos] = await Promise.all([
+        // The default Gallery always leads the list.
+        EventGalleryCategory.findAll({
+            where: { event_id: eventId },
+            order: [
+                [Sequelize.literal('is_default IS NULL'), 'ASC'],
+                ['sort_order', 'ASC'], ['id', 'ASC'],
+            ],
+        }),
+        EventGalleryItem.findAll({
+            where: { event_id: eventId, ...visible },
+            attributes: ['category_id', [Sequelize.fn('COUNT', Sequelize.col('id')), 'n']],
+            group: ['category_id'],
+            raw: true,
+        }),
+        // A category with no cover of its own shows its first photo — the same
+        // order the grid draws, so the thumbnail is the photo the host sees first.
+        EventGalleryItem.findAll({
+            where: { event_id: eventId, type: 'image', category_id: { [Op.ne]: null }, ...visible },
+            attributes: ['category_id', 'url', 'thumbnail_url'],
+            order: ITEM_ORDER,
+            raw: true,
+        }),
+    ]);
     const byId = new Map(counts.map((c) => [c.category_id, Number(c.n)]));
-
-    // A category with no cover of its own shows its first photo — the same
-    // order the grid draws, so the thumbnail is the photo the host sees first.
-    const photos = await EventGalleryItem.findAll({
-        where: { event_id: eventId, type: 'image', category_id: { [Op.ne]: null }, ...visible },
-        attributes: ['category_id', 'url', 'thumbnail_url'],
-        order: ITEM_ORDER,
-        raw: true,
-    });
     const firstPhoto = new Map();
     for (const p of photos) {
         // The small copy when there is one — a cover is a thumbnail.
@@ -645,7 +662,14 @@ const storeVideoPoster = async (videoFile, eventId, companyId) => {
     }
 };
 
-const uploadItem = async (clientId, eventId, file, body = {}) => {
+/**
+ * [short] = `{ music, cover }` (either may be null) for a Short from the app's
+ * Upload Shorts; null for an ordinary photo / video. A short is a video with
+ * its own caps (10 MB, 1 minute), a required title, an optional description,
+ * an optional cover (the host's picture instead of the first frame) and
+ * optional background music that REPLACES the clip's own sound.
+ */
+const uploadItem = async (clientId, eventId, file, body = {}, short = null) => {
     if (!file || !file.buffer) throw ApiError.badRequest('Please choose a file to upload.');
 
     const event = await resolveEvent(clientId, eventId);
@@ -655,44 +679,71 @@ const uploadItem = async (clientId, eventId, file, body = {}) => {
     if (!isImage && !isVideo) {
         throw ApiError.badRequest('Please choose a JPG, PNG, WEBP or GIF image, or an MP4, WebM or MOV video.');
     }
+    if (short && !isVideo) throw ApiError.badRequest('A short must be an MP4, WebM or MOV video.');
 
     const type = isImage ? 'image' : 'video';
     const size = Number(file.size || file.buffer.length || 0);
 
-    const perFileCap = isImage ? MAX_IMAGE_BYTES : MAX_VIDEO_BYTES;
+    const perFileCap = isImage ? MAX_IMAGE_BYTES : short ? MAX_SHORT_BYTES : MAX_VIDEO_BYTES;
     if (size > perFileCap) {
         throw ApiError.badRequest(
-            `${isImage ? 'Images' : 'Videos'} must be ${mb(perFileCap)}MB or smaller. This file is ${mb(size)}MB.`
+            `${isImage ? 'Images' : short ? 'Shorts' : 'Videos'} must be ${mb(perFileCap)}MB or smaller. This file is ${mb(size)}MB.`
         );
     }
 
+    // A short's own checks, before anything is counted or stored.
+    let shortTitle = null;
+    let shortDescription = null;
+    let shortSeconds = null;
+    if (short) {
+        shortTitle = cleanText(body.title, 150);
+        if (!shortTitle) throw ApiError.badRequest('Please enter a title for the short.');
+        shortDescription = cleanText(body.description, 500);
+        if (short.cover && !IMAGE_MIMES.includes(short.cover.mimetype)) {
+            throw ApiError.badRequest('The cover must be a JPG, PNG or WEBP image.');
+        }
+        if (short.music && Number(short.music.size || short.music.buffer?.length || 0) > MAX_MUSIC_BYTES) {
+            throw ApiError.badRequest(`The music must be ${mb(MAX_MUSIC_BYTES)}MB or smaller.`);
+        }
+        // Unreadable length (no ffmpeg) is let through: the app trims to a
+        // minute before it sends.
+        const seconds = await videoDuration(file.buffer);
+        if (seconds !== null && seconds > MAX_SHORT_SECONDS + 1) {
+            throw ApiError.badRequest(`Shorts can be up to 1 minute long. This video is ${Math.round(seconds)} seconds.`);
+        }
+        shortSeconds = seconds === null ? null : Math.round(seconds);
+    }
+
+    // Every limit and count is read in ONE round trip (they were six in a row,
+    // ~2s on production before the file even started uploading). The counts
+    // are read even when a limit turns out to be off — a cheap COUNT is far
+    // cheaper than waiting for the limit first.
+    //
+    // Storage is an ACCOUNT limit, so it is read from the client's CURRENT plan
+    // rather than the event's — it is the account that holds the bytes.
     const planId = event.subscription_plan_id;
-    const countLimit = await subscriptionPlanService.getPlanLimit(
-        planId, isImage ? 'max_photos' : 'max_videos'
-    );
+    const [countLimit, usedCount, client, plan, usedStorage] = await Promise.all([
+        subscriptionPlanService.getPlanLimit(planId, isImage ? 'max_photos' : 'max_videos'),
+        isImage ? photosUsedFor(event.id) : videosUsedFor(event.id),
+        WebsiteClient.findByPk(clientId, { attributes: ['subscription_plan_id', 'company_id'] }),
+        subscriptionPlanService.getClientStoragePlan(clientId).catch(() => null),
+        storageUsedFor(clientId),
+    ]);
+
     let countBefore = null;
     if (countLimit !== null) {
-        const used = isImage
-            ? await photosUsedFor(event.id)
-            : await videosUsedFor(event.id);
-        countBefore = used;
-        if (used >= countLimit) {
+        countBefore = usedCount;
+        if (usedCount >= countLimit) {
             throw ApiError.badRequest(
                 `This event has reached its limit of ${countLimit} ${isImage ? 'image' : 'video'}${countLimit === 1 ? '' : 's'}. Please upgrade your plan to add more.`
             );
         }
     }
 
-    // Storage is an ACCOUNT limit, so it is read from the client's CURRENT plan
-    // rather than the event's — it is the account that holds the bytes.
-    const client = await WebsiteClient.findByPk(clientId, { attributes: ['subscription_plan_id', 'company_id'] });
-    const plan = client?.subscription_plan_id
-        ? await subscriptionPlanService.getById(client.subscription_plan_id).catch(() => null)
-        : null;
     const storageLimit = storageBytesFor(plan);
     let storageBefore = null;
     if (storageLimit !== null) {
-        const used = await storageUsedFor(clientId);
+        const used = usedStorage;
         storageBefore = used;
         if (used + size > storageLimit) {
             const left = Math.max(0, storageLimit - used);
@@ -707,7 +758,25 @@ const uploadItem = async (clientId, eventId, file, body = {}) => {
     // into plain H.264. Sound is otherwise kept exactly as recorded. The result
     // is used only when it still fits the per-file cap.
     let toStore = file;
-    if (isVideo) {
+    if (isVideo && short?.music) {
+        // The song replaces the clip's sound, fitted to its length.
+        let out;
+        try {
+            out = await addMusic(file.buffer, file.mimetype, short.music.buffer);
+        } catch (e) {
+            throw ApiError.badRequest('The music could not be added to this short. Please try another song.');
+        }
+        if (out.buffer.length > perFileCap) {
+            throw ApiError.badRequest(`Shorts must be ${mb(perFileCap)}MB or smaller once the music is added.`);
+        }
+        toStore = {
+            ...file,
+            buffer: out.buffer,
+            size: out.buffer.length,
+            mimetype: out.mimetype,
+            originalname: `${(file.originalname || 'short').replace(/\.[^.]+$/, '')}.mp4`,
+        };
+    } else if (isVideo) {
         const mute = [true, 'true', 1, '1'].includes(body.mute);
         const out = await processVideo(file.buffer, file.mimetype, { mute });
         // Muting is the host's choice, not a nicety: never store with sound
@@ -715,7 +784,7 @@ const uploadItem = async (clientId, eventId, file, body = {}) => {
         if (mute && !out.muted) {
             throw ApiError.badRequest('The sound could not be removed from this video. Please try again.');
         }
-        if (out.applied && out.buffer.length <= MAX_VIDEO_BYTES) {
+        if (out.applied && out.buffer.length <= perFileCap) {
             const ext = out.mimetype === 'video/webm' ? '.webm' : '.mp4';
             toStore = {
                 ...file,
@@ -728,7 +797,7 @@ const uploadItem = async (clientId, eventId, file, body = {}) => {
             };
         } else if (mute && out.applied) {
             // Muted but somehow over the cap — refuse rather than keep the sound.
-            throw ApiError.badRequest(`Videos must be ${mb(MAX_VIDEO_BYTES)}MB or smaller.`);
+            throw ApiError.badRequest(`${short ? 'Shorts' : 'Videos'} must be ${mb(perFileCap)}MB or smaller.`);
         }
     }
 
@@ -741,9 +810,13 @@ const uploadItem = async (clientId, eventId, file, body = {}) => {
     // a ~480 px copy (the full photo is up to 2 MB). Best effort: none means a
     // video shows its icon and a photo's tile falls back to the full file.
     const companyForFiles = event.company_id || client?.company_id || 1;
-    const thumbnailUrl = isVideo
-        ? await storeVideoPoster(toStore, event.id, companyForFiles)
-        : await storeImageThumb(toStore, event.id, companyForFiles);
+    // A short's cover, when the host chose one, is its picture instead.
+    const thumbnailUrl = short?.cover
+        ? await storeImageThumb(short.cover, event.id, companyForFiles)
+            || await storeVideoPoster(toStore, event.id, companyForFiles)
+        : isVideo
+            ? await storeVideoPoster(toStore, event.id, companyForFiles)
+            : await storeImageThumb(toStore, event.id, companyForFiles);
 
     const last = await EventGalleryItem.max('sort_order', { where: { event_id: event.id } });
 
@@ -760,6 +833,10 @@ const uploadItem = async (clientId, eventId, file, body = {}) => {
         size_bytes: Number(stored.size || size),
         category_id: await categoryIdOrDefault(event.id, body.category_id),
         caption: typeof body.caption === 'string' ? body.caption.slice(0, 300) : null,
+        is_short: Boolean(short),
+        title: shortTitle,
+        description: shortDescription,
+        duration_seconds: shortSeconds,
         sort_order: Number.isFinite(Number(last)) ? Number(last) + 1 : 0,
         uploaded_by: clientId,
         company_id: event.company_id || client?.company_id || null,
@@ -894,6 +971,8 @@ const reorderItems = async (clientId, eventId, body = {}) => {
 module.exports = {
     MAX_IMAGE_BYTES,
     MAX_VIDEO_BYTES,
+    MAX_SHORT_BYTES,
+    MAX_MUSIC_BYTES,
     IMAGE_MIMES,
     VIDEO_MIMES,
     getUsage,
@@ -909,6 +988,11 @@ module.exports = {
     uploadCategoryCover,
     removeCategory,
     uploadItem,
+    /** Upload Shorts: multer `fields` → the clip, its music and its cover. */
+    uploadShort: (clientId, eventId, files = {}, body = {}) => uploadItem(
+        clientId, eventId, files.file?.[0], body,
+        { music: files.music?.[0] || null, cover: files.cover?.[0] || null },
+    ),
     updateItem,
     reorderItems,
     removeItem,

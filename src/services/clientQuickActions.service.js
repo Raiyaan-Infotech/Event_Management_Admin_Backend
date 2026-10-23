@@ -110,9 +110,13 @@ const shape = (available, stored) => {
 
 /** GET /client/quick-actions */
 const get = async (clientId) => {
-    const client = await WebsiteClient.findByPk(clientId, { attributes: ['id', 'quick_actions'] });
+    // The saved list and the plan's menus are independent — read together.
+    const [client, available] = await Promise.all([
+        WebsiteClient.findByPk(clientId, { attributes: ['id', 'quick_actions'] }),
+        availableFor(clientId),
+    ]);
     if (!client) throw ApiError.notFound('Account not found.');
-    return shape(await availableFor(clientId), client.quick_actions);
+    return shape(available, client.quick_actions);
 };
 
 /**

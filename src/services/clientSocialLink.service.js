@@ -66,14 +66,17 @@ const resolveEvent = async (clientId, rawId) => {
 const resolveEventForView = async (clientId, rawId) => {
     const eventId = Number(rawId);
     if (!eventId) throw ApiError.badRequest('Please choose an event.');
-    const event = await Event.findByPk(eventId, { attributes: EVENT_ATTRS });
+    // Event and membership probe read together — a guest pays one round trip, not two.
+    const [event, membership] = await Promise.all([
+        Event.findByPk(eventId, { attributes: EVENT_ATTRS }),
+        EventParticipant.findOne({
+            where: { event_id: eventId, participant_client_id: clientId },
+            attributes: ['id'],
+        }),
+    ]);
     if (!event) throw ApiError.notFound('That event was not found.');
     const isOwner = Number(event.website_client_id) === Number(clientId);
     if (isOwner) return { event, isOwner };
-    const membership = await EventParticipant.findOne({
-        where: { event_id: event.id, participant_client_id: clientId },
-        attributes: ['id'],
-    });
     if (!membership) throw ApiError.notFound('That event is not on your account.');
     return { event, isOwner: false };
 };
@@ -93,7 +96,8 @@ const ensurePresets = async (event) => {
     const have = await EventSocialLink.count({
         where: { event_id: event.id, platform_key: [...PRESET_KEYS] },
     });
-    if (have >= PRESETS.length) return;
+    // true = rows were just inserted (the caller re-reads); false = nothing to do.
+    if (have >= PRESETS.length) return false;
     const values = PRESETS.map((p, i) => [
         event.id, event.website_client_id, p.key, p.name, p.name, i - PRESETS.length, event.company_id ?? null,
     ]);
@@ -103,6 +107,7 @@ const ensurePresets = async (event) => {
          VALUES ${values.map(() => '(?, ?, ?, ?, ?, ?, ?, NOW(), NOW())').join(', ')}`,
         { replacements: values.flat() },
     );
+    return true;
 };
 
 const present = (row) => {
@@ -143,8 +148,13 @@ const rowsFor = (eventId) => EventSocialLink.findAll({ where: { event_id: eventI
 /** Host: every link, presets with no URL included. Participant: links with a URL that are switched on. */
 const list = async (clientId, eventId) => {
     const { event, isOwner } = await resolveEventForView(clientId, eventId);
-    await ensurePresets(event);
-    const [rows, menu] = await Promise.all([rowsFor(event.id), menuState(event)]);
+    // The presets exist on every event after its first read, so the rows are
+    // read beside the check rather than after it; only the one read that has
+    // to create them reads the rows again.
+    const [created, firstRows, menu] = await Promise.all([
+        ensurePresets(event), rowsFor(event.id), menuState(event),
+    ]);
+    const rows = created ? await rowsFor(event.id) : firstRows;
     const links = rows.map(present).filter((l) => isOwner || (l.url && l.show_in_app));
     return { links, ...menu, icon_size: ICON_SIZE, can_edit: isOwner };
 };

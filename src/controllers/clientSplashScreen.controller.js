@@ -64,6 +64,7 @@ const forEvent = asyncHandler(async (req, res) => {
     const splash = await service.getActiveSplashForEvent(
         req.websiteClient.id,
         req.params.eventId,
+        req.websiteClient,
     );
     return ApiResponse.success(res, { splash_screen: splash ?? null }, 'Splash screen retrieved');
 });

@@ -73,14 +73,14 @@ const join = asyncHandler(async (req, res) => {
 
 /** The app's My Events for somebody who is a guest rather than a host. */
 const myEvents = asyncHandler(async (req, res) => {
-    const events = await service.myEvents(req.websiteClient.id);
+    const events = await service.myEvents(req.websiteClient.id, req.websiteClient);
     logger.logRequest(req, `Listed ${events.length} joined events`);
     return ApiResponse.success(res, { events });
 });
 
 /** The signed-in guest's own RSVP for one event, plus whether they may still answer. */
 const myRsvp = asyncHandler(async (req, res) => {
-    const result = await service.getMyRsvp(req.websiteClient.id, req.params.id);
+    const result = await service.getMyRsvp(req.websiteClient.id, req.params.id, req.websiteClient);
     return ApiResponse.success(res, result, 'RSVP retrieved');
 });
 
@@ -96,7 +96,7 @@ const submitMyRsvp = asyncHandler(async (req, res) => {
  * status. Open to the host and to any guest who joined; see the service.
  */
 const participantsDirectory = asyncHandler(async (req, res) => {
-    const members = await service.participantsDirectory(req.websiteClient.id, req.params.id);
+    const members = await service.participantsDirectory(req.websiteClient.id, req.params.id, req.websiteClient);
     return ApiResponse.success(res, members, 'Participants retrieved');
 });
 

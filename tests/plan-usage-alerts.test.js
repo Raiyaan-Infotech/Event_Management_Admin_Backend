@@ -80,6 +80,16 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
         const plain = real?.toJSON ? real.toJSON() : (real || {});
         return { ...plain, storage_limit: storageLimitBytes / (1024 * 1024), storage_unit: 'MB' };
     };
+    // The gallery / wish paths read limits and storage through these one-read
+    // helpers (2026-10-23 speed-up), so they are stubbed with the same values.
+    const realLimits = plans.getPlanLimits;
+    const realStoragePlan = plans.getClientStoragePlan;
+    plans.getPlanLimits = async (planId, keys) => {
+        const out = {};
+        for (const k of keys) out[k] = await plans.getPlanLimit(planId, k);
+        return out;
+    };
+    plans.getClientStoragePlan = async () => ({ storage_limit: storageLimitBytes / (1024 * 1024), storage_unit: 'MB' });
     const pushes = [];
     pushSender.sendToTokens = async (tokens, payload) => {
         pushes.push({ count: tokens.length, payload });
@@ -170,6 +180,8 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     } finally {
         plans.getPlanLimit = realLimit;
         plans.getById = realGetById;
+        plans.getPlanLimits = realLimits;
+        plans.getClientStoragePlan = realStoragePlan;
         pushSender.sendToTokens = realSend;
         for (const id of madeWishes) {
             // eslint-disable-next-line no-await-in-loop

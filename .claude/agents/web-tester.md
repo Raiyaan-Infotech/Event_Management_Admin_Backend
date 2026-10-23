@@ -78,6 +78,11 @@ servers himself and keeps them running.
 - ⚠ Cross-account isolation is the highest-value API test here: take an id you own, and try to reach it while authenticated as a different account. It must 404, not 403 with details and not 200.
 
 ## 5. Load / performance testing
+- **Backend repo has two ready-made scripts — use them first, they need no install:**
+  - `node tests/perf-client-api.js` — one user, every endpoint the MOBILE APP calls, first/median/max ms. This is "how long does the app wait".
+  - `node tests/load-client-api.js` — same endpoints at 1/10/25 concurrent (`LEVELS=`, `SECONDS=`), req/s, p50/p95/p99, errors, plus a whole-app-session scenario. `REPORT=1` writes `qa-reports/<date>-load-report.md`. It refuses non-localhost hosts.
+  - Both need Jamal's local server already running; if `/health` does not answer, report "not run — server down" and stop (HARD RULE 1). Local timings measure CODE only; production adds ~374ms per DB round trip, so for a slow endpoint count its DB queries (`SHOW GLOBAL STATUS LIKE 'Questions'` before/after one call) and report round trips, not just ms.
+  - For every endpoint over 400ms p95, say WHY (query count, missing index via `EXPLAIN`, payload bytes, N+1 include) and the specific fix.
 - Run a lightweight load test against key endpoints/pages using `autocannon` or `ab`/`hey` IF ALREADY PRESENT. Report requests/sec, latency p50/p95/p99, and error rate. Local URLs only.
 - Check for connection pool exhaustion under load if the backend hits MySQL directly (watch for "too many connections" errors in server logs during the run).
 - Run a Lighthouse pass on key pages if `lighthouse` is already available; flag any category under 80.

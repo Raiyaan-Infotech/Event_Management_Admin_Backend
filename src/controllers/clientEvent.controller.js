@@ -15,18 +15,17 @@ const { organisedBy } = require('../middleware/eventOrganizerAccess');
 
 /** The dashboard's event grid. Paginated, tab-filtered, searchable. */
 const list = asyncHandler(async (req, res) => {
-    const { rows, pagination } = await clientEventService.listEvents(
-        req.websiteClient.id,
-        req.query
-    );
-
     /*
       The events this account ORGANISES for somebody else go on the same list
       (first page), read as their owner would read them and marked
       `is_organizer` — the app hides Delete on those. A client who is also an
-      organizer sees both.
+      organizer sees both. Looked up beside the client's own page: neither read
+      needs the other.
     */
-    const organised = await organisedBy(req.websiteClient.id);
+    const [{ rows, pagination }, organised] = await Promise.all([
+        clientEventService.listEvents(req.websiteClient.id, req.query),
+        organisedBy(req.websiteClient.id),
+    ]);
     if (organised.size && (Number(req.query.page) || 1) === 1) {
         const theirs = await Promise.all(
             [...organised.entries()].map(([eventId, ownerId]) =>
@@ -90,6 +89,7 @@ const getById = asyncHandler(async (req, res) => {
     // portal its website menus — see presentOne.
     const event = await clientEventService.getEventForViewer(req.websiteClient.id, req.params.id, {
         platform: clientPortalService.platformFromHeader(req.get('x-client')),
+        viewer: req.websiteClient,
     });
     if (!event) throw ApiError.notFound('Event not found.');
     // Read by the event's organizer (see eventOrganizerAccess), not its owner.
@@ -171,7 +171,7 @@ const uploadInvitationImage = asyncHandler(async (req, res) => {
  */
 const wishlist = asyncHandler(async (req, res) => {
     const platform = clientPortalService.platformFromHeader(req.get('x-client'));
-    const events = await clientEventService.getWishlist(req.websiteClient.id, { platform });
+    const events = await clientEventService.getWishlist(req.websiteClient.id, { platform, viewer: req.websiteClient });
     // `{ events }`, matching /events/joined — the app reads data.events for
     // every list endpoint, and a bare array here would be the one exception.
     return ApiResponse.success(res, { events }, 'Wishlist retrieved');

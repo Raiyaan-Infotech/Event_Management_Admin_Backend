@@ -73,15 +73,19 @@ const resolveEvent = async (clientId, rawId) => {
 const resolveEventForView = async (clientId, rawId) => {
     const eventId = Number(rawId);
     if (!eventId) throw ApiError.badRequest('Please choose an event.');
-    const event = await Event.findByPk(eventId, { attributes: EVENT_ATTRS });
+    // The event and the membership probe do not depend on each other — read
+    // together, so a guest pays one round trip here, not two.
+    const [event, membership] = await Promise.all([
+        Event.findByPk(eventId, { attributes: EVENT_ATTRS }),
+        EventParticipant.findOne({
+            where: { event_id: eventId, participant_client_id: clientId },
+            attributes: ['id'],
+        }),
+    ]);
     if (!event) throw ApiError.notFound('That event was not found.');
 
     if (Number(event.website_client_id) === Number(clientId)) return { event, isOwner: true };
 
-    const membership = await EventParticipant.findOne({
-        where: { event_id: event.id, participant_client_id: clientId },
-        attributes: ['id'],
-    });
     if (!membership) throw ApiError.notFound('That event is not on your account.');
     return { event, isOwner: false };
 };

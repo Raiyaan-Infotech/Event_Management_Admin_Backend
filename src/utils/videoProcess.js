@@ -68,7 +68,9 @@ const probe = (file) => new Promise((resolve) => {
     child.on('close', () => {
         const v = err.match(/Video: (\w+)[^\n]*?, (yuv\w+|nv12|gbrp|rgb\w*)/);
         const a = err.match(/Audio: (\w+)/);
-        resolve({ codec: v && v[1], pixFmt: v && v[2], audio: a ? a[1] : null });
+        const d = err.match(/Duration: (\d+):(\d+):(\d+(?:\.\d+)?)/);
+        const duration = d ? Number(d[1]) * 3600 + Number(d[2]) * 60 + Number(d[3]) : null;
+        resolve({ codec: v && v[1], pixFmt: v && v[2], audio: a ? a[1] : null, duration });
     });
 });
 
@@ -176,6 +178,71 @@ const videoPoster = async (buffer) => {
     }
 };
 
+/**
+ * A video's length in seconds, or null when it cannot be read (never throws).
+ * Shorts are refused over a minute.
+ */
+const videoDuration = async (buffer) => {
+    if (!ffmpegPath || !buffer || !buffer.length) return null;
+    const [inFile] = tempPaths('vdur', 'mp4');
+    try {
+        fs.writeFileSync(inFile, buffer);
+        const { duration } = await probe(inFile);
+        return Number.isFinite(duration) ? duration : null;
+    } catch (_) {
+        return null;
+    } finally {
+        cleanup(inFile);
+    }
+};
+
+/**
+ * A short's background music (Jamal, 2026-10-23): the song REPLACES the
+ * video's own sound, fitted to the video — looped when the song is shorter,
+ * cut at the video's end when longer, with a short fade-out at the end. The
+ * picture is copied when every phone can already play it, else made plain
+ * H.264. Always an MP4.
+ *
+ * THROWS on failure — unlike processVideo, a short the host asked to carry
+ * music must not quietly go up without it. The caller turns it into a 400.
+ */
+const addMusic = async (videoBuffer, videoMime, musicBuffer) => {
+    if (!ffmpegPath) throw new Error('ffmpeg is not available');
+    const [vIn, outFile] = tempPaths('vm', 'mp4');
+    const [mIn] = tempPaths('vm-music', 'audio');
+    try {
+        fs.writeFileSync(vIn, videoBuffer);
+        fs.writeFileSync(mIn, musicBuffer);
+        const [{ codec, pixFmt, duration }, music] = await Promise.all([probe(vIn), probe(mIn)]);
+        if (!duration) throw new Error('the video could not be read');
+        if (!music.audio) throw new Error('the music file has no sound');
+
+        const playable = videoMime !== 'video/webm' && codec === 'h264' && pixFmt === 'yuv420p';
+        const fade = Math.min(1.5, duration / 4);
+        await run([
+            '-y',
+            '-i', vIn,
+            // Loop the song for as long as the picture needs it.
+            '-stream_loop', '-1', '-i', mIn,
+            '-map', '0:v:0', '-map', '1:a:0',
+            ...(playable
+                ? ['-c:v', 'copy']
+                : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '26', '-pix_fmt', 'yuv420p', '-profile:v', 'main']),
+            '-af', `afade=t=out:st=${Math.max(0, duration - fade).toFixed(2)}:d=${fade.toFixed(2)}`,
+            '-c:a', 'aac', '-b:a', '128k',
+            // Exactly the picture's length.
+            '-t', duration.toFixed(2),
+            '-movflags', '+faststart',
+            outFile,
+        ]);
+        const out = fs.readFileSync(outFile);
+        if (!out.length) throw new Error('ffmpeg wrote nothing');
+        return { buffer: out, mimetype: 'video/mp4', duration };
+    } finally {
+        cleanup(vIn, mIn, outFile);
+    }
+};
+
 /** Boot-time check, one log line: is ffmpeg runnable, and which version. */
 const selfCheck = () => {
     const child = spawn(ffmpegPath, ['-hide_banner', '-version'], { windowsHide: true });
@@ -190,4 +257,4 @@ const selfCheck = () => {
 };
 ensureBinary().then(selfCheck);
 
-module.exports = { processVideo, videoPoster };
+module.exports = { processVideo, videoPoster, videoDuration, addMusic };

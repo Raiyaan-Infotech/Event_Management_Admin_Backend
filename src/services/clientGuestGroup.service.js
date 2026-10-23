@@ -36,25 +36,28 @@ const withCounts = async (clientId, groups) => {
     if (groups.length === 0) return [];
     const ids = groups.map((g) => g.id);
 
-    // Members = the phone-book guests in the group (§581).
-    const members = await Guest.findAll({
-        where: { website_client_id: clientId, group_id: { [Op.in]: ids } },
-        attributes: ['group_id', [Sequelize.fn('COUNT', Sequelize.col('id')), 'members']],
-        group: ['group_id'],
-        raw: true,
-    });
-
-    // Events = DISTINCT events a member of the group has joined, through the
-    // phone-book guest they are. (A participant has no group of its own — Jamal,
-    // 2026-10-12.) COUNT(DISTINCT), or 400 people at one wedding read as 400 events.
-    const events = await sequelize.query(
-        `SELECT c.group_id, COUNT(DISTINCT g.event_id) AS events
-           FROM event_participants g
-           JOIN guests c ON c.id = g.guest_id AND c.deleted_at IS NULL
-          WHERE g.website_client_id = :clientId AND g.deleted_at IS NULL AND c.group_id IN (:ids)
-          GROUP BY c.group_id`,
-        { replacements: { clientId, ids }, type: Sequelize.QueryTypes.SELECT },
-    );
+    // Both counts at once — independent reads, one round trip.
+    const [members, events] = await Promise.all([
+        // Members = the phone-book guests in the group (§581).
+        Guest.findAll({
+            where: { website_client_id: clientId, group_id: { [Op.in]: ids } },
+            attributes: ['group_id', [Sequelize.fn('COUNT', Sequelize.col('id')), 'members']],
+            group: ['group_id'],
+            raw: true,
+        }),
+        // Events = DISTINCT events a member of the group has joined, through the
+        // phone-book guest they are. (A participant has no group of its own —
+        // Jamal, 2026-10-12.) COUNT(DISTINCT), or 400 people at one wedding read
+        // as 400 events.
+        sequelize.query(
+            `SELECT c.group_id, COUNT(DISTINCT g.event_id) AS events
+               FROM event_participants g
+               JOIN guests c ON c.id = g.guest_id AND c.deleted_at IS NULL
+              WHERE g.website_client_id = :clientId AND g.deleted_at IS NULL AND c.group_id IN (:ids)
+              GROUP BY c.group_id`,
+            { replacements: { clientId, ids }, type: Sequelize.QueryTypes.SELECT },
+        ),
+    ]);
 
     const memberCount = new Map(members.map((r) => [Number(r.group_id), Number(r.members)]));
     const eventCount = new Map(events.map((r) => [Number(r.group_id), Number(r.events)]));
