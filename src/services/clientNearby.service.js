@@ -59,7 +59,11 @@ const EVENT_ATTRS = [
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-const apiKey = () => process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_PLACES_API_KEY || '';
+// `Places_API` = the name used on Render (Jamal, 2026-10-24).
+const apiKey = () => process.env.GOOGLE_MAPS_API_KEY
+    || process.env.GOOGLE_PLACES_API_KEY
+    || process.env.Places_API
+    || '';
 
 /** Distance in km between two points (haversine), 2 decimals. */
 const distanceKm = (lat1, lng1, lat2, lng2) => {
