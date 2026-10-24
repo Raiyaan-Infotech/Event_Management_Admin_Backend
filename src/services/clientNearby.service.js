@@ -319,6 +319,8 @@ const list = async (clientId, eventId, query = {}) => {
     // Guests see nothing until the organizer has set Near By up.
     if (!isOwner && !settings.saved) return { ...base, places: [], fetched_at: null };
     if (!venue.has_location) {
+        // A guest cannot fix the pin — they just see no places.
+        if (!isOwner) return { ...base, places: [], fetched_at: null };
         throw ApiError.badRequest('Please set the venue location on the map first.');
     }
     if (!settings.categories.length) return { ...base, places: [], fetched_at: null };
