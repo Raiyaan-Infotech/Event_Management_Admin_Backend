@@ -23,6 +23,7 @@ const socialLinkController = require('../controllers/clientSocialLink.controller
 const socialLinkService = require('../services/clientSocialLink.service');
 const familyController = require('../controllers/clientFamily.controller');
 const wishController = require('../controllers/clientWish.controller');
+const nearbyController = require('../controllers/clientNearby.controller');
 const wishService = require('../services/clientWish.service');
 const organizerContactController = require('../controllers/clientOrganizerContact.controller');
 const agendaService = require('../services/clientAgenda.service');
@@ -930,6 +931,11 @@ router.post('/wishes/:wishId/like', wishController.like);
 router.delete('/wishes/:wishId/like', wishController.unlike);
 router.post('/wishes/:wishId/block', wishController.block);
 router.delete('/wishes/:wishId/block', wishController.unblock);
+
+// Near By (2026-10-24): settings = organizer; places = organizer + participants.
+router.get('/events/:id/nearby-settings', nearbyController.getSettings);
+router.put('/events/:id/nearby-settings', nearbyController.updateSettings);
+router.get('/events/:id/nearby', nearbyController.list);
 
 // The app's read: the ACTIVE splash for one event, or null. Declared BEFORE
 // `/splash-screens/:id` — the same ordering trap as `/events/stats`, since

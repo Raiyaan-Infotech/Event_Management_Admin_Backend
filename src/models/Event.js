@@ -201,6 +201,13 @@ module.exports = (sequelize) => {
              * migrations/sql/20261016-event-wish-settings.sql.
              */
             wish_settings: { type: DataTypes.JSON, allowNull: true },
+            /**
+             * Near By (the app's Near By Settings): { categories, radius_km,
+             * sort }. NULL = not set up. The Google Places result lives in
+             * event_nearby_cache (clientNearby.service). See
+             * migrations/sql/20261024-event-nearby-settings.sql.
+             */
+            nearby_settings: { type: DataTypes.JSON, allowNull: true },
         },
         {
             tableName: 'events',
