@@ -34,6 +34,13 @@ module.exports = (sequelize) => {
             type: DataTypes.STRING(300),
             allowNull: true,
         },
+        // Contact Person responsibilities (admin Menu module, 2026-10-26):
+        // a JSON list of names; only the contact-us menu uses it. See
+        // migrations/sql/20261026-event-menu-responsibilities.sql.
+        responsibilities: {
+            type: DataTypes.JSON,
+            allowNull: true,
+        },
         // Core / Add-on: a label only — every menu a plan grants is offered to
         // every event; `is_default` (not this column) decides whether an event
         // may switch it off. `quick_action` (2026-10-19) is different: a menu

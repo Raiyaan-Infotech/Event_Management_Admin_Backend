@@ -774,7 +774,7 @@ const presentOne = async (event, { platform = 'website', isOwner = true } = {}) 
                 // name / icon / color / sort_order: the app draws its Explore
                 // tiles straight from these (Menu Management is the source of
                 // the label, icon and order — nothing about a tile is hardcoded).
-                attributes: ['id', 'name', 'slug', 'icon', 'color', 'sort_order', 'is_default', 'event_category_id'],
+                attributes: ['id', 'name', 'slug', 'icon', 'color', 'sort_order', 'is_default', 'event_category_id', 'responsibilities'],
                 order: [['sort_order', 'ASC'], ['id', 'ASC']],
                 raw: true,
             })
@@ -788,7 +788,20 @@ const presentOne = async (event, { platform = 'website', isOwner = true } = {}) 
 
     const categoryId = presented.event_category_id ? Number(presented.event_category_id) : null;
     const menus = [];
+    // The Contact Person menu's responsibilities (admin Menu module) go out as
+    // the event's `contact_responsibilities`; no other menu carries the list.
+    presented.contact_responsibilities = [];
     for (const row of menuRows) {
+        const { responsibilities: rawResp, ...rest } = row;
+        if (row.slug === 'contact-us' && rawResp) {
+            let list = rawResp;
+            if (typeof list === 'string') {
+                try { list = JSON.parse(list); } catch { list = []; }
+            }
+            presented.contact_responsibilities = Array.isArray(list) ? list.map(String) : [];
+        }
+        Object.keys(row).forEach((k) => delete row[k]);
+        Object.assign(row, rest);
         const on = chosen.has(Number(row.id))
             // A default menu is always on — but only where it suits the
             // event's category, the same rule the wizard and the save apply.
@@ -1088,6 +1101,25 @@ const listEvents = async (clientId, query = {}) => {
     // that actually left.
     const ids = rows.map((r) => r.id);
     const counts = new Map();
+    // Which menus are ON for each event (`menu_slugs`), by the same rule as
+    // presentOne: plan-granted, active, not a Home Quick Action, and either
+    // switched on (menu_ids) or Default for the event's category. Home's Quick
+    // Actions / Quick View hide a menu that is off, and the event picker
+    // offers only the events it is on for (Jamal, 2026-10-26). Started now,
+    // awaited after the counts query, so it costs no extra round trip time.
+    const menuDefsP = ids.length
+        ? clientPortalService.ownerGrantedMenuIds(clientId).then((granted) => (granted.length
+            ? EventMenu.findAll({
+                where: {
+                    id: { [Op.in]: granted },
+                    is_active: 1,
+                    menu_group: { [Op.ne]: 'quick_action' },
+                },
+                attributes: ['id', 'slug', 'is_default', 'event_category_id'],
+                raw: true,
+            })
+            : []))
+        : Promise.resolve([]);
     if (ids.length) {
         const found = await sequelize.query(
             `SELECT e.id AS event_id,
@@ -1108,8 +1140,16 @@ const listEvents = async (clientId, query = {}) => {
         );
         for (const c of found) counts.set(Number(c.event_id), c);
     }
+    const menuDefs = await menuDefsP;
     const presented = rows.map((r) => {
         const row = present(r);
+        const chosen = new Set(row.menu_ids.map(Number));
+        const cat = row.event_category_id ? Number(row.event_category_id) : null;
+        row.menu_slugs = menuDefs
+            .filter((m) => chosen.has(Number(m.id))
+                || (Number(m.is_default) === 1
+                    && (!m.event_category_id || !cat || Number(m.event_category_id) === cat)))
+            .map((m) => m.slug);
         const c = counts.get(Number(row.id));
         row.guest_count = Number(c?.guest_count) || 0;
         row.confirmed_count = Number(c?.confirmed_count) || 0;

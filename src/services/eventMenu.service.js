@@ -26,6 +26,7 @@ const WRITABLE_FIELDS = [
     'slug',
     'description',
     'remarks',
+    'responsibilities',
     'menu_group',
     'event_category_id',
     'is_default',
@@ -55,12 +56,36 @@ const slugify = (value) =>
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '');
 
+/**
+ * Contact Person responsibilities: trimmed, de-duplicated names, at most 20 of
+ * 60 characters each. An empty list is stored as NULL (the app then falls
+ * back to its own six).
+ */
+const cleanResponsibilities = (value) => {
+    if (value === null || value === '') return null;
+    const list = Array.isArray(value) ? value : [];
+    const names = [];
+    for (const raw of list) {
+        const name = String(raw ?? '').trim();
+        if (!name) continue;
+        if (name.length > 60) {
+            throw ApiError.badRequest('Each responsibility must be 60 characters or fewer.');
+        }
+        if (!names.some((n) => n.toLowerCase() === name.toLowerCase())) names.push(name);
+    }
+    if (names.length > 20) throw ApiError.badRequest('Please add up to 20 responsibilities.');
+    return names.length ? names : null;
+};
+
 const pickWritable = (data = {}) => {
     const picked = WRITABLE_FIELDS.reduce((acc, key) => {
         if (data[key] !== undefined) acc[key] = data[key];
         return acc;
     }, {});
     if (picked.is_default !== undefined) picked.is_default = toBit(picked.is_default, 0);
+    if (picked.responsibilities !== undefined) {
+        picked.responsibilities = cleanResponsibilities(picked.responsibilities);
+    }
     return picked;
 };
 
