@@ -332,6 +332,15 @@ router.put('/events/:id/organizer-contact', organizerContactController.updateCon
 // Menu Config — which additional menus the contact person may use (owner only).
 router.get('/events/:id/contact-menus', organizerContactController.getContactMenus);
 router.put('/events/:id/contact-menus', organizerContactController.updateContactMenus);
+// Contact Person chat (2026-10-26): the team's Participant Chats, and a
+// participant's own chat with the event team.
+const contactChatController = require('../controllers/clientContactChat.controller');
+router.get('/events/:id/contact-chats', contactChatController.list);
+router.get('/events/:id/contact-chats/:chatId/messages', contactChatController.messages);
+router.post('/events/:id/contact-chats/:chatId/messages', contactChatController.reply);
+router.patch('/events/:id/contact-chats/:chatId', contactChatController.status);
+router.get('/events/:id/my-contact-chat', contactChatController.myChat);
+router.post('/events/:id/my-contact-chat/messages', contactChatController.sendMine);
 
 router.get('/events/:id/notification-templates', eventNotificationTemplateController.listApplicable);
 router.patch('/events/:id/notification-templates/:templateId', eventNotificationTemplateController.toggle);
