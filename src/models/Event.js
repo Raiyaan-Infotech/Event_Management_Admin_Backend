@@ -208,6 +208,21 @@ module.exports = (sequelize) => {
              * migrations/sql/20261024-event-nearby-settings.sql.
              */
             nearby_settings: { type: DataTypes.JSON, allowNull: true },
+            /**
+             * Contact Person Profile (2026-10-26) — the contact person's own
+             * details; name / photo / mobile / email are organizer,
+             * organizer_image, contact_phone, contact_email. Times are 'HH:MM'
+             * (24h); languages is a JSON string array. Responsibilities are fixed in
+             * the app, not stored.
+             * See migrations/sql/20261026-event-contact-person.sql.
+             */
+            contact_designation: { type: DataTypes.STRING(100), allowNull: true },
+            contact_whatsapp: { type: DataTypes.STRING(30), allowNull: true },
+            contact_address: { type: DataTypes.STRING(500), allowNull: true },
+            contact_time_from: { type: DataTypes.STRING(5), allowNull: true },
+            contact_time_to: { type: DataTypes.STRING(5), allowNull: true },
+            contact_languages: { type: DataTypes.JSON, allowNull: true },
+            contact_about: { type: DataTypes.STRING(300), allowNull: true },
         },
         {
             tableName: 'events',
