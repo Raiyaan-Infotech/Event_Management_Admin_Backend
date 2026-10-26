@@ -11,26 +11,32 @@ const service = require('../services/clientContactChat.service');
  */
 const ownerId = (req) => req.websiteClient.id;
 const senderId = (req) => (req.organizerClient || req.websiteClient).id;
+/** The caller is the event's contact person (organizer login), not its owner. */
+const asContactPerson = (req) => Boolean(req.organizerClient);
 
 const list = asyncHandler(async (req, res) => {
-    const data = await service.listChats(ownerId(req), req.params.id);
+    const data = await service.listChats(ownerId(req), req.params.id, asContactPerson(req));
     return ApiResponse.success(res, data, 'Participant chats retrieved');
 });
 
 const messages = asyncHandler(async (req, res) => {
-    const data = await service.getTeamMessages(ownerId(req), req.params.id, req.params.chatId, senderId(req));
+    const data = await service.getTeamMessages(
+        ownerId(req), req.params.id, req.params.chatId, senderId(req), asContactPerson(req),
+    );
     return ApiResponse.success(res, data, 'Chat retrieved');
 });
 
 const reply = asyncHandler(async (req, res) => {
     const message = await service.sendTeamMessage(
-        ownerId(req), req.params.id, req.params.chatId, senderId(req), req.body?.body,
+        ownerId(req), req.params.id, req.params.chatId, senderId(req), req.body?.body, asContactPerson(req),
     );
     return ApiResponse.created(res, { message }, 'Message sent');
 });
 
 const status = asyncHandler(async (req, res) => {
-    const chat = await service.setStatus(ownerId(req), req.params.id, req.params.chatId, String(req.body?.status || ''));
+    const chat = await service.setStatus(
+        ownerId(req), req.params.id, req.params.chatId, String(req.body?.status || ''), asContactPerson(req),
+    );
     return ApiResponse.success(res, { chat }, 'Chat updated');
 });
 

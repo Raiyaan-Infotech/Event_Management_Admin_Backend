@@ -1,5 +1,5 @@
 const { Op } = require('sequelize');
-const { WebsiteClient, EventMenu } = require('../models');
+const { WebsiteClient, EventMenu, Event } = require('../models');
 const ApiError = require('../utils/apiError');
 const clientPortalService = require('./clientPortal.service');
 
@@ -43,8 +43,66 @@ const baseSlug = (slug) => String(slug || '').replace(/-\d+$/, '');
  * in Menu Management's order. Nothing here is hardcoded: what the admin adds
  * in Menu Management and ticks on the plan is what the organizer can pick.
  */
+/**
+ * The menu ids a CONTACT PERSON (organizer login) gets through the events
+ * they run for somebody else (Jamal, 2026-10-26): per event, the owner's
+ * plan menus that are ON for it (switched on, or Default for its category),
+ * an additional one only when the owner allowed it in Menu Config
+ * (`contact_menu_ids`, NULL = all). Home Quick Action menus of the owner's
+ * plan (My Plan, …) are the owner's, so not included.
+ */
+const organisedMenuIds = async (clientId) => {
+    const events = await Event.findAll({
+        where: { organizer_client_id: clientId, website_client_id: { [Op.ne]: clientId } },
+        attributes: ['id', 'website_client_id', 'menu_ids', 'event_category_id', 'contact_menu_ids'],
+        raw: true,
+    });
+    if (!events.length) return [];
+    const parse = (v) => {
+        if (typeof v !== 'string') return v;
+        try { return JSON.parse(v); } catch { return null; }
+    };
+    const owners = [...new Set(events.map((e) => Number(e.website_client_id)))];
+    const grants = new Map(await Promise.all(
+        owners.map(async (o) => [o, await clientPortalService.ownerGrantedMenuIds(o)]),
+    ));
+    const allIds = [...new Set([...grants.values()].flat().map(Number))];
+    if (!allIds.length) return [];
+    const defs = await EventMenu.findAll({
+        where: { id: { [Op.in]: allIds }, is_active: 1, menu_group: { [Op.ne]: 'quick_action' } },
+        attributes: ['id', 'is_default', 'event_category_id'],
+        raw: true,
+    });
+    const out = new Set();
+    for (const e of events) {
+        const granted = new Set((grants.get(Number(e.website_client_id)) || []).map(Number));
+        const chosen = new Set((parse(e.menu_ids) || []).map(Number));
+        const allowedRaw = parse(e.contact_menu_ids);
+        const allowed = Array.isArray(allowedRaw) ? new Set(allowedRaw.map(Number)) : null;
+        const cat = e.event_category_id ? Number(e.event_category_id) : null;
+        for (const m of defs) {
+            const id = Number(m.id);
+            if (!granted.has(id)) continue;
+            const isDefault = Number(m.is_default) === 1;
+            const on = chosen.has(id)
+                || (isDefault && (!m.event_category_id || !cat || Number(m.event_category_id) === cat));
+            if (!on) continue;
+            if (!isDefault && allowed && !allowed.has(id)) continue;
+            out.add(id);
+        }
+    }
+    return [...out];
+};
+
 const availableFor = async (clientId) => {
-    const ids = await clientPortalService.ownerGrantedMenuIds(clientId);
+    // The caller's own plan, plus the menus of the events they run as a
+    // contact person — a contact person with no plan of their own got an
+    // empty Home before this.
+    const [own, organised] = await Promise.all([
+        clientPortalService.ownerGrantedMenuIds(clientId),
+        organisedMenuIds(clientId),
+    ]);
+    const ids = [...new Set([...own, ...organised].map(Number))];
     if (!ids.length) return [];
     const menus = await EventMenu.findAll({
         where: { id: { [Op.in]: ids }, is_active: 1 },

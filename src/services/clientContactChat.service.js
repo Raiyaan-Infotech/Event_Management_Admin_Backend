@@ -16,6 +16,13 @@ const { Op } = Sequelize;
  *
  * Status: open → resolved (a label; a new participant message reopens it) →
  * blocked (the participant can no longer send in THIS event's chat).
+ *
+ * WHO ANSWERS (Jamal, 2026-10-26): the CONTACT PERSON is responsible — they
+ * reply, resolve and block. The OWNER only READS (monitors), unless the event
+ * has no separate contact person (organizer_client_id empty / the owner), in
+ * which case the owner is the contact person. [asContactPerson] = the caller
+ * came in through eventOrganizerAccess. Reading as the owner does not clear
+ * the unread count — it belongs to whoever answers.
  */
 
 const MAX_BODY = 2000;
@@ -37,7 +44,10 @@ const resolveEvent = async (clientId, rawId) => {
     if (!eventId) throw ApiError.badRequest('Please choose an event.');
     const [event, membership] = await Promise.all([
         Event.findByPk(eventId, {
-            attributes: ['id', 'name', 'website_client_id', 'organizer', 'organizer_image', 'contact_designation'],
+            attributes: [
+                'id', 'name', 'website_client_id', 'organizer_client_id',
+                'organizer', 'organizer_image', 'contact_designation',
+            ],
         }),
         EventParticipant.findOne({
             where: { event_id: eventId, participant_client_id: clientId },
@@ -92,6 +102,14 @@ const assertTeam = async (clientId, eventId) => {
     return r;
 };
 
+/** Whether this team member answers: the contact person, or the owner of an
+ *  event with no separate contact person. */
+const answers = (event, asContactPerson) => {
+    if (asContactPerson) return true;
+    const org = Number(event.organizer_client_id) || 0;
+    return !org || org === Number(event.website_client_id);
+};
+
 const teamChat = async (clientId, eventId, chatId) => {
     const { event } = await assertTeam(clientId, eventId);
     const chat = await EventContactChat.findOne({ where: { id: Number(chatId) || 0, event_id: event.id } });
@@ -99,8 +117,14 @@ const teamChat = async (clientId, eventId, chatId) => {
     return { event, chat };
 };
 
+const assertAnswers = (event, asContactPerson) => {
+    if (!answers(event, asContactPerson)) {
+        throw ApiError.forbidden('Only the contact person can reply to participants. You can read the chats.');
+    }
+};
+
 /** Participant Chats: every chat of the event, newest first, with counts. */
-const listChats = async (clientId, eventId) => {
+const listChats = async (clientId, eventId, asContactPerson = false) => {
     const { event } = await assertTeam(clientId, eventId);
     const chats = await EventContactChat.findAll({
         where: { event_id: event.id },
@@ -141,22 +165,34 @@ const listChats = async (clientId, eventId) => {
         resolved: rows.filter((r) => r.status === 'resolved').length,
         blocked: rows.filter((r) => r.status === 'blocked').length,
     };
-    return { event: { id: event.id, name: event.name }, chats: rows, counts };
+    return {
+        event: { id: event.id, name: event.name },
+        can_reply: answers(event, asContactPerson),
+        chats: rows,
+        counts,
+    };
 };
 
 /** One chat for the team; reading it clears the team's unread count. */
-const getTeamMessages = async (clientId, eventId, chatId, senderId) => {
-    const { chat } = await teamChat(clientId, eventId, chatId);
+const getTeamMessages = async (clientId, eventId, chatId, senderId, asContactPerson = false) => {
+    const { event, chat } = await teamChat(clientId, eventId, chatId);
+    const canReply = answers(event, asContactPerson);
     const [rows] = await Promise.all([
         lastMessages(chat.id),
-        chat.team_unread ? chat.update({ team_unread: 0 }) : null,
+        // Only the one who answers clears the unread count.
+        canReply && chat.team_unread ? chat.update({ team_unread: 0 }) : null,
     ]);
-    return { chat: { id: chat.id, status: chat.status }, messages: await shapeMessages(rows, senderId) };
+    return {
+        chat: { id: chat.id, status: chat.status },
+        can_reply: canReply,
+        messages: await shapeMessages(rows, senderId),
+    };
 };
 
-const sendTeamMessage = async (clientId, eventId, chatId, senderId, rawBody) => {
+const sendTeamMessage = async (clientId, eventId, chatId, senderId, rawBody, asContactPerson = false) => {
     const body = cleanBody(rawBody);
-    const { chat } = await teamChat(clientId, eventId, chatId);
+    const { event, chat } = await teamChat(clientId, eventId, chatId);
+    assertAnswers(event, asContactPerson);
     const msg = await EventContactChatMessage.create({
         chat_id: chat.id, sender_side: 'team', sender_client_id: senderId, body,
     });
@@ -169,9 +205,10 @@ const sendTeamMessage = async (clientId, eventId, chatId, senderId, rawBody) => 
     return (await shapeMessages([msg.get({ plain: true })], senderId))[0];
 };
 
-const setStatus = async (clientId, eventId, chatId, status) => {
+const setStatus = async (clientId, eventId, chatId, status, asContactPerson = false) => {
     if (!STATUSES.includes(status)) throw ApiError.badRequest('Please choose a valid status.');
-    const { chat } = await teamChat(clientId, eventId, chatId);
+    const { event, chat } = await teamChat(clientId, eventId, chatId);
+    assertAnswers(event, asContactPerson);
     await chat.update({ status });
     return { id: chat.id, status: chat.status };
 };
