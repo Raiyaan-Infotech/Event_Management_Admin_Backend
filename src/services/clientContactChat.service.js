@@ -45,7 +45,7 @@ const resolveEvent = async (clientId, rawId) => {
     const [event, membership] = await Promise.all([
         Event.findByPk(eventId, {
             attributes: [
-                'id', 'name', 'website_client_id', 'organizer_client_id',
+                'id', 'name', 'website_client_id', 'contact_phone',
                 'organizer', 'organizer_image', 'contact_designation',
             ],
         }),
@@ -72,13 +72,18 @@ const clientNames = async (ids) => {
     return new Map(rows.map((r) => [Number(r.id), { name: r.name, photo: r.avatar_url || null }]));
 };
 
-const shapeMessages = async (rows, viewerId) => {
+/**
+ * [event] names a team sender with no account (id 0 = the event's contact
+ * person, who is not a client): their name is the event's contact name.
+ */
+const shapeMessages = async (rows, viewerId, event = null) => {
     const names = await clientNames(rows.map((m) => m.sender_client_id));
     return rows.map((m) => ({
         id: m.id,
         side: m.sender_side,
         mine: Number(m.sender_client_id) === Number(viewerId),
-        sender_name: names.get(Number(m.sender_client_id))?.name || null,
+        sender_name: names.get(Number(m.sender_client_id))?.name
+            || (m.sender_side === 'team' && Number(m.sender_client_id) === 0 ? event?.organizer || 'Contact Person' : null),
         body: m.body,
         created_at: m.created_at,
     }));
@@ -102,12 +107,22 @@ const assertTeam = async (clientId, eventId) => {
     return r;
 };
 
-/** Whether this team member answers: the contact person, or the owner of an
- *  event with no separate contact person. */
-const answers = (event, asContactPerson) => {
+const national = (raw) => {
+    const d = String(raw || '').replace(/\D/g, '');
+    return d.length >= 7 ? d.slice(-10) : null;
+};
+
+/**
+ * Whether this team member answers: the contact person, or the owner when the
+ * event has no SEPARATE contact person — no contact number, or the owner's
+ * own (2026-10-26: the contact person is the event's contact number).
+ */
+const answers = async (event, asContactPerson) => {
     if (asContactPerson) return true;
-    const org = Number(event.organizer_client_id) || 0;
-    return !org || org === Number(event.website_client_id);
+    const contact = national(event.contact_phone);
+    if (!contact) return true;
+    const owner = await WebsiteClient.findByPk(event.website_client_id, { attributes: ['mobile'], raw: true });
+    return contact === national(owner?.mobile);
 };
 
 const teamChat = async (clientId, eventId, chatId) => {
@@ -117,8 +132,8 @@ const teamChat = async (clientId, eventId, chatId) => {
     return { event, chat };
 };
 
-const assertAnswers = (event, asContactPerson) => {
-    if (!answers(event, asContactPerson)) {
+const assertAnswers = async (event, asContactPerson) => {
+    if (!(await answers(event, asContactPerson))) {
         throw ApiError.forbidden('Only the contact person can reply to participants. You can read the chats.');
     }
 };
@@ -167,7 +182,7 @@ const listChats = async (clientId, eventId, asContactPerson = false) => {
     };
     return {
         event: { id: event.id, name: event.name },
-        can_reply: answers(event, asContactPerson),
+        can_reply: await answers(event, asContactPerson),
         chats: rows,
         counts,
     };
@@ -176,7 +191,7 @@ const listChats = async (clientId, eventId, asContactPerson = false) => {
 /** One chat for the team; reading it clears the team's unread count. */
 const getTeamMessages = async (clientId, eventId, chatId, senderId, asContactPerson = false) => {
     const { event, chat } = await teamChat(clientId, eventId, chatId);
-    const canReply = answers(event, asContactPerson);
+    const canReply = await answers(event, asContactPerson);
     const [rows] = await Promise.all([
         lastMessages(chat.id),
         // Only the one who answers clears the unread count.
@@ -185,14 +200,14 @@ const getTeamMessages = async (clientId, eventId, chatId, senderId, asContactPer
     return {
         chat: { id: chat.id, status: chat.status },
         can_reply: canReply,
-        messages: await shapeMessages(rows, senderId),
+        messages: await shapeMessages(rows, senderId, event),
     };
 };
 
 const sendTeamMessage = async (clientId, eventId, chatId, senderId, rawBody, asContactPerson = false) => {
     const body = cleanBody(rawBody);
     const { event, chat } = await teamChat(clientId, eventId, chatId);
-    assertAnswers(event, asContactPerson);
+    await assertAnswers(event, asContactPerson);
     const msg = await EventContactChatMessage.create({
         chat_id: chat.id, sender_side: 'team', sender_client_id: senderId, body,
     });
@@ -202,13 +217,13 @@ const sendTeamMessage = async (clientId, eventId, chatId, senderId, rawBody, asC
         participant_unread: chat.participant_unread + 1,
         team_unread: 0,
     });
-    return (await shapeMessages([msg.get({ plain: true })], senderId))[0];
+    return (await shapeMessages([msg.get({ plain: true })], senderId, event))[0];
 };
 
 const setStatus = async (clientId, eventId, chatId, status, asContactPerson = false) => {
     if (!STATUSES.includes(status)) throw ApiError.badRequest('Please choose a valid status.');
     const { event, chat } = await teamChat(clientId, eventId, chatId);
-    assertAnswers(event, asContactPerson);
+    await assertAnswers(event, asContactPerson);
     await chat.update({ status });
     return { id: chat.id, status: chat.status };
 };
@@ -238,7 +253,7 @@ const getMyChat = async (clientId, eventId) => {
     return {
         chat: { id: chat.id, status: chat.status },
         contact,
-        messages: await shapeMessages(rows, clientId),
+        messages: await shapeMessages(rows, clientId, event),
     };
 };
 
@@ -263,7 +278,7 @@ const sendMyMessage = async (clientId, eventId, rawBody) => {
         // A new question reopens a resolved chat.
         status: chat.status === 'resolved' ? 'open' : chat.status,
     });
-    return (await shapeMessages([msg.get({ plain: true })], clientId))[0];
+    return (await shapeMessages([msg.get({ plain: true })], clientId, event))[0];
 };
 
 module.exports = {

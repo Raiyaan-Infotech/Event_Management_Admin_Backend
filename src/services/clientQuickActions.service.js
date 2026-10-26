@@ -51,9 +51,12 @@ const baseSlug = (slug) => String(slug || '').replace(/-\d+$/, '');
  * (`contact_menu_ids`, NULL = all). Home Quick Action menus of the owner's
  * plan (My Plan, …) are the owner's, so not included.
  */
-const organisedMenuIds = async (clientId) => {
+const organisedMenuIds = async (caller) => {
+    // The events the caller's number is the contact person of (2026-10-26).
+    const organised = await require('../middleware/eventOrganizerAccess').organisedBy(caller);
+    if (!organised.size) return [];
     const events = await Event.findAll({
-        where: { organizer_client_id: clientId, website_client_id: { [Op.ne]: clientId } },
+        where: { id: { [Op.in]: [...organised.keys()] } },
         attributes: ['id', 'website_client_id', 'menu_ids', 'event_category_id', 'contact_menu_ids'],
         raw: true,
     });
@@ -94,13 +97,14 @@ const organisedMenuIds = async (clientId) => {
     return [...out];
 };
 
-const availableFor = async (clientId) => {
+const availableFor = async (caller) => {
+    const clientId = caller.id;
     // The caller's own plan, plus the menus of the events they run as a
     // contact person — a contact person with no plan of their own got an
     // empty Home before this.
     const [own, organised] = await Promise.all([
         clientPortalService.ownerGrantedMenuIds(clientId),
-        organisedMenuIds(clientId),
+        organisedMenuIds(caller),
     ]);
     const ids = [...new Set([...own, ...organised].map(Number))];
     if (!ids.length) return [];
@@ -167,11 +171,14 @@ const shape = (available, stored) => {
 };
 
 /** GET /client/quick-actions */
-const get = async (clientId) => {
+const get = async (caller) => {
+    const clientId = caller.id;
+    // A contact person has no account to keep an order on: the default order.
+    if (caller.is_contact_person) return shape(await availableFor(caller), null);
     // The saved list and the plan's menus are independent — read together.
     const [client, available] = await Promise.all([
         WebsiteClient.findByPk(clientId, { attributes: ['id', 'quick_actions'] }),
-        availableFor(clientId),
+        availableFor(caller),
     ]);
     if (!client) throw ApiError.notFound('Account not found.');
     return shape(available, client.quick_actions);
@@ -182,10 +189,14 @@ const get = async (clientId) => {
  * A slug the plan does not grant is dropped, not refused (an app showing a
  * stale list must still be able to save). `slugs: null` = back to the default.
  */
-const save = async (clientId, slugs) => {
+const save = async (caller, slugs) => {
+    const clientId = caller.id;
+    if (caller.is_contact_person) {
+        throw ApiError.forbidden('As an event contact person, your Quick Actions follow the event.');
+    }
     const client = await WebsiteClient.findByPk(clientId, { attributes: ['id', 'quick_actions'] });
     if (!client) throw ApiError.notFound('Account not found.');
-    const available = await availableFor(clientId);
+    const available = await availableFor(caller);
     if (slugs === null) {
         await WebsiteClient.update({ quick_actions: null }, { where: { id: clientId } });
         return shape(available, null);

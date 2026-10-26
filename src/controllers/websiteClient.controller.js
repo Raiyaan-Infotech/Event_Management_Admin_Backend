@@ -5,6 +5,7 @@ const logger = require('../utils/logger');
 const { asyncHandler } = require('../utils/helpers');
 const {
     generateWebsiteClientAccessToken, generateWebsiteClientRefreshToken, verifyRefreshToken,
+    generateContactPersonAccessToken, generateContactPersonRefreshToken,
     generateWebsiteClient2faChallengeToken, verifyWebsiteClient2faChallengeToken,
     generateDeviceTrustToken, verifyDeviceTrustToken,
 } = require('../utils/jwt');
@@ -392,6 +393,19 @@ const deleteById = asyncHandler(async (req, res) => {
  * `expires_in` is stated so the app can refresh ahead of expiry instead of
  * hardcoding a number that only this backend knows.
  */
+/**
+ * An event contact person's session (2026-10-26): no account, so no session
+ * row — the token carries the number. `client` is the id-0 stand-in the app
+ * reads like any account.
+ */
+const contactPersonPayload = (cp) => ({
+    client: require('../services/eventOrganizer.service').contactPersonCaller(cp).toJSON(),
+    access_token: generateContactPersonAccessToken(cp),
+    refresh_token: generateContactPersonRefreshToken(cp),
+    token_type: 'Bearer',
+    expires_in: 15 * 60,
+});
+
 const sessionPayload = async (client, req) => {
     const { accessToken, refreshToken } = await sessionService.issueSession({ client, req });
     return {
@@ -415,6 +429,12 @@ const requestLoginOtp = asyncHandler(async (req, res) => {
 const verifyLoginOtp = asyncHandler(async (req, res) => {
     const vendorId = req.body.vendor_id || req.query.vendor_id || req.companyId || undefined;
     const client = await websiteClientService.verifyLoginOtp(req.body, vendorId);
+
+    if (client && client.contactPerson) {
+        const cpPayload = contactPersonPayload(client.contactPerson);
+        logger.logRequest(req, `Mobile OTP login: contact person ${client.contactPerson.mobile}`);
+        return ApiResponse.success(res, cpPayload, 'Login successful');
+    }
 
     // Cookies are set as well, so the SAME endpoint works if the web portal ever
     // wants OTP sign-in. Harmless to an app, which ignores them.
@@ -454,6 +474,15 @@ const refreshSession = asyncHandler(async (req, res) => {
     if (!token) return ApiResponse.error(res, 'A refresh token is required.', 401);
 
     const decoded = verifyRefreshToken(token);
+    if (decoded && decoded.type === 'contact_person') {
+        // Still the contact person of an event? Otherwise the session ends.
+        const cp = await require('../services/eventOrganizer.service')
+            .contactPersonFor(decoded.mobile, decoded.vendorId);
+        if (!cp) {
+            return ApiResponse.error(res, 'You are no longer the contact person of an event.', 401);
+        }
+        return ApiResponse.success(res, contactPersonPayload(cp), 'Session refreshed');
+    }
     if (!decoded || decoded.type !== 'website_client') {
         return ApiResponse.error(res, 'Your session has expired. Please sign in again.', 401);
     }

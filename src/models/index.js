@@ -168,6 +168,8 @@ db.EventNearbyCache = require('./EventNearbyCache')(sequelize, Sequelize);
 // Contact Person chat (2026-10-26).
 db.EventContactChat = require('./EventContactChat')(sequelize, Sequelize);
 db.EventContactChatMessage = require('./EventContactChatMessage')(sequelize, Sequelize);
+// Contact person sign-in code (2026-10-26) - not an account.
+db.ContactPersonLogin = require('./ContactPersonLogin')(sequelize, Sequelize);
 db.EventParticipant = require('./EventParticipant')(sequelize, Sequelize);
 // The client's phone book (§581). Participants are EventParticipant.
 db.Guest = require('./Guest')(sequelize, Sequelize);

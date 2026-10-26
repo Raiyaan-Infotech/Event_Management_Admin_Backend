@@ -1,6 +1,6 @@
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
-const { Sequelize, WebsiteClient, Vendor, Event, EventParticipant } = require('../models');
+const { Sequelize, WebsiteClient, Vendor, Event, EventParticipant, ContactPersonLogin } = require('../models');
 const { Op } = Sequelize;
 const baseService = require('./base.service');
 const ApiError = require('../utils/apiError');
@@ -580,18 +580,10 @@ const findClientByMobile = async (mobile, vendorId, { allowParticipant = true } 
     }
 
     /*
-      Still nobody: is it the organizer number of an event? The owner typed it
-      on the Organizer page, so its holder is to manage that event — give the
-      number an account, exactly as a participant's number is given one above.
+      A number that is only an EVENT'S CONTACT PERSON gets no account here
+      (Jamal, 2026-10-26) — the contact person lives on the event. The login
+      steps below sign them in from the event instead (contactPersonFor).
     */
-    if (!client) {
-        const made = await eventOrganizer.createFromEvent(digits, resolvedVendorId);
-        if (made) {
-            client = await WebsiteClient.unscoped().findByPk(made.id, {
-                attributes: { exclude: ['password'] },
-            });
-        }
-    }
 
     /**
      * ⚠ THIS ANSWER REVEALS WHETHER A NUMBER IS REGISTERED.
@@ -623,9 +615,70 @@ const findClientByMobile = async (mobile, vendorId, { allowParticipant = true } 
  * password at all) can use the app. That is a feature of this route, not a hole:
  * possession of the number is what is being tested, in place of the password.
  */
+/**
+ * The client behind a number, or null when there is none — only "not
+ * registered" is swallowed, so a contact person can be tried next.
+ */
+const clientOrNull = async (mobile, vendorId, opts) => {
+    try {
+        return await findClientByMobile(mobile, vendorId, opts);
+    } catch (e) {
+        if (e.statusCode === 401) return null;
+        throw e;
+    }
+};
+
+/**
+ * A number with no account that is an event's CONTACT PERSON (2026-10-26):
+ * the code is kept in contact_person_logins, never on a client row.
+ */
+const contactPersonOtp = async (cp, data) => {
+    const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+    const otpHash = await bcrypt.hash(code, 10);
+    const [row] = await ContactPersonLogin.findOrCreate({
+        where: { vendor_id: cp.vendorId, mobile: cp.mobile },
+        defaults: { vendor_id: cp.vendorId, mobile: cp.mobile },
+    });
+    await row.update({
+        otp_hash: otpHash,
+        otp_expires_at: new Date(Date.now() + OTP_TTL_SECONDS * 1000),
+        otp_attempts: 0,
+    });
+    const mobileDigits = digitsOnly(data.mobile);
+    const [delivery, smsDelivery] = await Promise.all([
+        msg91.sendOtp({ dialCode: cp.dialCode, mobile: mobileDigits, code, purpose: 'login' }),
+        msg91Sms.sendOtp({ dialCode: cp.dialCode, mobile: mobileDigits, code, purpose: 'login' }),
+    ]);
+    delivery.delivered = delivery.delivered || smsDelivery.delivered;
+    if (!delivery.delivered) {
+        logger.info?.(`[OTP] login code for contact person ${cp.dialCode}${cp.mobile}: ${code} (NOT SENT — ${delivery.reason})`);
+    }
+    const echo = process.env.NODE_ENV !== 'production'
+        && (process.env.OTP_DEV_ECHO === 'true'
+            || delivery.reason === 'disabled'
+            || delivery.reason === 'not_configured');
+    return {
+        expires_in: OTP_TTL_SECONDS,
+        delivered: delivery.delivered,
+        ...(delivery.delivered || process.env.NODE_ENV === 'production'
+            ? {}
+            : { delivery_error: delivery.reason }),
+        ...(echo ? { dev_code: code } : {}),
+    };
+};
+
 const requestLoginOtp = async (data = {}, vendorId = DEFAULT_VENDOR_ID) => {
     const isOrganizer = data.login_as === 'organizer';
-    const client = await findClientByMobile(data.mobile, vendorId, { allowParticipant: !isOrganizer });
+    const client = await clientOrNull(data.mobile, vendorId, { allowParticipant: !isOrganizer });
+    if (!client) {
+        // Not a client: an event's contact person signs in from the event.
+        const cp = await eventOrganizer.contactPersonFor(data.mobile, Number(vendorId) || DEFAULT_VENDOR_ID);
+        if (!cp) throw ApiError.unauthorized('No account is registered with that mobile number.');
+        if (!isOrganizer) {
+            throw ApiError.forbidden('This number is an event contact person. Please sign in as Event Organizer.');
+        }
+        return contactPersonOtp(cp, data);
+    }
 
     // The app's "Event Organizer" button sends `login_as: 'organizer'`. There is
     // no organizer flag on the account, so owning a live event is the test —
@@ -725,8 +778,33 @@ const requestLoginOtp = async (data = {}, vendorId = DEFAULT_VENDOR_ID) => {
  * put on the account.
  */
 const verifyLoginOtp = async (data = {}, vendorId = DEFAULT_VENDOR_ID) => {
-    const client = await findClientByMobile(data.mobile, vendorId);
     const code = digitsOnly(data.otp);
+    const client = await clientOrNull(data.mobile, vendorId, {
+        allowParticipant: data.login_as !== 'organizer',
+    });
+    if (!client) {
+        // An event's contact person (no account): checked against their code.
+        const cp = await eventOrganizer.contactPersonFor(data.mobile, Number(vendorId) || DEFAULT_VENDOR_ID);
+        if (!cp) throw ApiError.unauthorized('No account is registered with that mobile number.');
+        const row = await ContactPersonLogin.findOne({ where: { vendor_id: cp.vendorId, mobile: cp.mobile } });
+        if (!row || !row.otp_hash || !row.otp_expires_at) {
+            throw ApiError.badRequest('Please request a code first.');
+        }
+        if (new Date(row.otp_expires_at).getTime() < Date.now()) {
+            throw ApiError.badRequest('That code has expired. Please request a new one.');
+        }
+        if (row.otp_attempts >= OTP_MAX_ATTEMPTS) {
+            throw ApiError.badRequest('Too many incorrect attempts. Please request a new code.');
+        }
+        const ok = process.env.OTP_ACCEPT_ANY === 'true'
+            || (code.length === 6 && (await bcrypt.compare(code, row.otp_hash)));
+        if (!ok) {
+            await row.update({ otp_attempts: row.otp_attempts + 1 });
+            throw ApiError.badRequest('That code is not correct.');
+        }
+        await row.update({ otp_hash: null, otp_expires_at: null, otp_attempts: 0, last_login_at: new Date() });
+        return { contactPerson: cp };
+    }
 
     if (!client.otp_hash || !client.otp_expires_at) {
         throw ApiError.badRequest('Please request a code first.');
@@ -789,10 +867,8 @@ const verifyLoginOtp = async (data = {}, vendorId = DEFAULT_VENDOR_ID) => {
     }
 
     // Re-read through the default scope so the caller never holds otp_hash.
-    // Signed in: every event whose organizer number is this one is theirs to
-    // manage from here on.
-    await eventOrganizer.claimForClient(client);
-
+    // The events this number is the contact person of are found by number on
+    // every request (eventOrganizerAccess) — nothing to link here.
     return WebsiteClient.findByPk(client.id);
 };
 

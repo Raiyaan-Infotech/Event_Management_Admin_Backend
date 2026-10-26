@@ -155,7 +155,8 @@ const applyFilter = (text, filter) => {
 /** Tell the organizer a post was flagged (in-app; best effort, never throws). */
 const notifyFlagged = async (event, wish) => {
     const snippet = Array.from(wish.message || '').slice(0, 120).join('');
-    const ids = [...new Set([event.website_client_id, event.organizer_client_id].map(Number).filter(Boolean))];
+    // The owner (an event contact person has no account to notify; 2026-10-26).
+    const ids = [Number(event.website_client_id)].filter(Boolean);
     await Promise.all(ids.map((id) => notificationService.notify(id, {
         type: 'wish_flagged',
         title: 'A wish was flagged',

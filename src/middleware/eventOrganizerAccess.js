@@ -53,22 +53,27 @@ const forget = () => {
     ownerCache.clear();
 };
 
-/** The events [clientId] organises (and does not own), as eventId -> ownerId. */
-const organisedBy = async (clientId) => {
-    const hit = organisedCache.get(clientId);
+/**
+ * The events [caller] is the CONTACT PERSON of (and does not own), as
+ * eventId -> ownerId — matched on the event's contact mobile (2026-10-26; no
+ * client link any more). [caller] = { id, mobile, vendor_id } — a client, or
+ * the id-0 stand-in of a contact person with no account.
+ */
+const organisedBy = async (caller) => {
+    if (!caller || !caller.mobile) return new Map();
+    const { nationalOf, eventsForNumber } = require('../services/eventOrganizer.service');
+    const national = nationalOf(caller.mobile);
+    const key = `${caller.vendor_id}:${national}:${caller.id}`;
+    const hit = organisedCache.get(key);
     if (hit && Date.now() - hit.at < TTL_MS) return hit.events;
 
-    const rows = await Event.findAll({
-        where: { organizer_client_id: clientId },
-        attributes: ['id', 'website_client_id'],
-        raw: true,
-    });
+    const rows = await eventsForNumber(national, caller.vendor_id);
     const events = new Map(
         rows
-            .filter((r) => Number(r.website_client_id) !== Number(clientId))
+            .filter((r) => Number(r.website_client_id) !== Number(caller.id))
             .map((r) => [Number(r.id), Number(r.website_client_id)]),
     );
-    organisedCache.set(clientId, { at: Date.now(), events });
+    organisedCache.set(key, { at: Date.now(), events });
     return events;
 };
 
@@ -142,7 +147,7 @@ const eventOrganizerAccess = async (req, res, next) => {
         const caller = req.websiteClient;
         if (!caller) return next();
 
-        const organised = await organisedBy(caller.id);
+        const organised = await organisedBy(caller);
         // Nearly everybody: organises nothing, nothing to do, no extra query.
         if (!organised.size) return next();
 

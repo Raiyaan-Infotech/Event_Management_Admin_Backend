@@ -13,6 +13,10 @@ const sessionService = require('../services/clientSession.service');
  * Reads req.websiteClient, set by isWebsiteClientAuthenticated.
  */
 const me = asyncHandler(async (req, res) => {
+    // An event contact person has no account: who they are comes from the event.
+    if (req.contactPerson) {
+        return ApiResponse.success(res, { client: req.websiteClient.toJSON() }, 'Client profile retrieved');
+    }
     const client = await clientPortalService.getMe(req.websiteClient.id);
     if (!client) throw ApiError.notFound('Account not found.');
     return ApiResponse.success(res, { client }, 'Client profile retrieved');
@@ -48,7 +52,7 @@ const setFavouriteTemplates = asyncHandler(async (req, res) => {
  * the ones the organizer put on Home, in order (`selected`).
  */
 const getQuickActions = asyncHandler(async (req, res) => {
-    const data = await quickActionsService.get(req.websiteClient.id);
+    const data = await quickActionsService.get(req.websiteClient);
     return ApiResponse.success(res, data, 'Quick actions retrieved');
 });
 
@@ -57,7 +61,7 @@ const saveQuickActions = asyncHandler(async (req, res) => {
     const slugs = req.body && Object.prototype.hasOwnProperty.call(req.body, 'slugs')
         ? req.body.slugs
         : undefined;
-    const data = await quickActionsService.save(req.websiteClient.id, slugs);
+    const data = await quickActionsService.save(req.websiteClient, slugs);
     return ApiResponse.success(res, data, 'Quick actions saved');
 });
 
@@ -97,6 +101,9 @@ const proxyImage = asyncHandler(async (req, res) => {
 
 /** Update the signed-in client's own profile. */
 const updateMe = asyncHandler(async (req, res) => {
+    if (req.contactPerson) {
+        throw ApiError.forbidden('Your details are kept on the event. Please ask the event owner to change them.');
+    }
     const client = await clientPortalService.updateMe(req.websiteClient.id, req.body);
     logger.logRequest(req, `Client profile updated: ${req.websiteClient.id}`);
     return ApiResponse.success(res, { client }, 'Profile updated');
@@ -136,6 +143,9 @@ const changeMyPassword = asyncHandler(async (req, res) => {
  * as a mysterious 401 rather than as "you closed your account".
  */
 const deleteMyAccount = asyncHandler(async (req, res) => {
+    if (req.contactPerson) {
+        throw ApiError.forbidden('There is no account to delete — you are signed in as an event contact person.');
+    }
     // The body carries the identity confirmation — a password, or the account's
     // own email address for a social-only client that has none.
     await clientPortalService.deleteMyAccount(req.websiteClient.id, req.body);

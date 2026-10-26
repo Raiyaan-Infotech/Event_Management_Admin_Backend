@@ -164,6 +164,29 @@ const generateWebsiteClientRefreshToken = (client, jti = null) => {
   );
 };
 
+/**
+ * Contact person (2026-10-26): an EVENT's contact, signed in by the event's
+ * contact mobile — no website_clients row, so no session row either. The
+ * token carries the number; every request re-checks it against the events.
+ */
+const generateContactPersonAccessToken = (cp) => jwt.sign(
+  {
+    type: 'contact_person',
+    mobile: cp.mobile,
+    dialCode: cp.dialCode || '+91',
+    vendorId: cp.vendorId,
+    companyId: cp.companyId || null,
+  },
+  getAccessSecret(),
+  { expiresIn: '15m' },
+);
+
+const generateContactPersonRefreshToken = (cp) => jwt.sign(
+  { type: 'contact_person', mobile: cp.mobile, vendorId: cp.vendorId, jti: uuidv4() },
+  getRefreshSecret(),
+  { expiresIn: '30d' },
+);
+
 // Vendor handoff — short-lived token to carry a vendor session across domains
 // (e.g. vendor portal → website builder, which lives on a different origin).
 const generateVendorHandoffToken = (vendor) => {
@@ -262,6 +285,8 @@ module.exports = {
   generateClientRefreshToken,
   generateWebsiteClientAccessToken,
   generateWebsiteClientRefreshToken,
+  generateContactPersonAccessToken,
+  generateContactPersonRefreshToken,
   generateVendorHandoffToken,
   verifyVendorHandoffToken,
   generateClientHandoffToken,

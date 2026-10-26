@@ -76,87 +76,78 @@ const eventsForNumber = async (national, vendorId) => {
 };
 
 /**
- * After an event's organizer number changed: point it at the account that
- * number belongs to, or at nobody. Creates no account — a number that has
- * never signed in is linked when it first does.
+ * ── CONTACT PERSON = THE EVENT'S CONTACT (Jamal, 2026-10-26) ─────────────
+ * One event has one contact person, kept ON THE EVENT (organizer,
+ * contact_phone, contact_*). They are not clients: no website_clients row is
+ * made for them (the accounts the 2026-10-13 version created were removed by
+ * tools/apply-contact-person-logins.js). Who runs which event is read from the
+ * event's contact mobile each time — `events.organizer_client_id` is no longer
+ * written or read. A number that IS a client (or a participant) signs in as
+ * itself and also gets the events it is the contact of.
  */
+
+/** An event's contact number changed: drop the cached "who runs what". */
 const syncEvent = async (event) => {
-    if (!event) return null;
-    const national = nationalOf(event.contact_phone);
-    let organizerId = null;
-
-    if (national) {
-        const owner = await WebsiteClient.unscoped().findByPk(event.website_client_id, {
-            attributes: ['id', 'vendor_id'],
-        });
-        const account = owner && await WebsiteClient.unscoped().findOne({
-            where: { vendor_id: owner.vendor_id, mobile: national },
-            attributes: ['id'],
-        });
-        if (account && Number(account.id) !== Number(event.website_client_id)) {
-            organizerId = Number(account.id);
-        }
-    }
-
-    // Written every time, not only when the instance in hand looks different:
-    // that instance may be stale, and a link left behind is somebody keeping
-    // control of an event after their number was taken off it.
-    await Event.update({ organizer_client_id: organizerId }, { where: { id: event.id } });
-    forgetAccess();
-    return organizerId;
+    if (event) forgetAccess();
+    return null;
 };
 
-/**
- * When an account signs in: every event whose organizer number is theirs
- * becomes theirs to manage. One UPDATE. Returns how many events they organise.
- */
+/** How many events [client]'s number is the contact person of (not their own). */
 const claimForClient = async (client) => {
     if (!client) return 0;
     const events = await eventsForNumber(nationalOf(client.mobile), client.vendor_id);
-    const mine = events.filter((e) => Number(e.website_client_id) !== Number(client.id));
-    const unlinked = mine.filter((e) => Number(e.organizer_client_id) !== Number(client.id));
-    if (unlinked.length) {
-        await Event.update(
-            { organizer_client_id: client.id },
-            { where: { id: unlinked.map((e) => e.id) } },
-        );
-        forgetAccess();
-    }
-    return mine.length;
+    return events.filter((e) => Number(e.website_client_id) !== Number(client.id)).length;
 };
 
 /**
- * A number with no account that IS some event's organizer number: give it one,
- * so it can sign in. Named after the organizer the owner typed. Null when no
- * event has that number — the caller then answers "not registered".
+ * The contact person behind a number with NO account: who they are, taken
+ * from the newest event that names them. Null when no event has the number.
  */
-const createFromEvent = async (mobile, vendorId) => {
+const contactPersonFor = async (mobile, vendorId) => {
     const national = nationalOf(mobile);
     const events = await eventsForNumber(national, vendorId);
     if (!events.length) return null;
-
     const newest = events[0];
-    return WebsiteClient.create({
-        name: String(newest.organizer || '').trim() || 'Organizer',
-        dial_code: dialOf(newest.contact_phone),
+    return {
         mobile: national,
-        vendor_id: vendorId,
-        company_id: newest.company_id ?? null,
-        source: 'website',
-        is_active: 1,
-        avatar_url: newest.organizer_image || null,
-    });
+        dialCode: dialOf(newest.contact_phone),
+        vendorId: Number(vendorId),
+        companyId: newest.company_id ?? null,
+        name: String(newest.organizer || '').trim() || 'Contact Person',
+        photo: newest.organizer_image || null,
+        events: events.length,
+    };
 };
 
-/** How many events this account organises (not counting the ones it owns). */
-const countOrganised = (clientId) =>
-    Event.count({ where: { organizer_client_id: clientId } });
+/**
+ * The stand-in for `req.websiteClient` when a contact person (no account) is
+ * signed in: id 0, so everything that is the CALLER's own (billing, phone
+ * book, their own events) is empty, and their events come through
+ * eventOrganizerAccess by the number. `toJSON()` is what /me returns.
+ */
+const contactPersonCaller = (cp) => {
+    const plain = {
+        id: 0,
+        name: cp.name,
+        email: null,
+        dial_code: cp.dialCode || '+91',
+        mobile: cp.mobile,
+        avatar_url: cp.photo || null,
+        vendor_id: cp.vendorId,
+        company_id: cp.companyId ?? null,
+        subscription_plan_id: null,
+        plan: null,
+        is_active: 1,
+        is_contact_person: true,
+    };
+    return { ...plain, toJSON: () => ({ ...plain }), get: () => ({ ...plain }) };
+};
 
 module.exports = {
     syncEvent,
     claimForClient,
-    createFromEvent,
-    countOrganised,
+    contactPersonFor,
+    contactPersonCaller,
     // Exported for the tests.
     nationalOf,
     dialOf,

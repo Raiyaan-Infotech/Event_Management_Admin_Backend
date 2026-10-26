@@ -24,7 +24,7 @@ const list = asyncHandler(async (req, res) => {
     */
     const [{ rows, pagination }, organised] = await Promise.all([
         clientEventService.listEvents(req.websiteClient.id, req.query),
-        organisedBy(req.websiteClient.id),
+        organisedBy(req.websiteClient),
     ]);
     if (organised.size && (Number(req.query.page) || 1) === 1) {
         const theirs = await Promise.all(

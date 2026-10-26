@@ -72,6 +72,17 @@ const bearerToken = (req) => {
     return match ? match[1].trim() : null;
 };
 
+/** Contact person lookups, cached a minute per number. */
+const cpCache = new Map();
+const contactPersonCached = async (mobile, vendorId) => {
+    const key = `${vendorId}:${mobile}`;
+    const hit = cpCache.get(key);
+    if (hit && Date.now() - hit.at < 60 * 1000) return hit.cp;
+    const cp = await require('../services/eventOrganizer.service').contactPersonFor(mobile, vendorId);
+    cpCache.set(key, { at: Date.now(), cp });
+    return cp;
+};
+
 const isWebsiteClientAuthenticated = async (req, res, next) => {
     try {
         const headerToken = bearerToken(req);
@@ -111,6 +122,27 @@ const isWebsiteClientAuthenticated = async (req, res, next) => {
                     decoded = verifyAccessToken(newAccess);
                 }
             }
+        }
+
+        if (decoded && decoded.type === 'contact_person') {
+            /*
+              An EVENT'S contact person with no account (2026-10-26). Re-checked
+              every request (cached a minute) — a number taken off every event
+              loses access within that minute.
+            */
+            const cp = await contactPersonCached(decoded.mobile, decoded.vendorId);
+            if (!cp) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'You are no longer the contact person of an event.',
+                });
+            }
+            req.clientSession = null;
+            req.sessionJti = null;
+            req.contactPerson = cp;
+            req.websiteClient = require('../services/eventOrganizer.service').contactPersonCaller(cp);
+            req.companyId = cp.companyId ?? null;
+            return next();
         }
 
         if (!decoded || decoded.type !== 'website_client') {
