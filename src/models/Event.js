@@ -223,6 +223,13 @@ module.exports = (sequelize) => {
             contact_time_to: { type: DataTypes.STRING(5), allowNull: true },
             contact_languages: { type: DataTypes.JSON, allowNull: true },
             contact_about: { type: DataTypes.STRING(300), allowNull: true },
+            /**
+             * Contact person boundaries (2026-10-26): the ADDITIONAL menu ids
+             * the contact person (organizer login) may use. NULL = all.
+             * Default menus are always allowed; participants unaffected. See
+             * migrations/sql/20261026-event-contact-menus.sql.
+             */
+            contact_menu_ids: { type: DataTypes.JSON, allowNull: true },
         },
         {
             tableName: 'events',

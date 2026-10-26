@@ -2,6 +2,7 @@ const { asyncHandler } = require('../utils/helpers');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const { Event } = require('../models');
+const clientEventService = require('../services/clientEvent.service');
 const mediaService = require('../services/media.service');
 const eventOrganizer = require('../services/eventOrganizer.service');
 
@@ -192,4 +193,69 @@ const uploadPhoto = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, { url: stored.url }, 'Photo uploaded');
 });
 
-module.exports = { getContact, updateContact, uploadPhoto };
+/**
+ * Menu Config (contact person boundaries, 2026-10-26) — OWNER only: the
+ * contact person (organizer login) gets 403.
+ *
+ * GET  /events/:id/contact-menus  → { menus: [{ id, name, slug, icon, color,
+ *      allowed }] } — the event's ADDITIONAL menus that are on (Default menus
+ *      are always the contact person's, so not listed).
+ * PUT  /events/:id/contact-menus  { menu_ids: [..] } → saves
+ *      events.contact_menu_ids (ids outside that list are dropped).
+ */
+const ownerEventMenus = async (req) => {
+    if (req.organizerClient) {
+        throw ApiError.forbidden('Only the event owner can change the contact person\'s menus.');
+    }
+    const ownerId = req.websiteClient.id;
+    const exists = await Event.findOne({
+        where: { id: req.params.id, website_client_id: ownerId },
+        attributes: ['id', 'contact_menu_ids'],
+    });
+    if (!exists) throw ApiError.notFound('Event not found.');
+    const event = await clientEventService.getEventById(ownerId, req.params.id);
+    const additional = (event?.menus || []).filter((m) => !m.is_default);
+    let allowed = exists.contact_menu_ids;
+    if (typeof allowed === 'string') {
+        try { allowed = JSON.parse(allowed); } catch { allowed = null; }
+    }
+    return { row: exists, additional, allowed: Array.isArray(allowed) ? allowed.map(Number) : null };
+};
+
+const shapeMenus = (additional, allowed) => additional.map((m) => ({
+    id: m.id,
+    name: m.name,
+    slug: m.slug,
+    icon: m.icon ?? null,
+    color: m.color ?? null,
+    allowed: allowed === null || allowed.includes(Number(m.id)),
+}));
+
+const getContactMenus = asyncHandler(async (req, res) => {
+    const { additional, allowed } = await ownerEventMenus(req);
+    return ApiResponse.success(res, { menus: shapeMenus(additional, allowed) }, 'Contact person menus retrieved');
+});
+
+const updateContactMenus = asyncHandler(async (req, res) => {
+    const { row, additional } = await ownerEventMenus(req);
+    const valid = new Set(additional.map((m) => Number(m.id)));
+    const ids = [...new Set((Array.isArray(req.body?.menu_ids) ? req.body.menu_ids : [])
+        .map(Number)
+        .filter((n) => valid.has(n)))];
+    await row.update({ contact_menu_ids: ids });
+    // A new limit must reach the contact person at once, not after a minute.
+    require('../middleware/eventOrganizerAccess').forget();
+    return ApiResponse.success(
+        res,
+        { menus: shapeMenus(additional, ids) },
+        'Contact person menus updated successfully',
+    );
+});
+
+module.exports = {
+    getContact,
+    updateContact,
+    uploadPhoto,
+    getContactMenus,
+    updateContactMenus,
+};

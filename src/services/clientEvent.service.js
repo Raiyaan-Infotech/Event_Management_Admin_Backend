@@ -1047,6 +1047,26 @@ const attachDesign = async (rows, companyId) => {
  * not cancelled". `published` means everything a guest could see: anything that
  * is neither a draft nor cancelled, whatever its dates.
  */
+/**
+ * Contact person boundaries (2026-10-26): the event as its CONTACT PERSON
+ * (organizer login) sees it — additional menus the owner did not allow
+ * (`contact_menu_ids`) are taken out of `menus`, and `menu_slugs` follows.
+ * Default menus always stay. NULL list = no limit. Mutates and returns [event].
+ */
+const limitForContactPerson = (event) => {
+    if (!event) return event;
+    let allowed = event.contact_menu_ids;
+    if (typeof allowed === 'string') {
+        try { allowed = JSON.parse(allowed); } catch { allowed = null; }
+    }
+    if (Array.isArray(allowed) && Array.isArray(event.menus)) {
+        const ok = new Set(allowed.map(Number));
+        event.menus = event.menus.filter((m) => m.is_default || ok.has(Number(m.id)));
+    }
+    if (Array.isArray(event.menus)) event.menu_slugs = event.menus.map((m) => m.slug);
+    return event;
+};
+
 const listEvents = async (clientId, query = {}) => {
     const page = Math.max(1, Number(query.page) || 1);
     const limit = Math.min(100, Math.max(1, Number(query.limit) || 12));
@@ -1641,6 +1661,7 @@ const setWishlisted = async (clientId, eventId, wishlisted) => {
 };
 
 module.exports = {
+    limitForContactPerson,
     WRITABLE_FIELDS,
     uploadCoverImage,
     uploadInvitationImage,

@@ -32,7 +32,10 @@ const list = asyncHandler(async (req, res) => {
                 clientEventService.getEventById(ownerId, eventId)),
         );
         for (const event of theirs) {
-            if (event) rows.push({ ...event, is_organizer: true });
+            // Only the menus the owner allows this contact person (Menu Config).
+            if (event) {
+                rows.push(clientEventService.limitForContactPerson({ ...event, is_organizer: true }));
+            }
         }
         pagination.totalItems += theirs.filter(Boolean).length;
     }
@@ -93,7 +96,10 @@ const getById = asyncHandler(async (req, res) => {
     });
     if (!event) throw ApiError.notFound('Event not found.');
     // Read by the event's organizer (see eventOrganizerAccess), not its owner.
-    if (req.organizerClient) event.is_organizer = true;
+    if (req.organizerClient) {
+        event.is_organizer = true;
+        clientEventService.limitForContactPerson(event);
+    }
     return ApiResponse.success(res, { event }, 'Event retrieved');
 });
 

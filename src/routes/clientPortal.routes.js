@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const multer = require('multer');
 const router = express.Router();
 const controller = require('../controllers/clientPortal.controller');
@@ -329,6 +329,9 @@ router.post(
 // Declared AFTER /events/:id DELETE to respect Express ordering.
 router.get('/events/:id/organizer-contact', organizerContactController.getContact);
 router.put('/events/:id/organizer-contact', organizerContactController.updateContact);
+// Menu Config — which additional menus the contact person may use (owner only).
+router.get('/events/:id/contact-menus', organizerContactController.getContactMenus);
+router.put('/events/:id/contact-menus', organizerContactController.updateContactMenus);
 
 router.get('/events/:id/notification-templates', eventNotificationTemplateController.listApplicable);
 router.patch('/events/:id/notification-templates/:templateId', eventNotificationTemplateController.toggle);
