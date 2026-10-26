@@ -86,6 +86,46 @@ const eventsForNumber = async (national, vendorId) => {
  * itself and also gets the events it is the contact of.
  */
 
+/* ── Presence: "Online" in the chat = active in the app lately ───────────── */
+
+const ONLINE_MS = 3 * 60 * 1000;
+const TOUCH_EVERY_MS = 60 * 1000;
+const touched = new Map();
+
+/**
+ * Remember that [mobile] used the app just now (one write a minute at most).
+ * Kept per number in contact_person_logins — a contact person has no client
+ * row. Never throws: presence must not break a request.
+ */
+const touchPresence = (mobile, vendorId) => {
+    const national = nationalOf(mobile);
+    if (!national || !vendorId) return;
+    const key = `${vendorId}:${national}`;
+    const last = touched.get(key) || 0;
+    if (Date.now() - last < TOUCH_EVERY_MS) return;
+    touched.set(key, Date.now());
+    const { ContactPersonLogin } = require('../models');
+    ContactPersonLogin.findOrCreate({
+        where: { vendor_id: vendorId, mobile: national },
+        defaults: { vendor_id: vendorId, mobile: national },
+    })
+        .then(([row]) => row.update({ last_seen_at: new Date() }))
+        .catch(() => null);
+};
+
+/** Whether [mobile] used the app in the last few minutes. */
+const isOnline = async (mobile, vendorId) => {
+    const national = nationalOf(mobile);
+    if (!national || !vendorId) return false;
+    const { ContactPersonLogin } = require('../models');
+    const row = await ContactPersonLogin.findOne({
+        where: { vendor_id: vendorId, mobile: national },
+        attributes: ['last_seen_at'],
+        raw: true,
+    });
+    return Boolean(row?.last_seen_at && Date.now() - new Date(row.last_seen_at).getTime() < ONLINE_MS);
+};
+
 /** An event's contact number changed: drop the cached "who runs what". */
 const syncEvent = async (event) => {
     if (event) forgetAccess();
@@ -148,6 +188,8 @@ module.exports = {
     claimForClient,
     contactPersonFor,
     contactPersonCaller,
+    touchPresence,
+    isOnline,
     // Exported for the tests.
     nationalOf,
     dialOf,

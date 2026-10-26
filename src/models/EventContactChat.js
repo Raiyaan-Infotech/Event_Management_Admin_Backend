@@ -9,7 +9,8 @@ module.exports = (sequelize, DataTypes) => sequelize.define(
         id: { type: DataTypes.INTEGER.UNSIGNED, primaryKey: true, autoIncrement: true },
         event_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
         participant_client_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
-        status: { type: DataTypes.ENUM('open', 'resolved', 'blocked'), allowNull: false, defaultValue: 'open' },
+        // 'removed' = taken off Participant Chats (Remove Participant).
+        status: { type: DataTypes.ENUM('open', 'resolved', 'blocked', 'removed'), allowNull: false, defaultValue: 'open' },
         last_message: { type: DataTypes.STRING(255), allowNull: true },
         last_message_at: { type: DataTypes.DATE, allowNull: true },
         team_unread: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false, defaultValue: 0 },

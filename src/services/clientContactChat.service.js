@@ -26,8 +26,11 @@ const { Op } = Sequelize;
  */
 
 const MAX_BODY = 2000;
+const AUTO_REPLY = 'Thanks for contacting us. We are currently offline and will reply soon.';
+/** One auto reply per quiet spell, not one per message. */
+const AUTO_REPLY_GAP_MS = 30 * 60 * 1000;
 const MAX_MESSAGES = 300;
-const STATUSES = ['open', 'resolved', 'blocked'];
+const STATUSES = ['open', 'resolved', 'blocked', 'removed'];
 
 const cleanBody = (raw) => {
     const body = String(raw ?? '').trim();
@@ -85,8 +88,27 @@ const shapeMessages = async (rows, viewerId, event = null) => {
         sender_name: names.get(Number(m.sender_client_id))?.name
             || (m.sender_side === 'team' && Number(m.sender_client_id) === 0 ? event?.organizer || 'Contact Person' : null),
         body: m.body,
+        is_auto: Boolean(m.is_auto),
         created_at: m.created_at,
     }));
+};
+
+/**
+ * Who answers this event's chats, for Online / Offline: the event's contact
+ * number, or the owner's own when it has none.
+ */
+const contactNumberOf = async (event) => {
+    const contact = national(event.contact_phone);
+    const owner = await WebsiteClient.findByPk(event.website_client_id, {
+        attributes: ['mobile', 'vendor_id'],
+        raw: true,
+    });
+    return { mobile: contact || national(owner?.mobile), vendorId: owner?.vendor_id || null };
+};
+
+const contactOnline = async (event) => {
+    const { mobile, vendorId } = await contactNumberOf(event);
+    return require('./eventOrganizer.service').isOnline(mobile, vendorId);
 };
 
 const lastMessages = async (chatId) => {
@@ -142,7 +164,8 @@ const assertAnswers = async (event, asContactPerson) => {
 const listChats = async (clientId, eventId, asContactPerson = false) => {
     const { event } = await assertTeam(clientId, eventId);
     const chats = await EventContactChat.findAll({
-        where: { event_id: event.id },
+        // Removed participants are off the list until they write again.
+        where: { event_id: event.id, status: { [Op.ne]: 'removed' } },
         order: [['last_message_at', 'DESC'], ['id', 'DESC']],
         raw: true,
     });
@@ -152,7 +175,7 @@ const listChats = async (clientId, eventId, asContactPerson = false) => {
         ids.length
             ? EventParticipant.findAll({
                 where: { event_id: event.id, participant_client_id: { [Op.in]: ids } },
-                attributes: ['participant_client_id', 'name', 'photo'],
+                attributes: ['participant_client_id', 'name', 'photo', 'rsvp_side'],
                 raw: true,
             })
             : [],
@@ -167,6 +190,8 @@ const listChats = async (clientId, eventId, asContactPerson = false) => {
                 client_id: c.participant_client_id,
                 name: g?.name || n?.name || 'Participant',
                 photo: g?.photo || n?.photo || null,
+                // groom / bride (RSVP answer) — the list's side filter.
+                side: g?.rsvp_side || null,
             },
             status: c.status,
             last_message: c.last_message,
@@ -217,6 +242,14 @@ const sendTeamMessage = async (clientId, eventId, chatId, senderId, rawBody, asC
         participant_unread: chat.participant_unread + 1,
         team_unread: 0,
     });
+    // The participant's bell: "<contact> replied" (in-app; never throws).
+    require('./clientNotification.service').notify(chat.participant_client_id, {
+        type: 'contact_chat_reply',
+        title: `${event.organizer || 'The contact person'} replied`,
+        body: preview(body),
+        eventId: event.id,
+        meta: { chat_id: chat.id },
+    });
     return (await shapeMessages([msg.get({ plain: true })], senderId, event))[0];
 };
 
@@ -224,7 +257,8 @@ const setStatus = async (clientId, eventId, chatId, status, asContactPerson = fa
     if (!STATUSES.includes(status)) throw ApiError.badRequest('Please choose a valid status.');
     const { event, chat } = await teamChat(clientId, eventId, chatId);
     await assertAnswers(event, asContactPerson);
-    await chat.update({ status });
+    // Resolved / removed: nothing left to read (Jamal's design).
+    await chat.update({ status, ...(status === 'resolved' || status === 'removed' ? { team_unread: 0 } : {}) });
     return { id: chat.id, status: chat.status };
 };
 
@@ -244,6 +278,8 @@ const getMyChat = async (clientId, eventId) => {
         name: event.organizer || null,
         photo: event.organizer_image || null,
         designation: event.contact_designation || null,
+        online: await contactOnline(event),
+        event_name: event.name,
     };
     if (!chat) return { chat: null, contact, messages: [] };
     const [rows] = await Promise.all([
@@ -275,10 +311,31 @@ const sendMyMessage = async (clientId, eventId, rawBody) => {
         last_message_at: new Date(),
         team_unread: chat.team_unread + 1,
         participant_unread: 0,
-        // A new question reopens a resolved chat.
-        status: chat.status === 'resolved' ? 'open' : chat.status,
+        // A new question reopens a resolved (or removed) chat.
+        status: chat.status === 'resolved' || chat.status === 'removed' ? 'open' : chat.status,
     });
-    return (await shapeMessages([msg.get({ plain: true })], clientId, event))[0];
+    const [message] = await shapeMessages([msg.get({ plain: true })], clientId, event);
+
+    // Contact person offline → one automatic reply per quiet spell.
+    const online = await contactOnline(event);
+    let autoReply = null;
+    if (!online) {
+        const recentAuto = await EventContactChatMessage.findOne({
+            where: {
+                chat_id: chat.id,
+                is_auto: true,
+                created_at: { [Op.gt]: new Date(Date.now() - AUTO_REPLY_GAP_MS) },
+            },
+            attributes: ['id'],
+        });
+        if (!recentAuto) {
+            const auto = await EventContactChatMessage.create({
+                chat_id: chat.id, sender_side: 'team', sender_client_id: 0, body: AUTO_REPLY, is_auto: true,
+            });
+            [autoReply] = await shapeMessages([auto.get({ plain: true })], clientId, event);
+        }
+    }
+    return { message, auto_reply: autoReply, contact_online: online };
 };
 
 module.exports = {

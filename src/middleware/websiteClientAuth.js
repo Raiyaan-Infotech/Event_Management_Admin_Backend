@@ -142,6 +142,7 @@ const isWebsiteClientAuthenticated = async (req, res, next) => {
             req.contactPerson = cp;
             req.websiteClient = require('../services/eventOrganizer.service').contactPersonCaller(cp);
             req.companyId = cp.companyId ?? null;
+            require('../services/eventOrganizer.service').touchPresence(cp.mobile, cp.vendorId);
             return next();
         }
 
@@ -207,6 +208,8 @@ const isWebsiteClientAuthenticated = async (req, res, next) => {
         req.clientSession = session;
         req.sessionJti = decoded.sid ?? null;
         req.websiteClient = client;
+        // Online / Offline in the Contact Person chat (throttled, never throws).
+        require('../services/eventOrganizer.service').touchPresence(client.mobile, client.vendor_id);
         // Scope every downstream query to this client's company, the same way
         // extractCompanyContext does for admins.
         req.companyId = client.company_id ?? null;

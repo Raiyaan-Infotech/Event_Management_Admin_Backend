@@ -13,6 +13,8 @@ module.exports = (sequelize, DataTypes) => sequelize.define(
         otp_expires_at: { type: DataTypes.DATE, allowNull: true },
         otp_attempts: { type: DataTypes.TINYINT.UNSIGNED, allowNull: false, defaultValue: 0 },
         last_login_at: { type: DataTypes.DATE, allowNull: true },
+        // Online / Offline in the chat: last request from this number's app.
+        last_seen_at: { type: DataTypes.DATE, allowNull: true },
     },
     { tableName: 'contact_person_logins', timestamps: true, underscored: true },
 );

@@ -46,8 +46,8 @@ const myChat = asyncHandler(async (req, res) => {
 });
 
 const sendMine = asyncHandler(async (req, res) => {
-    const message = await service.sendMyMessage(req.websiteClient.id, req.params.id, req.body?.body);
-    return ApiResponse.created(res, { message }, 'Message sent');
+    const data = await service.sendMyMessage(req.websiteClient.id, req.params.id, req.body?.body);
+    return ApiResponse.created(res, data, 'Message sent');
 });
 
 module.exports = { list, messages, reply, status, myChat, sendMine };
