@@ -735,22 +735,17 @@ const dropBlockedWishesMenu = async (clientId, presented) => {
 };
 
 /**
- * `isOwner` — whether the CALLER hosts this event. Defaults to true because
- * the two owner-scoped readers (`getEventById`, the portal) cannot be anything
- * else; `getEventForViewer` and the wishlist pass the real answer.
- */
-/**
- * The Contact Person responsibilities for [event]'s category — admin Menu
+ * Every Contact Person responsibility for [event]'s category — admin Menu
  * Management → Responsibilities (Jamal, 2026-10-27; was a field on the Contact
  * Person menu). Active rows, in order; the NULL-category (fallback) list when
- * the category has none. [{ name, description }].
+ * the category has none. [{ id, name, description }].
  */
-const contactResponsibilities = async (event) => {
+const categoryResponsibilities = async (event) => {
     const { EventResponsibility } = require('../models');
     const companyId = event.company_id ?? 1;
     const query = (categoryId) => EventResponsibility.findAll({
         where: { company_id: companyId, is_active: 1, event_category_id: categoryId },
-        attributes: ['name', 'description'],
+        attributes: ['id', 'name', 'description'],
         order: [['sort_order', 'ASC'], ['name', 'ASC']],
         raw: true,
     });
@@ -758,12 +753,37 @@ const contactResponsibilities = async (event) => {
         const cat = event.event_category_id ? Number(event.event_category_id) : null;
         const rows = (cat ? await query(cat) : []);
         const list = rows.length ? rows : await query(null);
-        return list.map((r) => ({ name: r.name, description: r.description || null }));
+        return list.map((r) => ({ id: Number(r.id), name: r.name, description: r.description || null }));
     } catch (_) {
         // Table not created yet (migration not run): the app shows its own six.
         return [];
     }
 };
+
+/**
+ * The owner's pick for the contact person (`contact_responsibility_ids`,
+ * Add Responsibility flow 2026-10-27) as numbers; null = no pick yet (all).
+ */
+const pickedResponsibilityIds = (event) => {
+    let ids = event.contact_responsibility_ids;
+    if (typeof ids === 'string') {
+        try { ids = JSON.parse(ids); } catch { ids = null; }
+    }
+    return Array.isArray(ids) ? ids.map(Number) : null;
+};
+
+/** The responsibilities the contact person handles — the category's, narrowed to the pick. */
+const contactResponsibilities = async (event) => {
+    const all = await categoryResponsibilities(event);
+    const picked = pickedResponsibilityIds(event);
+    return picked === null ? all : all.filter((r) => picked.includes(r.id));
+};
+
+/**
+ * `isOwner` — whether the CALLER hosts this event. Defaults to true because
+ * the two owner-scoped readers (`getEventById`, the portal) cannot be anything
+ * else; `getEventForViewer` and the wishlist pass the real answer.
+ */
 
 const presentOne = async (event, { platform = 'website', isOwner = true } = {}) => {
     const presented = present(event);
@@ -1696,4 +1716,6 @@ module.exports = {
     setWishlisted,
     readWishlistIds,
     attachDesign,
+    categoryResponsibilities,
+    pickedResponsibilityIds,
 };

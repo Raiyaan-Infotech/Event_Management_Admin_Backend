@@ -22,7 +22,8 @@ const eventOrganizer = require('../services/eventOrganizer.service');
  *   contact_time_from / _to  -> preferred contact time, 'HH:MM' 24h
  *   contact_languages        -> ["Tamil", "English"]
  *   contact_about            -> about the contact person (300 max)
- *   (Responsibilities are fixed in the app — not stored.)
+ *   contact_responsibility_ids -> the responsibilities assigned (Add
+ *                               Responsibility, below); NULL = all
  *
  * Until 2026-10-26 "address" was written to venue_address and "description"
  * to the event description, overwriting the venue and the event text. Both now
@@ -252,7 +253,59 @@ const updateContactMenus = asyncHandler(async (req, res) => {
     );
 });
 
+/**
+ * Add Responsibility (Jamal's design, 2026-10-27) — OWNER only.
+ *
+ * GET  /events/:id/contact-responsibilities → { responsibilities: [{ id, name,
+ *      description, assigned }] } — the event category's list (admin Menu
+ *      Management → Responsibilities).
+ * PUT  /events/:id/contact-responsibilities { responsibility_ids: [..] } →
+ *      saves events.contact_responsibility_ids (ids outside that list are
+ *      dropped). Only the assigned ones show on the Contact Person profile.
+ */
+const ownerEventResponsibilities = async (req) => {
+    if (req.organizerClient) {
+        throw ApiError.forbidden('Only the event owner can assign the contact person\'s responsibilities.');
+    }
+    const row = await Event.findOne({
+        where: { id: req.params.id, website_client_id: req.websiteClient.id },
+        attributes: ['id', 'company_id', 'event_category_id', 'contact_responsibility_ids'],
+    });
+    if (!row) throw ApiError.notFound('Event not found.');
+    const all = await clientEventService.categoryResponsibilities(row);
+    return { row, all, picked: clientEventService.pickedResponsibilityIds(row) };
+};
+
+const shapeResponsibilities = (all, picked) => all.map((r) => ({
+    ...r,
+    assigned: picked === null || picked.includes(r.id),
+}));
+
+const getContactResponsibilities = asyncHandler(async (req, res) => {
+    const { all, picked } = await ownerEventResponsibilities(req);
+    return ApiResponse.success(
+        res,
+        { responsibilities: shapeResponsibilities(all, picked) },
+        'Contact person responsibilities retrieved',
+    );
+});
+
+const updateContactResponsibilities = asyncHandler(async (req, res) => {
+    const { row, all } = await ownerEventResponsibilities(req);
+    const valid = new Set(all.map((r) => r.id));
+    const raw = Array.isArray(req.body?.responsibility_ids) ? req.body.responsibility_ids : [];
+    const ids = [...new Set(raw.map(Number).filter((n) => valid.has(n)))];
+    await row.update({ contact_responsibility_ids: ids });
+    return ApiResponse.success(
+        res,
+        { responsibilities: shapeResponsibilities(all, ids) },
+        'Responsibilities updated successfully',
+    );
+});
+
 module.exports = {
+    getContactResponsibilities,
+    updateContactResponsibilities,
     getContact,
     updateContact,
     uploadPhoto,

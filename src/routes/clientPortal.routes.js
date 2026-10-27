@@ -332,6 +332,9 @@ router.put('/events/:id/organizer-contact', organizerContactController.updateCon
 // Menu Config — which additional menus the contact person may use (owner only).
 router.get('/events/:id/contact-menus', organizerContactController.getContactMenus);
 router.put('/events/:id/contact-menus', organizerContactController.updateContactMenus);
+// Add Responsibility — which responsibilities the contact person handles (owner only).
+router.get('/events/:id/contact-responsibilities', organizerContactController.getContactResponsibilities);
+router.put('/events/:id/contact-responsibilities', organizerContactController.updateContactResponsibilities);
 // Contact Person chat (2026-10-26): the team's Participant Chats, and a
 // participant's own chat with the event team.
 const contactChatController = require('../controllers/clientContactChat.controller');

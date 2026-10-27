@@ -230,6 +230,12 @@ module.exports = (sequelize) => {
              * migrations/sql/20261026-event-contact-menus.sql.
              */
             contact_menu_ids: { type: DataTypes.JSON, allowNull: true },
+            /**
+             * Add Responsibility flow (2026-10-27): the event_responsibilities
+             * ids the contact person handles. NULL = all of the category's.
+             * See migrations/sql/20261027-event-contact-responsibilities.sql.
+             */
+            contact_responsibility_ids: { type: DataTypes.JSON, allowNull: true },
         },
         {
             tableName: 'events',

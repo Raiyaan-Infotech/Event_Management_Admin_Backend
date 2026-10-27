@@ -16962,3 +16962,30 @@ Jamal: guests' Near By + Quick View shows it; "open it goes Google Map" -> scree
 - **Admin FE:** sidebar Menu Management → **Responsibilities** (`/admin/menu-management/responsibilities`, TaxonomyManager: Label Name + Description (required) + Event Category, filter, status, delete). Responsibilities removed from the Menu form, Save & Add Another, the view page and the EventMenu types. tsc: no errors in these files.
 - **PRODUCTION ORDER:** `node src/database/tools/apply-event-responsibilities.js --prod --apply` → `node src/database/seeders/guest-option-permissions.seeder.js --prod` → push backend → push admin frontend. Production's list is on category 2 (contact-us menu #6).
 - **Event Menu Access (app, same day):** mockup screens 1–4 only, design only (Jamal: "I just change that design only"; screens 5–6 dropped): profile card, switch page, confirm popup, success page on the existing Menu Config data (`contact_menu_ids`, off = hidden). Not committed.
+
+## Add Responsibility flow — owner assigns the contact person's responsibilities (2026-10-27)
+
+Jamal's "EventInvit — Add Responsibility Flow" design (5 screens).
+
+- **Data:** `events.contact_responsibility_ids` JSON (NULL = all of the
+  category's, as before; `[]` = none). Migration
+  `migrations/sql/20261027-event-contact-responsibilities.sql`.
+- **Seed:** the design's ten responsibilities with descriptions (Guest Help
+  Desk … Food / Catering Support) for every ACTIVE event category; an
+  existing name keeps its row, only an empty description is filled.
+- **API (owner only, contact person 403):**
+  `GET/PUT /client/events/:id/contact-responsibilities`
+  `{ responsibility_ids: [...] }` → `{ responsibilities: [{id,name,description,assigned}] }`.
+- **Event read:** `contact_responsibilities` / `contact_responsibility_items`
+  = the category's list narrowed to the pick.
+- **App:** profile "Responsibilities" card (owner taps → Responsibilities
+  screen with switches → "Update Responsibilities?" popup → "Responsibilities
+  Updated" page → Done); profile shows only assigned chips + "N items".
+  Guests: card hidden when none assigned. The app's built-in six fallback was
+  removed. Icons/colours still come from the name (ResponsibilityGrid.look,
+  now shared in `lib/shared/widgets/responsibility_grid.dart`).
+
+**PRODUCTION ORDER:**
+1. `node src/database/tools/apply-contact-responsibilities.js --prod --apply`
+2. push backend (the Event model reads the new column — step 1 first)
+3. app build
