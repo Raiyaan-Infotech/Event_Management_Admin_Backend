@@ -89,7 +89,8 @@ const shapeMessages = async (rows, viewerId, event = null) => {
             || (m.sender_side === 'team' && Number(m.sender_client_id) === 0 ? event?.organizer || 'Contact Person' : null),
         body: m.body,
         is_auto: Boolean(m.is_auto),
-        created_at: m.created_at,
+        // raw rows carry the attribute name (createdAt), not the column name.
+        created_at: m.created_at ?? m.createdAt ?? null,
     }));
 };
 
