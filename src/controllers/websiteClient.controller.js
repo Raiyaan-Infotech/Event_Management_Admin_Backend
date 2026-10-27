@@ -407,9 +407,14 @@ const contactPersonPayload = (cp) => ({
 });
 
 const sessionPayload = async (client, req) => {
-    const { accessToken, refreshToken } = await sessionService.issueSession({ client, req });
+    // The same shape as /client/me (plan joined), or the app shows "No plan"
+    // until its next launch.
+    const [{ accessToken, refreshToken }, me] = await Promise.all([
+        sessionService.issueSession({ client, req }),
+        require('../services/clientPortal.service').getMe(client.id),
+    ]);
     return {
-        client,
+        client: me || client,
         access_token: accessToken,
         refresh_token: refreshToken,
         token_type: 'Bearer',
