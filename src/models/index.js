@@ -98,6 +98,8 @@ db.NotificationTemplate = require('./NotificationTemplate')(sequelize, Sequelize
 // scoped per event category with a NULL-category fallback list.
 db.GuestRelationshipOption = require('./GuestRelationshipOption')(sequelize, Sequelize);
 db.GuestFoodPreferenceOption = require('./GuestFoodPreferenceOption')(sequelize, Sequelize);
+// Contact Person responsibilities per event category (Menu Management, 2026-10-27).
+db.EventResponsibility = require('./EventResponsibility')(sequelize, Sequelize);
 
 // Invitation templates — the catalogue the Create Template wizard authors.
 // Distinct from the Website Builder's `company_templates` (a website theme).
@@ -385,6 +387,7 @@ db.EventNotificationTemplatePref.belongsTo(db.WebsiteClient, { foreignKey: 'webs
 // listing, and a hasMany would invite exactly that.
 db.GuestRelationshipOption.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'category' });
 db.GuestFoodPreferenceOption.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'category' });
+db.EventResponsibility.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'category' });
 
 db.EventMenu.belongsTo(db.EventCategory, { foreignKey: 'event_category_id', as: 'category' });
 db.EventMenu.belongsTo(db.User, { foreignKey: 'created_by', as: 'creator' });

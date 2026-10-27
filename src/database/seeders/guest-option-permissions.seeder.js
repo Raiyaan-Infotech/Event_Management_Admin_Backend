@@ -71,6 +71,14 @@ const MODULES = [
         description: 'Manage the "Food Preference" dropdown',
         label: 'Guest Food Preferences',
     },
+    // Menu Management → Responsibilities (2026-10-27): same kind of
+    // category-scoped list, same grants.
+    {
+        slug: 'event_responsibilities',
+        name: 'Responsibilities',
+        description: 'Manage the Contact Person responsibilities per event category',
+        label: 'Responsibilities',
+    },
 ];
 
 const ACTIONS = [

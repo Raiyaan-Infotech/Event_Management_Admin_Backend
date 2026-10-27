@@ -113,6 +113,8 @@ app.use('/api/v1/notification-templates', require('./routes/notificationTemplate
 // only be changed by shipping through app-store review.
 app.use('/api/v1/guest-relationship-options', require('./routes/guestRelationshipOption.routes'));
 app.use('/api/v1/guest-food-preference-options', require('./routes/guestFoodPreferenceOption.routes'));
+// Menu Management → Responsibilities (Contact Person, per event category).
+app.use('/api/v1/event-responsibilities', require('./routes/eventResponsibility.routes'));
 // Invitation templates — the super admin's Create Template wizard
 app.use('/api/v1/event-templates', require('./routes/eventTemplate.routes'));
 // The DESIGN family a template or frame belongs to (Elegant, Floral, Minimal).

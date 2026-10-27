@@ -739,6 +739,32 @@ const dropBlockedWishesMenu = async (clientId, presented) => {
  * the two owner-scoped readers (`getEventById`, the portal) cannot be anything
  * else; `getEventForViewer` and the wishlist pass the real answer.
  */
+/**
+ * The Contact Person responsibilities for [event]'s category — admin Menu
+ * Management → Responsibilities (Jamal, 2026-10-27; was a field on the Contact
+ * Person menu). Active rows, in order; the NULL-category (fallback) list when
+ * the category has none. [{ name, description }].
+ */
+const contactResponsibilities = async (event) => {
+    const { EventResponsibility } = require('../models');
+    const companyId = event.company_id ?? 1;
+    const query = (categoryId) => EventResponsibility.findAll({
+        where: { company_id: companyId, is_active: 1, event_category_id: categoryId },
+        attributes: ['name', 'description'],
+        order: [['sort_order', 'ASC'], ['name', 'ASC']],
+        raw: true,
+    });
+    try {
+        const cat = event.event_category_id ? Number(event.event_category_id) : null;
+        const rows = (cat ? await query(cat) : []);
+        const list = rows.length ? rows : await query(null);
+        return list.map((r) => ({ name: r.name, description: r.description || null }));
+    } catch (_) {
+        // Table not created yet (migration not run): the app shows its own six.
+        return [];
+    }
+};
+
 const presentOne = async (event, { platform = 'website', isOwner = true } = {}) => {
     const presented = present(event);
 
@@ -774,7 +800,7 @@ const presentOne = async (event, { platform = 'website', isOwner = true } = {}) 
                 // name / icon / color / sort_order: the app draws its Explore
                 // tiles straight from these (Menu Management is the source of
                 // the label, icon and order — nothing about a tile is hardcoded).
-                attributes: ['id', 'name', 'slug', 'icon', 'color', 'sort_order', 'is_default', 'event_category_id', 'responsibilities'],
+                attributes: ['id', 'name', 'slug', 'icon', 'color', 'sort_order', 'is_default', 'event_category_id'],
                 order: [['sort_order', 'ASC'], ['id', 'ASC']],
                 raw: true,
             })
@@ -784,24 +810,15 @@ const presentOne = async (event, { platform = 'website', isOwner = true } = {}) 
         // looks like.
         attachDesign([presented], presented.company_id ?? null),
         guestStatsFor(presented.id).then((stats) => { presented.stats = stats; }),
+        contactResponsibilities(presented).then((items) => {
+            presented.contact_responsibilities = items.map((r) => r.name);
+            presented.contact_responsibility_items = items;
+        }),
     ]);
 
     const categoryId = presented.event_category_id ? Number(presented.event_category_id) : null;
     const menus = [];
-    // The Contact Person menu's responsibilities (admin Menu module) go out as
-    // the event's `contact_responsibilities`; no other menu carries the list.
-    presented.contact_responsibilities = [];
     for (const row of menuRows) {
-        const { responsibilities: rawResp, ...rest } = row;
-        if (row.slug === 'contact-us' && rawResp) {
-            let list = rawResp;
-            if (typeof list === 'string') {
-                try { list = JSON.parse(list); } catch { list = []; }
-            }
-            presented.contact_responsibilities = Array.isArray(list) ? list.map(String) : [];
-        }
-        Object.keys(row).forEach((k) => delete row[k]);
-        Object.assign(row, rest);
         const on = chosen.has(Number(row.id))
             // A default menu is always on — but only where it suits the
             // event's category, the same rule the wizard and the save apply.
