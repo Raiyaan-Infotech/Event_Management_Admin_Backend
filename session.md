@@ -16989,3 +16989,38 @@ Jamal's "EventInvit — Add Responsibility Flow" design (5 screens).
 1. `node src/database/tools/apply-contact-responsibilities.js --prod --apply`
 2. push backend (the Event model reads the new column — step 1 first)
 3. app build
+
+## Guests — new design flows in the app, design only (2026-10-27)
+
+Jamal's 8 Guests mockups, built on the EXISTING API (no backend / DB change). Guests stay the
+account phone book; making them event-based is a later backend decision (asked, not answered).
+- **List:** title + "N Guests • M Groups", round + (sheet "Add or Manage Guests"), search,
+  All / group pills (primary colour), rows with group pill + ⋮ sheet (View, Edit, Move to Group,
+  Change Photo, Remove). Jamal removed multi-select and the coloured group cards; status pills
+  (Confirmed/Invited…) not shown — the phone book holds no RSVP.
+- **Add Guest** short form (Full Name, Mobile, Group*, Email, Note) — also `/event/guests/add`.
+- **Add Group** → Preview (colour saved; icon NOT stored — list derives icon from the name).
+- **Move to Group** → Confirm (bulk `group` action).
+- **Download / Share:** CSV, Excel (hand-built .xlsx) and PDF (pages drawn by Flutter → JPEG in a
+  hand-written PDF; the `pdf` package clashes with `image`) built on the phone from the loaded
+  list, chosen columns only; saved to Downloads / shared to WhatsApp / mail via MainActivity
+  (`saveDownload`, `openUri`, `share` with `file`).
+- **Import Excel/CSV:** read on the phone (csv / .xlsx; .xls refused) → Map Columns → server
+  preview → Duplicates → Importing → Completed / Errors (+ error report).
+- **Add from Contacts** (flutter_contacts, READ_CONTACTS, iOS NSContactsUsageDescription): name +
+  first number → server importer.
+- New packages: archive, xml, flutter_contacts. Test: `test/guest_files_test.dart` 5/5.
+
+- **APK (2026-10-27):** release arm64 built (~10 min, first build with the new packages) → `DocumentsventInvite_Mobile_Build�61027_Event_Invite.apk` (54.9 MB). Not yet tested on the phone.
+
+## Contact Person Profile layout + contact person shows the owner's plan (2026-10-28)
+
+- **App (design):** Responsibilities grid two per row (`ResponsibilityGrid`); Contact Details card moved
+  ABOVE Event Support Details, both full width (was side by side). Checked on the phone.
+- **"No plan" on Home:** the phone was signed in as the event's CONTACT PERSON (Ismail, 8220348702),
+  not client 27 (7010051951, Basic). Contact persons had `plan: null`. Jamal: "he belongs to that plan".
+- **Backend:** `contactPersonFor` carries `ownerId` (newest event's `website_client_id`); new
+  `ownerPlanOf` / `contactPersonProfile` join the owner's plan `{id,name,plan_code}`. Used by OTP login,
+  contact-person refresh and `/client/me`. DISPLAY ONLY — `subscription_plan_id` stays null, so the
+  wizard/billing unlock nothing. Checked locally (owner 108 → "Wedding Full Access (QA)"). No DB change.
+  Needs backend push; the app picks it up on its next launch (`/client/me`), no app build.

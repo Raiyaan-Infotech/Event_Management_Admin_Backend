@@ -398,8 +398,9 @@ const deleteById = asyncHandler(async (req, res) => {
  * row — the token carries the number. `client` is the id-0 stand-in the app
  * reads like any account.
  */
-const contactPersonPayload = (cp) => ({
-    client: require('../services/eventOrganizer.service').contactPersonCaller(cp).toJSON(),
+const contactPersonPayload = async (cp) => ({
+    // Owner's plan joined, like /client/me, or Home shows "No plan".
+    client: await require('../services/eventOrganizer.service').contactPersonProfile(cp),
     access_token: generateContactPersonAccessToken(cp),
     refresh_token: generateContactPersonRefreshToken(cp),
     token_type: 'Bearer',
@@ -436,7 +437,7 @@ const verifyLoginOtp = asyncHandler(async (req, res) => {
     const client = await websiteClientService.verifyLoginOtp(req.body, vendorId);
 
     if (client && client.contactPerson) {
-        const cpPayload = contactPersonPayload(client.contactPerson);
+        const cpPayload = await contactPersonPayload(client.contactPerson);
         logger.logRequest(req, `Mobile OTP login: contact person ${client.contactPerson.mobile}`);
         return ApiResponse.success(res, cpPayload, 'Login successful');
     }
@@ -486,7 +487,7 @@ const refreshSession = asyncHandler(async (req, res) => {
         if (!cp) {
             return ApiResponse.error(res, 'You are no longer the contact person of an event.', 401);
         }
-        return ApiResponse.success(res, contactPersonPayload(cp), 'Session refreshed');
+        return ApiResponse.success(res, await contactPersonPayload(cp), 'Session refreshed');
     }
     if (!decoded || decoded.type !== 'website_client') {
         return ApiResponse.error(res, 'Your session has expired. Please sign in again.', 401);

@@ -15,7 +15,9 @@ const sessionService = require('../services/clientSession.service');
 const me = asyncHandler(async (req, res) => {
     // An event contact person has no account: who they are comes from the event.
     if (req.contactPerson) {
-        return ApiResponse.success(res, { client: req.websiteClient.toJSON() }, 'Client profile retrieved');
+        const client = await require('../services/eventOrganizer.service')
+            .contactPersonProfile(req.contactPerson);
+        return ApiResponse.success(res, { client }, 'Client profile retrieved');
     }
     const client = await clientPortalService.getMe(req.websiteClient.id);
     if (!client) throw ApiError.notFound('Account not found.');

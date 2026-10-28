@@ -156,8 +156,34 @@ const contactPersonFor = async (mobile, vendorId) => {
         name: String(newest.organizer || '').trim() || 'Contact Person',
         photo: newest.organizer_image || null,
         events: events.length,
+        ownerId: Number(newest.website_client_id) || null,
     };
 };
+
+/**
+ * The plan of the account that owns the contact person's (newest) event —
+ * shown on their Home (Jamal, 2026-10-28: "he belongs to that plan"). Display
+ * only: the caller's `subscription_plan_id` stays null, so nothing is unlocked.
+ */
+const ownerPlanOf = async (cp) => {
+    if (!cp?.ownerId) return null;
+    const { SubscriptionPlan } = require('../models');
+    const owner = await WebsiteClient.unscoped().findByPk(cp.ownerId, {
+        attributes: ['id', 'subscription_plan_id'],
+        raw: true,
+    });
+    if (!owner?.subscription_plan_id) return null;
+    return SubscriptionPlan.findByPk(owner.subscription_plan_id, {
+        attributes: ['id', 'name', 'plan_code'],
+        raw: true,
+    });
+};
+
+/** contactPersonCaller(cp).toJSON() with the owner's plan joined. */
+const contactPersonProfile = async (cp) => ({
+    ...contactPersonCaller(cp).toJSON(),
+    plan: await ownerPlanOf(cp).catch(() => null),
+});
 
 /**
  * The stand-in for `req.websiteClient` when a contact person (no account) is
@@ -188,6 +214,7 @@ module.exports = {
     claimForClient,
     contactPersonFor,
     contactPersonCaller,
+    contactPersonProfile,
     touchPresence,
     isOnline,
     // Exported for the tests.
