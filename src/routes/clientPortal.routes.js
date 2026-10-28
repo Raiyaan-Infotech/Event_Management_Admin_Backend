@@ -56,6 +56,10 @@ router.get('/me/qr', qrScanController.myQr);
 router.post('/qr/scan', qrScanController.scan);
 router.get('/favourites', qrScanController.listFavourites);
 router.put('/favourites/:id', qrScanController.setFavourite);
+// Organizer scan for ONE event — /events/:id/… so eventOrganizerAccess lets
+// the organizer / contact person act as the owner.
+router.post('/events/:id/scan/participant', qrScanController.lookupParticipant);
+router.post('/events/:id/participants/:participantId/check-in', qrScanController.checkIn);
 
 // Self-service account management. No id parameter anywhere: each acts on the
 // session's own client, so none of them can be aimed at another account.

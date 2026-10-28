@@ -17119,3 +17119,29 @@ Open: how "private event" is decided (privacy defaults to 'private' on every eve
   Home); organizer Scan options sheet (Exchange Contact / Mark Attendance / Verify) is next.
 - **PRODUCTION ORDER:** `node src/database/tools/apply-client-qr-contacts.js --prod --apply` → push
   backend → app build.
+- **Event Status on Basic Details (Jamal, 2026-10-28):** app Create Event / Edit → Basic Details now has
+  "Event Status *" — two cards Public (anyone with the link or QR) / Private (invite only), default
+  Public; `privacy` is sent on create AND edit (was edit-only). `create_event_screen.dart`
+  `_PrivacyOption`. The hidden Privacy & Invitation section keeps its dropdown. Portal wizard already
+  has the Visibility select on "Event Details & Time" (now defaulting to Public). App only, no backend.
+
+## Organizer QR Code → QR Scan Options (Jamal, 2026-10-28)
+- Home Quick Action **QR Code** = choose event (Edit Event's sheet; one event → straight in) → "QR Scan
+  Options": **Exchange Contact** + **Verify Participant** always, **Mark Attendance** only when the event
+  is PRIVATE. The old "show the event QR" page is no longer behind this tile (Jamal: remove it).
+  Verify Participant = view + confirm, WRITES NOTHING; Mark Attendance = one check-in.
+- **Backend:** `event_participants.checked_in_at / checked_in_by_client_id / checked_in_by_name`
+  (`migrations/sql/20261028-participant-check-in.sql`, tool `tools/apply-participant-check-in.js`,
+  initial_setup.sql). `clientCheckIn.service`: `POST /client/events/:id/scan/participant {token}`
+  (the scanned ACCOUNT QR → that person's participant row in THIS event; event QR / contact-person QR /
+  not a participant → clear 400/404; full details: RSVP, relation, family/group, party size, table, meal,
+  participant code EVT<year>-<id>, check-in) and `POST /client/events/:id/participants/:pid/check-in`
+  (private only; second time → `already`). /events/:id/… so eventOrganizerAccess lets the organizer /
+  contact person act as owner. API test LOCAL 9/9 (incl. participant can't verify, public → 400).
+- **App:** `EventItem.isPrivate` (from `privacy`); `organizer/scan/organizer_scan.dart`
+  (`OrganizerScanMode`, `showQrScanOptions`, `ParticipantCheckScreen` details → Verify Entry / Mark
+  Present → success with Scan Next / Back to Home); `ScanQrScreen(organizerMode, eventId, eventName)`
+  reuses the camera + permission flow, no tabs, title = mode; Exchange Contact goes to
+  `ScannedContactScreen`. `dart analyze`: 0.
+- **PRODUCTION ORDER:** `apply-client-qr-contacts.js --prod --apply` and
+  `apply-participant-check-in.js --prod --apply` → push backend → app.

@@ -174,6 +174,10 @@ module.exports = (sequelize) => {
          * app — which is most of them.
          */
         participant_client_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+        /** Mark Attendance (private events, 2026-10-28). UTC. */
+        checked_in_at: { type: DataTypes.DATE, allowNull: true },
+        checked_in_by_client_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+        checked_in_by_name: { type: DataTypes.STRING(200), allowNull: true },
     }, {
         tableName: 'event_participants',
         timestamps: true,
