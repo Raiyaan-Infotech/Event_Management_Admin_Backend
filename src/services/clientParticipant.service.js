@@ -269,7 +269,7 @@ const createParticipant = async (clientId, companyId, body = {}) => {
         const clash = await clashOnEvent(event.id, person.mobile, { transaction });
         if (clash) throw ApiError.conflict(`${clash.name} is already a participant of this event.`);
 
-        const guest = await guests.guestForMobile(clientId, person.mobile, transaction);
+        const guest = await guests.guestForMobile(clientId, person.mobile, transaction, event.id);
         if (!person.title && guest?.title) person.title = guest.title;
 
         const digits = String(person.mobile || '').replace(/\D/g, '');
@@ -341,7 +341,7 @@ const updateParticipant = async (clientId, id, body = {}) => {
             if (clash) throw ApiError.conflict(`${clash.name} is already a participant of this event.`);
         }
         if (data.mobile) {
-            const guest = await guests.guestForMobile(clientId, data.mobile, transaction);
+            const guest = await guests.guestForMobile(clientId, data.mobile, transaction, eventId);
             data.guest_id = guest?.id ?? null;
 
             const digits = String(data.mobile).replace(/\D/g, '');

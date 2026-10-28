@@ -61,6 +61,47 @@ const joinedCount = Sequelize.literal(
     '(SELECT COUNT(*) FROM event_participants g WHERE g.guest_id = `Guest`.`id` AND g.deleted_at IS NULL)'
 );
 
+/**
+ * ── STATUS OF AN EVENT GUEST (Jamal, 2026-10-28) ──────────────────────────
+ * Worked out on read, never stored, so it is always current:
+ *   joined that event (a participant matched by guest_id or the last 10
+ *   digits of the mobile):  answered No -> declined, Maybe -> pending,
+ *                            otherwise -> confirmed
+ *   not joined:              not invited -> added, invited < 24h ago -> invited,
+ *                            invited 24h+ ago -> pending
+ * A guest with no event (older rows) has no status (NULL).
+ * `invited_at` is UTC (Sequelize writes UTC), hence UTC_TIMESTAMP().
+ */
+const GUEST_STATUSES = ['added', 'invited', 'pending', 'confirmed', 'declined'];
+const statusSql = (a) => `(CASE WHEN ${a}.event_id IS NULL THEN NULL ELSE COALESCE(
+    (SELECT CASE WHEN p.response_type = 'no' OR p.rsvp_status = 'declined' THEN 'declined'
+                 WHEN p.response_type = 'maybe' OR p.rsvp_status = 'pending' THEN 'pending'
+                 ELSE 'confirmed' END
+       FROM event_participants p
+      WHERE p.event_id = ${a}.event_id AND p.deleted_at IS NULL
+        AND (p.guest_id = ${a}.id
+             OR (CHAR_LENGTH(REGEXP_REPLACE(IFNULL(${a}.mobile, ''), '[^0-9]', '')) >= 7
+                 AND RIGHT(REGEXP_REPLACE(IFNULL(p.mobile, ''), '[^0-9]', ''), 10)
+                   = RIGHT(REGEXP_REPLACE(${a}.mobile, '[^0-9]', ''), 10)))
+      ORDER BY p.id DESC LIMIT 1),
+    CASE WHEN ${a}.invited_at IS NULL THEN 'added'
+         WHEN ${a}.invited_at > UTC_TIMESTAMP() - INTERVAL 24 HOUR THEN 'invited'
+         ELSE 'pending' END) END)`;
+const guestStatus = Sequelize.literal(statusSql('`Guest`'));
+
+/** The host's own event id, null when none was sent, or a clear refusal. */
+const ownEventId = async (clientId, rawEventId, transaction) => {
+    const id = Number(rawEventId) || 0;
+    if (!id) return null;
+    const event = await Event.findOne({
+        where: { id, website_client_id: clientId },
+        attributes: ['id'],
+        transaction,
+    });
+    if (!event) throw ApiError.badRequest('That event is not on your account.');
+    return event.id;
+};
+
 /** The row as the portal and the app read it. */
 const present = (guest) => {
     const plain = guest.toJSON ? guest.toJSON() : guest;
@@ -68,9 +109,8 @@ const present = (guest) => {
     return {
         ...plain,
         full_name: plain.name,
-        // A guest has no event (§581); the key is kept, null, so an older
-        // client reading `event_id` gets a clear "none" rather than undefined.
-        event_id: null,
+        event_id: plain.event_id ?? null,
+        status: plain.status ?? null,
         is_imported: plain.source === 'import',
         invite_source: plain.source,
         events_joined: joined,
@@ -79,13 +119,18 @@ const present = (guest) => {
     };
 };
 
-/** Same mobile as an existing guest of this client? (last 10 digits) */
-const findByMobile = (clientId, mobile, { excludeId = null, transaction } = {}) => {
+/**
+ * Same mobile as an existing guest of this client? (last 10 digits)
+ * With `eventId` the check is within ONE event (null = the guests with no
+ * event): the same person may be a guest of two events (2026-10-28).
+ */
+const findByMobile = (clientId, mobile, { excludeId = null, transaction, eventId } = {}) => {
     const key = mobileKey(mobile);
     if (!key) return null;
     return Guest.findOne({
         where: {
             website_client_id: clientId,
+            ...(eventId !== undefined ? { event_id: eventId ?? null } : {}),
             ...(excludeId ? { id: { [Op.ne]: excludeId } } : {}),
             [Op.and]: Sequelize.where(
                 Sequelize.fn('RIGHT', Sequelize.fn('REGEXP_REPLACE', Sequelize.col('mobile'), '[^0-9]', ''), 10),
@@ -109,8 +154,11 @@ const listGuests = async (clientId, query = {}) => {
     const groupId = Number(query.group_id) || null;
 
     const where = { website_client_id: clientId };
+    const eventId = Number(query.event_id) || null;
+    if (eventId) where.event_id = eventId;
     const and = [];
     if (tab === 'imported') where.source = 'import';
+    if (GUEST_STATUSES.includes(tab)) and.push(Sequelize.where(guestStatus, tab));
     if (tab === 'joined') and.push(Sequelize.where(joinedCount, Op.gt, 0));
     if (tab === 'not_joined') and.push(Sequelize.where(joinedCount, 0));
     if (and.length) where[Op.and] = and;
@@ -130,7 +178,7 @@ const listGuests = async (clientId, query = {}) => {
 
     const { rows, count } = await Guest.findAndCountAll({
         where,
-        attributes: { include: [[joinedCount, 'events_joined']] },
+        attributes: { include: [[joinedCount, 'events_joined'], [guestStatus, 'status']] },
         include: GUEST_INCLUDE,
         order: [['created_at', 'DESC'], ['id', 'DESC']],
         limit,
@@ -147,18 +195,29 @@ const listGuests = async (clientId, query = {}) => {
     };
 };
 
-/** The tiles above the list — all about the phone book, none about RSVPs. */
-const getGuestStats = async (clientId) => {
+/** The tiles above the list; `event_id` narrows them to one event's guests. */
+const getGuestStats = async (clientId, query = {}) => {
+    const eventId = Number(query.event_id) || null;
     const [row] = await sequelize.query(
         `SELECT COUNT(*) AS total,
-                SUM(c.group_id IS NOT NULL) AS grouped_n,
-                SUM(c.source = 'import') AS imported,
-                SUM(EXISTS (SELECT 1 FROM event_participants g
-                             WHERE g.guest_id = c.id AND g.deleted_at IS NULL)) AS joined
-           FROM guests c
-          WHERE c.website_client_id = :clientId AND c.deleted_at IS NULL`,
-        { replacements: { clientId }, type: Sequelize.QueryTypes.SELECT },
+                SUM(x.group_id IS NOT NULL) AS grouped_n,
+                SUM(x.source = 'import') AS imported,
+                SUM(x.joined_any) AS joined,
+                SUM(x.status = 'added') AS s_added,
+                SUM(x.status = 'invited') AS s_invited,
+                SUM(x.status = 'pending') AS s_pending,
+                SUM(x.status = 'confirmed') AS s_confirmed,
+                SUM(x.status = 'declined') AS s_declined
+           FROM (SELECT c.group_id, c.source,
+                        EXISTS (SELECT 1 FROM event_participants g
+                                 WHERE g.guest_id = c.id AND g.deleted_at IS NULL) AS joined_any,
+                        ${statusSql('c')} AS status
+                   FROM guests c
+                  WHERE c.website_client_id = :clientId AND c.deleted_at IS NULL
+                        ${eventId ? 'AND c.event_id = :eventId' : ''}) x`,
+        { replacements: { clientId, eventId }, type: Sequelize.QueryTypes.SELECT },
     );
+    const statuses = Object.fromEntries(GUEST_STATUSES.map((k) => [k, Number(row?.[`s_${k}`]) || 0]));
     const total = Number(row?.total) || 0;
     const grouped = Number(row?.grouped_n) || 0;
     const joined = Number(row?.joined) || 0;
@@ -169,6 +228,8 @@ const getGuestStats = async (clientId) => {
         ungrouped: total - grouped, ungrouped_pct: pct(total - grouped),
         imported: Number(row?.imported) || 0,
         joined, joined_pct: pct(joined),
+        // Per-event status counts (2026-10-28): added / invited / pending / confirmed / declined.
+        statuses,
         // Older readers: one guest is one row and one person.
         total_guests: total,
         total_rows: total,
@@ -178,7 +239,7 @@ const getGuestStats = async (clientId) => {
 const getGuestById = async (clientId, guestId) => {
     const guest = await Guest.findOne({
         where: { id: guestId, website_client_id: clientId },
-        attributes: { include: [[joinedCount, 'events_joined']] },
+        attributes: { include: [[joinedCount, 'events_joined'], [guestStatus, 'status']] },
         include: GUEST_INCLUDE,
     });
     return guest ? present(guest) : null;
@@ -238,9 +299,15 @@ const createGuest = async (clientId, companyId, body) => {
     const data = await normalisePerson(clientId, body, { partial: false, checkMobileCountry: true });
 
     const guest = await sequelize.transaction(async (transaction) => {
+        // Optional until the client portal sends it too (2026-10-28).
+        const eventId = await ownEventId(clientId, body?.event_id, transaction);
         await assertGuestCapacity(clientId, 1, { transaction });
-        const clash = await findByMobile(clientId, data.mobile, { transaction });
-        if (clash) throw ApiError.conflict(`${clash.name} is already in your guest list with this mobile number.`);
+        const clash = await findByMobile(clientId, data.mobile, { transaction, eventId });
+        if (clash) {
+            throw ApiError.conflict(eventId
+                ? `${clash.name} is already a guest of this event with this mobile number.`
+                : `${clash.name} is already in your guest list with this mobile number.`);
+        }
 
         // No group chosen → the default group, which is what "New guests will
         // be added to this group by default" means.
@@ -255,6 +322,7 @@ const createGuest = async (clientId, companyId, body) => {
 
         return Guest.create({
             ...data,
+            event_id: eventId,
             website_client_id: clientId,
             company_id: companyId ?? null,
             source: 'manual',
@@ -280,9 +348,14 @@ const updateGuest = async (clientId, guestId, body) => {
     if (!guest) return null;
 
     const data = await normalisePerson(clientId, body, { partial: true, existing: guest.toJSON(), checkMobileCountry: true });
-    if (data.mobile) {
-        const clash = await findByMobile(clientId, data.mobile, { excludeId: guest.id });
-        if (clash) throw ApiError.conflict(`${clash.name} is already in your guest list with this mobile number.`);
+    // Moving a guest to another of the host's events (2026-10-28).
+    if (body?.event_id !== undefined && body.event_id !== null && body.event_id !== '') {
+        data.event_id = await ownEventId(clientId, body.event_id);
+    }
+    const eventId = data.event_id !== undefined ? data.event_id : guest.event_id;
+    if (data.mobile || data.event_id !== undefined) {
+        const clash = await findByMobile(clientId, data.mobile || guest.mobile, { excludeId: guest.id, eventId });
+        if (clash) throw ApiError.conflict(`${clash.name} is already a guest of this event with this mobile number.`);
     }
     await guest.update(data);
     return getGuestById(clientId, guestId);
@@ -339,6 +412,17 @@ const bulkUpdate = async (clientId, guestIds, action, value) => {
         return { action, affected };
     }
 
+    // "Send Invitation" (2026-10-28): stamps invited_at, so the guest shows
+    // Invited, then Pending after 24 hours without joining. Sending again
+    // restarts the 24 hours. Only guests on an event can be invited.
+    if (action === 'invite') {
+        const [affected] = await Guest.update(
+            { invited_at: new Date() },
+            { where: { ...scope, event_id: { [Op.ne]: null } } },
+        );
+        return { action, affected };
+    }
+
     if (action === 'status') {
         // RSVP status belongs to a participant of one event, not to a guest.
         throw ApiError.badRequest('RSVP status is set per event — change it on the RSVP screen.');
@@ -377,11 +461,21 @@ const getGuestFormOptions = async (clientId, rawEventId) => {
     };
 };
 
-/** The phone-book guest with this mobile, for linking a participant (§581). */
-const guestForMobile = (hostId, mobile, transaction) => findByMobile(hostId, mobile, { transaction });
+/**
+ * The guest with this mobile, for linking a participant (§581): the guest of
+ * THAT event first (2026-10-28), then any guest of the host with the number.
+ */
+const guestForMobile = async (hostId, mobile, transaction, eventId = null) => {
+    if (eventId) {
+        const own = await findByMobile(hostId, mobile, { transaction, eventId });
+        if (own) return own;
+    }
+    return findByMobile(hostId, mobile, { transaction });
+};
 
 module.exports = {
     WRITABLE_FIELDS,
+    GUEST_STATUSES,
     getGuestFormOptions,
     listGuests,
     getGuestStats,

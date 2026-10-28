@@ -525,6 +525,10 @@ db.WebsiteClient.hasMany(db.Guest, { foreignKey: 'website_client_id', as: 'guest
 db.Guest.belongsTo(db.WebsiteClient, { foreignKey: 'website_client_id', as: 'client' });
 db.GuestGroup.hasMany(db.Guest, { foreignKey: 'group_id', as: 'members' });
 db.Guest.belongsTo(db.GuestGroup, { foreignKey: 'group_id', as: 'group' });
+// Event-based guests (2026-10-28). `as: 'eventGuests'` — Event already has
+// `guests` (its participants, a pre-§581 name).
+db.Guest.belongsTo(db.Event, { foreignKey: 'event_id', as: 'event' });
+db.Event.hasMany(db.Guest, { foreignKey: 'event_id', as: 'eventGuests' });
 db.Guest.hasMany(db.EventParticipant, { foreignKey: 'guest_id', as: 'participations' });
 db.EventParticipant.belongsTo(db.Guest, { foreignKey: 'guest_id', as: 'guest' });
 // Host notes / tags / reminders are about the person.

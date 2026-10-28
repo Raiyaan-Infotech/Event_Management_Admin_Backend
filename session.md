@@ -17024,3 +17024,33 @@ account phone book; making them event-based is a later backend decision (asked, 
   contact-person refresh and `/client/me`. DISPLAY ONLY — `subscription_plan_id` stays null, so the
   wizard/billing unlock nothing. Checked locally (owner 108 → "Wedding Full Access (QA)"). No DB change.
   Needs backend push; the app picks it up on its next launch (`/client/me`), no app build.
+
+## Guests are EVENT-BASED, with Invited / Pending / Confirmed / Declined (Jamal, 2026-10-28)
+
+Jamal's flow: a guest is added to ONE event → the invitation is sent → **Invited**; 24h and their
+number has not joined the event → **Pending**; joined as participant → **Confirmed**; joined and
+answered Maybe → **Pending**; answered No → **Declined**. Plan limits (Max Guests / Max RSVP) unchanged
+for now — "plan config later".
+- **DB:** `guests.event_id` (FK events, SET NULL) + `guests.invited_at` (UTC). SQL
+  `migrations/sql/20261028-guests-event-based.sql`, tool `tools/apply-guests-event-based.js`
+  (dry run lists each owner's unlinked guests + their events; `--event=<id>` moves that owner's
+  event-less guests onto it with invited_at = now). `initial_setup.sql` updated. Applied LOCAL (columns;
+  local has no guests).
+- **Status is computed, not stored** (`clientGuest.service` statusSql / GUEST_STATUSES): latest
+  participant of that event matched by `guest_id` or last-10 mobile → declined (No) / pending (Maybe)
+  / confirmed; else invited_at NULL → added ("Not Invited"), < 24h → invited, ≥ 24h → pending.
+- **Backend:** list `?event_id=` + `status=` tabs, `status` on every row; stats `?event_id=` +
+  `statuses{}`; create/update take `event_id` (must be the caller's event; OPTIONAL until the portal
+  sends it); duplicate mobile checked per event; bulk action `invite` stamps invited_at; CSV import
+  takes `event_id` (duplicates per event); participants link to the guest of THAT event first
+  (createParticipant, updateParticipant, QR join). Local test: 10/10 (added → invited → 25h pending →
+  joined confirmed → Maybe pending → No declined, stats, import dup per event), rows cleaned up.
+- **App:** `GuestRepository.currentEventId` = selected event, sent as `event_id` on every add/import;
+  `phoneBookProvider` = selected event's guests; `inviteGuests()`; `EventGuest.eventId/guestStatus`.
+  Guests screen: event bar (sheet "Choose an event" when >1), status tabs with counts, status pill per
+  row (group moves to the second line). Share flow (WhatsApp per guest / email from guest list) marks
+  guests invited. NOT wired: `share_whatsapp/sms/email_screen.dart` — design-only, they send nothing.
+  `dart analyze lib`: 0 errors / 0 warnings.
+- **Portal (event_client_single):** not changed yet — still adds guests with no event (allowed).
+- **PRODUCTION ORDER:** `node src/database/tools/apply-guests-event-based.js --prod` (see Ismail's events
+  + id of the Syed wedding) → `--prod --apply --event=<id>` (50 guests → Invited) → push backend → app.

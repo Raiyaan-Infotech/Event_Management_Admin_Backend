@@ -1,4 +1,4 @@
-const { sequelize, Guest, GuestGroup } = require('../models');
+const { sequelize, Guest, GuestGroup, Event } = require('../models');
 const ApiError = require('../utils/apiError');
 const { checkMobile } = require('../utils/phone');
 const guestService = require('./clientGuest.service');
@@ -170,7 +170,19 @@ const cleanPhone = (raw) => {
  * caller sees exactly what would be created, and which rows would be refused
  * and why, before anything touches the database.
  */
-const analyse = async (clientId, { content }) => {
+/** The host's own event for an import (2026-10-28), null when none was chosen. */
+const importEventId = async (clientId, rawEventId) => {
+    const id = Number(rawEventId) || 0;
+    if (!id) return null;
+    const event = await Event.findOne({ where: { id, website_client_id: clientId }, attributes: ['id'] });
+    if (!event) throw ApiError.badRequest('That event is not on your account.');
+    return event.id;
+};
+
+const analyse = async (clientId, { content, defaultEventId = null }) => {
+    // Guests are event-based (2026-10-28): duplicates are checked within the
+    // chosen event; no event = the guests that have none (older portal flow).
+    const eventId = await importEventId(clientId, defaultEventId);
     if (typeof content !== 'string' || !content.trim()) {
         throw ApiError.badRequest('The file is empty.');
     }
@@ -211,7 +223,7 @@ const analyse = async (clientId, { content }) => {
 
     // Mobiles already in the phone book, by last 10 digits (§576).
     const existing = await Guest.findAll({
-        where: { website_client_id: clientId },
+        where: { website_client_id: clientId, event_id: eventId },
         attributes: ['mobile'],
     });
     const digits = (v) => String(v || '').replace(/\D/g, '').slice(-10);
@@ -323,6 +335,7 @@ const analyse = async (clientId, { content }) => {
     });
 
     return {
+        event_id: eventId,
         delimiter,
         mapping,
         unmapped: mapping.filter((m) => !m.field).map((m) => m.header),
@@ -381,8 +394,8 @@ const parseCsv = async (clientId, options) => {
  * the rest. A file of 500 with three bad rows imports 497 — rolling all of it
  * back because of row 7 is the behaviour people hate most about importers.
  */
-const commitImport = async (clientId, companyId, { content, createGroups = false }) => {
-    const result = await analyse(clientId, { content });
+const commitImport = async (clientId, companyId, { content, defaultEventId = null, createGroups = false }) => {
+    const result = await analyse(clientId, { content, defaultEventId });
     const rows = result.valid;
 
     const outcome = {
@@ -433,6 +446,7 @@ const commitImport = async (clientId, companyId, { content, createGroups = false
 
         const payload = rows.map(({ row: _row, group_name: _groupName, ...rest }) => ({
             ...rest,
+            event_id: result.event_id,
             website_client_id: clientId,
             company_id: companyId ?? null,
         }));

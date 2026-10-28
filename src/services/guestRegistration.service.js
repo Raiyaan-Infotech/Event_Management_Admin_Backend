@@ -588,7 +588,9 @@ const join = async (client, payload = {}) => {
                 website_client_id: event.website_client_id,
                 // The host's phone-book guest with this mobile, if any — so
                 // the host sees this person's events on their profile (§581).
-                guest_id: (await guestService.guestForMobile(event.website_client_id, clientDigits, transaction))?.id ?? null,
+                // The guest of THIS event first (2026-10-28), which turns that
+                // guest's status to Confirmed / Declined.
+                guest_id: (await guestService.guestForMobile(event.website_client_id, clientDigits, transaction, event.id))?.id ?? null,
                 company_id: event.company_id ?? DEFAULT_COMPANY_ID,
                 dial_code: client.dial_code || '+91',
                 mobile: clientDigits.length > 10 ? clientDigits.slice(-10) : clientDigits,

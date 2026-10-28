@@ -1,6 +1,13 @@
 const { DataTypes } = require('sequelize');
 
 /**
+ * ── EVENT-BASED SINCE 2026-10-28 (Jamal) ─────────────────────────────────
+ * A guest now belongs to ONE event (`event_id`) and is invited to it
+ * (`invited_at`). Their status (added / invited / pending / confirmed /
+ * declined) is worked out on read from `invited_at` and that event's
+ * participants — see clientGuest.service GUEST_STATUS. The notes below are the
+ * §581 phone-book history.
+ *
  * A guest in the client's PHONE BOOK (§581).
  *
  * The client adds the people they know, organised in groups, and SHARES an
@@ -21,6 +28,8 @@ module.exports = (sequelize) => {
         website_client_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
         company_id: { type: DataTypes.INTEGER, allowNull: true },
         group_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+        /** The event this guest belongs to (2026-10-28). NULL = older, not on an event yet. */
+        event_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
 
         title: { type: DataTypes.STRING(30), allowNull: true },
         first_name: { type: DataTypes.STRING(100), allowNull: true },
@@ -59,6 +68,8 @@ module.exports = (sequelize) => {
             allowNull: false,
             defaultValue: 'manual',
         },
+        /** UTC; when the invitation was sent to this guest. NULL = not invited yet. */
+        invited_at: { type: DataTypes.DATE, allowNull: true },
         /** The event_participants row this was moved from by the §581 split. Audit only. */
         migrated_from_guest_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
     }, {
