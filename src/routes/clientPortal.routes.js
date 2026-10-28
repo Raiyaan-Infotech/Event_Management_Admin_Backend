@@ -48,6 +48,15 @@ router.use(isWebsiteClientAuthenticated);
 router.use(eventOrganizerAccess);
 
 router.get('/me', controller.me);
+
+// Scan QR + My Favourites (2026-10-28) — the caller's own QR, what a scanned
+// code is (event / person), and the people saved from scans.
+const qrScanController = require('../controllers/clientQrScan.controller');
+router.get('/me/qr', qrScanController.myQr);
+router.post('/qr/scan', qrScanController.scan);
+router.get('/favourites', qrScanController.listFavourites);
+router.put('/favourites/:id', qrScanController.setFavourite);
+
 // Self-service account management. No id parameter anywhere: each acts on the
 // session's own client, so none of them can be aimed at another account.
 router.put('/me', controller.updateMe);

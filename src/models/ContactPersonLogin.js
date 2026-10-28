@@ -15,6 +15,9 @@ module.exports = (sequelize, DataTypes) => sequelize.define(
         last_login_at: { type: DataTypes.DATE, allowNull: true },
         // Online / Offline in the chat: last request from this number's app.
         last_seen_at: { type: DataTypes.DATE, allowNull: true },
+        /** The contact person's personal QR (utils/personQr.js), set on create. */
+        qr_code: { type: DataTypes.CHAR(32), allowNull: true },
+        qr_token: { type: DataTypes.STRING(255), allowNull: true },
     },
     { tableName: 'contact_person_logins', timestamps: true, underscored: true },
 );

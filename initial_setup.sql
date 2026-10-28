@@ -2098,7 +2098,7 @@ CREATE TABLE IF NOT EXISTS `events` (
   `contact_phone` varchar(30) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `contact_email` varchar(150) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `footer_note` varchar(300) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `privacy` enum('private','public','unlisted') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'private',
+  `privacy` enum('private','public','unlisted') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'public',
   `status` enum('draft','upcoming','cancelled') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'upcoming' COMMENT 'Past is derived from end_date at read time, never stored',
   `menu_ids` json DEFAULT NULL,
   `menu_order` json DEFAULT NULL COMMENT 'menu ids in host order; NULL = admin sort_order. See add-event-venue-details.js',
@@ -3755,7 +3755,10 @@ CREATE TABLE IF NOT EXISTS `website_clients` (
   `favourite_templates` json DEFAULT NULL COMMENT 'Template slugs the client hearted on the Templates screen',
   `favourite_events` json DEFAULT NULL COMMENT 'Event ids the client hearted (wishlist) on Home / My Events',
   `quick_actions` json DEFAULT NULL COMMENT 'Home Quick Actions: ordered menu slugs from the plan, NULL = default set',
+  `qr_code` char(32) DEFAULT NULL COMMENT 'Personal QR lookup key (utils/personQr.js)',
+  `qr_token` varchar(255) DEFAULT NULL COMMENT 'Encrypted string drawn as the QR',
   PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_website_clients_qr_code` (`qr_code`),
   UNIQUE KEY `uniq_website_client_email` (`vendor_id`,`email`),
   UNIQUE KEY `uniq_website_client_mobile` (`vendor_id`,`mobile`),
   KEY `idx_website_clients_listing` (`company_id`,`deleted_at`,`is_active`,`created_at`),
@@ -11210,6 +11213,37 @@ CREATE TABLE IF NOT EXISTS `splash_screens` (
   CONSTRAINT `fk_splash_screens_client` FOREIGN KEY (`website_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `fk_splash_screens_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- My Favourites (2026-10-28) — people scanned by QR, and the ones saved.
+CREATE TABLE IF NOT EXISTS `client_qr_contacts` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `owner_client_id` int unsigned NOT NULL COMMENT 'Who scanned (website_clients.id)',
+  `person_kind` enum('client','contact_person','event') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `person_id` int unsigned NOT NULL COMMENT 'website_clients.id, contact_person_logins.id or events.id',
+  `event_id` int unsigned DEFAULT NULL COMMENT 'The event both share, at the last scan',
+  `role` varchar(30) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'participant / host / contact_person',
+  `name` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `photo` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `dial_code` varchar(8) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `mobile` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `email` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `relation` varchar(120) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `event_name` varchar(200) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `event_date` date DEFAULT NULL,
+  `is_favourite` tinyint(1) NOT NULL DEFAULT '0',
+  `favourited_at` datetime DEFAULT NULL,
+  `scan_count` int unsigned NOT NULL DEFAULT '1',
+  `last_scanned_at` datetime NOT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_client_qr_contacts_person` (`owner_client_id`,`person_kind`,`person_id`),
+  KEY `idx_client_qr_contacts_fav` (`owner_client_id`,`is_favourite`,`favourited_at`),
+  KEY `idx_client_qr_contacts_scans` (`owner_client_id`,`last_scanned_at`),
+  KEY `fk_client_qr_contacts_event` (`event_id`),
+  CONSTRAINT `fk_client_qr_contacts_owner` FOREIGN KEY (`owner_client_id`) REFERENCES `website_clients` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_client_qr_contacts_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='My Favourites: people scanned by QR, and the ones saved';
 
 SET FOREIGN_KEY_CHECKS = 1;
 

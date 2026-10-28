@@ -17054,3 +17054,68 @@ for now — "plan config later".
 - **Portal (event_client_single):** not changed yet — still adds guests with no event (allowed).
 - **PRODUCTION ORDER:** `node src/database/tools/apply-guests-event-based.js --prod` (see Ismail's events
   + id of the Syed wedding) → `--prod --apply --event=<id>` (50 guests → Invited) → push backend → app.
+
+## Scan QR module — step 1: personal QR for client, contact person, participant (2026-10-28)
+
+Jamal's Scan QR designs (organizer: Exchange Contact / Mark Attendance / Verify Participant;
+participant: event QR → menus, participant QR → Favorites, document QR → Downloads). Decisions:
+Mark Attendance + Verify = check-in for PRIVATE (corporate-style) events, maybe weddings later;
+Verify = confirm entry only; Exchange Contact = ONE-WAY (scanner saves the scanned person); contact
+person QR = one per PERSON; client and participant QRs are separate (different logins); participant
+sees My QR + Scan QR from the Scan sheet. EVENT_QR_SECRET IS on Render (verified 2026-09-11).
+Open: how "private event" is decided (privacy defaults to 'private' on every event).
+- **Step 1 built (backend):** `utils/personQr.js` — same AES-GCM `EVQ1.` format as the event QR,
+  payload `{v:1,k:'c'|'cp'|'p',c:<qr_code>}`; `parse()` returns {kind, code} or null (event QR /
+  tampered). New `qr_code` CHAR(32) UNIQUE + `qr_token` on `website_clients`, `event_participants`,
+  `contact_person_logins` (`migrations/sql/20261028-person-qr.sql`, tool `tools/apply-person-qr.js`:
+  adds columns, creates a contact_person_logins row for every event contact number, fills every
+  empty QR, batched). Model hooks (models/index.js) stamp a QR on every create; Event
+  afterCreate/afterUpdate(contact_phone) findOrCreates the contact person row. initial_setup.sql
+  updated (contact_person_logins itself was never in it). Applied LOCAL (15 clients, 171 participants,
+  4 contact persons). Test 6/6 (create ×3 kinds, one row per contact number, event QR not a person
+  QR, tampered rejected).
+- **PRODUCTION ORDER:** `node src/database/tools/apply-person-qr.js --prod` → `--prod --apply` →
+  push backend. Nothing shows the QRs yet (My QR screen / scan decode = next steps).
+
+## All events PUBLIC, default public (Jamal, 2026-10-28)
+- `events.privacy` default 'private' → 'public' (model, initial_setup.sql, both seeders) and every
+  existing event set to public (incl. 'unlisted'). `migrations/sql/20261028-events-public.sql`, tool
+  `tools/apply-events-public.js` (dry run / --apply / --prod). LOCAL applied: 22 private + 1 unlisted
+  → public 25. Privacy only stored / filtered / counted in the backend — nothing is gated by it.
+- Portal `event-wizard.tsx`: new-event default and missing-value fallback "private" → "public". App
+  already defaulted to Public (`create_event_screen.dart _privacy`).
+- PRODUCTION: `node src/database/tools/apply-events-public.js --prod` → `--prod --apply`; push backend +
+  portal. Private events (Mark Attendance / Verify) will be the ones a host switches to Private.
+- **Revised same day (Jamal):** participant QR is ONE PER PERSON = their account QR
+  (`website_clients`), same in every event — the per-event `event_participants.qr_*` columns were
+  removed (dropped LOCAL; never on prod). personQr kinds now `c` (account) / `cp` (contact person).
+  Participant-QR scans: same-event only for now. Blocked tab dropped (mockup artefact). Event QR scanned
+  again → that event's home. Document QR = later.
+- **"My Briefcase" → "My Favourites"** (holds saved contacts + My Scans; later documents). Slug stays
+  `my-briefcase`. Tool `tools/apply-rename-favourites.js` (name, description, icon mdi:heart-outline);
+  LOCAL applied; `apply-quick-action-menus.js` seed updated; app fallback label/icon
+  (`quick_actions_section.dart`). PRODUCTION: `apply-rename-favourites.js --prod --apply`.
+
+## Scan QR (participant side) + My Favourites (Jamal, 2026-10-28)
+- **Backend:** `client_qr_contacts` (one row per account × scanned person/event; snapshot of the
+  minimal details; `is_favourite`; person_kind client / contact_person / event). SQL
+  `migrations/sql/20261028-client-qr-contacts.sql`, tool `tools/apply-client-qr-contacts.js`,
+  initial_setup.sql. `clientQrScan.service` + controller, routes: `GET /client/me/qr` (own QR, made
+  if missing; contact person too), `POST /client/qr/scan` (event QR → `{type:'event'}` + remembered
+  in My Scans; person QR → same-event check (owner / organizer / joined participant; contact person by
+  number) → 403 "This person isn't in your event.", own QR 400, minimal details: name, photo, phone,
+  email, relation e.g. "Bride's Friend", role participant/host/contact_person, event; remembered),
+  `GET /client/favourites?tab=contacts|scans`, `PUT /client/favourites/:id {favourite}` (events can't
+  be favourites; contact-person callers have no Favourites). API test LOCAL 17/17.
+- **App:** Scan QR screen gets My QR | QR Scanner tabs when signed in (camera stopped behind My QR;
+  qr_flutter), an "auto-detected" info line, and a signed-in scan asks `/qr/scan` first → person →
+  `ScannedContactScreen` (Detected → details → Save to Favourites / Share Contact →
+  `/favourites?saved=1`); event QRs run the old join / open-event flow. `FavouritesScreen` per Jamal's
+  Favorites design (count cards, Contacts with role chips + star + ⋮, Downloads = empty state until
+  documents exist, My Scans grouped Participant QR / Event QR with View Result) and
+  `FavouriteContactScreen` (copy, Call, WhatsApp, Share, Remove). My Favourites tile → `/favourites`
+  (was "coming soon"). Chat button from the design left out (messaging unfinished). `dart analyze`: 0.
+- **Not yet:** participants have no My Favourites tile of their own (quick-action menu = organizer
+  Home); organizer Scan options sheet (Exchange Contact / Mark Attendance / Verify) is next.
+- **PRODUCTION ORDER:** `node src/database/tools/apply-client-qr-contacts.js --prod --apply` → push
+  backend → app build.

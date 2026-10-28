@@ -172,6 +172,7 @@ db.EventContactChat = require('./EventContactChat')(sequelize, Sequelize);
 db.EventContactChatMessage = require('./EventContactChatMessage')(sequelize, Sequelize);
 // Contact person sign-in code (2026-10-26) - not an account.
 db.ContactPersonLogin = require('./ContactPersonLogin')(sequelize, Sequelize);
+db.ClientQrContact = require('./ClientQrContact')(sequelize, Sequelize);
 db.EventParticipant = require('./EventParticipant')(sequelize, Sequelize);
 // The client's phone book (§581). Participants are EventParticipant.
 db.Guest = require('./Guest')(sequelize, Sequelize);
@@ -620,5 +621,45 @@ db.EmailQueue.belongsTo(db.EmailConfig, { foreignKey: 'email_config_id', as: 'co
 
 db.EmailSentLog.belongsTo(db.EmailCampaign, { foreignKey: 'campaign_id', as: 'campaign' });
 db.EmailSentLog.belongsTo(db.EmailTemplate, { foreignKey: 'template_id', as: 'template' });
+
+// ── Personal QR codes (Jamal, 2026-10-28) ────────────────────────────────────
+// Every account and contact person gets one when created — here, so every
+// create path (sign-up, OAuth, QR join…) is covered. A PARTICIPANT's QR is
+// their account's: one per person, the same in every event (Jamal). Existing
+// rows were filled by tools/apply-person-qr.js.
+{
+    const personQr = require('../utils/personQr');
+    const stampOn = (model, kind) => {
+        model.addHook('beforeCreate', (row) => personQr.stamp(row, kind));
+        model.addHook('beforeBulkCreate', (rows) => rows.forEach((row) => personQr.stamp(row, kind)));
+    };
+    stampOn(db.WebsiteClient, 'client');
+    stampOn(db.ContactPersonLogin, 'contact_person');
+
+    // A contact person is one per PERSON (vendor + mobile), not per event: the
+    // first event that names their number creates their row (and so their QR).
+    const ensureContactPerson = async (event, options = {}) => {
+        const digits = String(event.contact_phone || '').replace(/\D/g, '');
+        if (digits.length < 7 || !event.website_client_id) return;
+        const owner = await db.WebsiteClient.unscoped().findByPk(event.website_client_id, {
+            attributes: ['vendor_id'], transaction: options.transaction,
+        });
+        if (!owner?.vendor_id) return;
+        const [row] = await db.ContactPersonLogin.findOrCreate({
+            where: { vendor_id: owner.vendor_id, mobile: digits.slice(-10) },
+            defaults: { vendor_id: owner.vendor_id, mobile: digits.slice(-10) },
+            transaction: options.transaction,
+        });
+        if (!row.qr_code) {
+            personQr.stamp(row, 'contact_person');
+            await row.save({ fields: ['qr_code', 'qr_token'], transaction: options.transaction });
+        }
+    };
+    // Never fails the event save: the QR is filled again next time.
+    const safely = (event, options) => ensureContactPerson(event, options)
+        .catch((err) => console.error('[personQr] contact person QR:', err.message));
+    db.Event.addHook('afterCreate', safely);
+    db.Event.addHook('afterUpdate', (event, options) => (event.changed('contact_phone') ? safely(event, options) : null));
+}
 
 module.exports = db;

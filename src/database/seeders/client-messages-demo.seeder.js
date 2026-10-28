@@ -211,7 +211,7 @@ async function seedFor(client) {
             venue_name: 'The Grand Palace',
             venue_address: 'Delhi',
             status: 'upcoming',
-            privacy: 'private',
+            privacy: 'public',
         });
         console.log(`  + created event "${created.name}" (there were none)`);
         events = [created];

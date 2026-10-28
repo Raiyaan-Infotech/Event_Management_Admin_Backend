@@ -84,10 +84,12 @@ module.exports = (sequelize) => {
             contact_email: { type: DataTypes.STRING(150), allowNull: true },
             footer_note: { type: DataTypes.STRING(300), allowNull: true },
 
+            // Public by default (Jamal, 2026-10-28); every existing event was
+            // set public by tools/apply-events-public.js.
             privacy: {
                 type: DataTypes.ENUM('private', 'public', 'unlisted'),
                 allowNull: false,
-                defaultValue: 'private',
+                defaultValue: 'public',
             },
             status: {
                 type: DataTypes.ENUM('draft', 'upcoming', 'cancelled'),

@@ -710,7 +710,7 @@ function eventBody(item, options, client, templateCode, coverUrl) {
         timezone: 'Asia/Kolkata',
         contact_email: client.email || null,
         contact_phone: client.mobile ? `+91 ${client.mobile}` : null,
-        privacy: 'private',
+        privacy: 'public',
         status: 'upcoming',
         menu_ids: options.menus.map((m) => m.id),
         theme_id: templateCode || null,

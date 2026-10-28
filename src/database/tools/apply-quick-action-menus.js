@@ -43,7 +43,7 @@ const MENUS = [
     { name: 'QR Code', slug: 'qr-code', icon: 'mdi:qrcode', description: 'Open the event invitation QR code.' },
     { name: 'Notifications', slug: 'notifications', icon: 'mdi:bell-outline', description: 'Create a new notification for one event.' },
     { name: 'My Plan', slug: 'my-plan', icon: 'mdi:crown-outline', description: 'Your plan limits: storage, photos, videos, guests and participants.' },
-    { name: 'My Briefcase', slug: 'my-briefcase', icon: 'mdi:briefcase-outline', description: 'Your briefcase (coming soon).' },
+    { name: 'My Favourites', slug: 'my-briefcase', icon: 'mdi:heart-outline', description: 'Contacts you saved by scanning a QR, and your scan history.' },
 ];
 
 (async () => {

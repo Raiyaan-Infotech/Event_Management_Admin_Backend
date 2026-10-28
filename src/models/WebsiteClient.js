@@ -109,6 +109,9 @@ module.exports = (sequelize) => {
             // always share an email, and a Google email can change.
             provider_id: { type: DataTypes.STRING(64), allowNull: true },
             avatar_url: { type: DataTypes.STRING(500), allowNull: true },
+            /** The account's personal QR (utils/personQr.js), set on create. */
+            qr_code: { type: DataTypes.CHAR(32), allowNull: true },
+            qr_token: { type: DataTypes.STRING(255), allowNull: true },
 
             // Verification is tracked but NOT enforced: there is no SMS provider
             // configured in this backend, so the signup form's OTP is still a
