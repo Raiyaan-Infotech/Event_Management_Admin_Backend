@@ -17166,3 +17166,32 @@ Open: how "private event" is decided (privacy defaults to 'private' on every eve
   participant_client_id was already this account). A host-added row claimed for the first time still
   gets it. App `EventDetectedScreen` Open Event Menus → `go('/home')` + `push('/event/wedding')` =
   inside the event, Home under it. No DB change — push backend only.
+- **Event splash slow (Jamal, 2026-10-28):** `SplashRepository.forEvent` was network-first (waited up to 4 s
+  every open; cache only offline). Now CACHE FIRST: a saved answer (splash or "none") is used at once and
+  refreshed in the background for the next open; only a never-opened event waits. Also
+  `EventSplashScreen` starts `myRsvpProvider(id)` while the splash plays, so the first-open RSVP check no
+  longer adds up to 3 s after it. App only.
+- **APK (2026-10-28):** release arm64 built (~4 min) → Documents\EventInvite_Mobile_Build\20261028_Event_Invite.apk (55.0 MB).
+
+## Fixes from Jamal's phone review (2026-10-28, evening)
+- **My Favourites per EVENT + per OWNER:** `client_qr_contacts.owner_key` ('c:<client>' / 'cp:<contact
+  person>') + `owner_contact_person_id`; unique (owner_key, person_kind, person_id, event_id)
+  (`migrations/sql/20261028-qr-contacts-per-event.sql`, tool `tools/apply-qr-contacts-per-event.js`,
+  initial_setup.sql). `/qr/scan` takes `event_id` (the app's event; used when both share it) and saves
+  under it; `/favourites?event_id=` lists one event. A contact person now has their OWN list (can save);
+  the client never sees it (404 on their rows). API test LOCAL 10/10 + old scan test 17/17. App: scan sends
+  the selected / organizer-picked event; My Favourites tile + Quick View pick the event
+  (`/favourites?event=`); Save → `/favourites?saved=1&event=`.
+- **"Groom's Groom's Father":** `relationOf` no longer prefixes a relation that already names the side.
+- **Organizer Home:** "● Online / ● Offline · showing saved data" under the plan (the app-wide dot is
+  not mounted, only the participant Home had it). Stat cards open THEIR Events tab
+  (`organizerEventsTabProvider`; Total Events = default).
+- **Contact Person Profile:** Contact Details / Event Support Details text one size up (body, icons 20).
+- **Quick Actions / Quick View customise:** "Add More" = 4-column grid (was a sideways row), both.
+- **Drafts only in Create Event:** `EventItem` `.published` / `.drafts`; drafts hidden from Home counts,
+  Events tab, every Choose an Event sheet, QR Code, Guests; the ＋ button offers "New Event" or
+  "Continue draft: <name>" (→ draft preview) when drafts exist.
+- **Event Menu Access:** header shows the contact's designation under the name (shared header — Access
+  Updated / Responsibilities too); "Enable Event Management Access" fits one line (scaleDown).
+- **My Favourites Back:** phone Back with nothing under the page → Home (was leaving the app).
+- PRODUCTION: `apply-qr-contacts-per-event.js --prod --apply` BEFORE pushing the backend.

@@ -8,6 +8,12 @@ const organizer = require('./eventOrganizer.service');
 /**
  * SCAN QR + MY FAVOURITES (Jamal, 2026-10-28).
  *
+ * PER EVENT, PER OWNER (Jamal, same day): a scan is remembered for the event
+ * both share — the event the app is in (`event_id`) when both are in it —
+ * and My Favourites lists one event at a time. Every caller has a list of
+ * their own: an account (`c:<id>`) or a contact person (`cp:<id>`, no
+ * account), so the event's client never sees what its contact person saved.
+ *
  * One scan endpoint tells what a code is: an EVENT QR (the app carries on
  * with its join / open-event flow) or a PERSON QR — an account (host or
  * participant: one QR per person, the same in every event) or a contact
@@ -21,11 +27,12 @@ const organizer = require('./eventOrganizer.service');
 
 const SIDE = { bride: "Bride's", groom: "Groom's" };
 
-/** "Bride's Friend", "Friend", "Bride's Side" — or null. */
+/** "Bride's Friend", "Friend", "Bride's Side" — or null. A relation that
+ *  already names the side ("Groom's Father") is not prefixed again. */
 const relationOf = (p) => {
     const rel = String(p?.relationship || '').trim();
     const side = SIDE[p?.rsvp_side];
-    if (side && rel) return `${side} ${rel}`;
+    if (side && rel) return /^(groom|bride)/i.test(rel) ? rel : `${side} ${rel}`;
     if (rel) return rel;
     return side ? `${side} Side` : null;
 };
@@ -56,19 +63,21 @@ const callerEventIds = (req) => (req.contactPerson
     ? contactEventIds(req.contactPerson.mobile, req.contactPerson.vendorId)
     : accountEventIds(req.websiteClient.id));
 
-/** The newest event both share, or a refusal. */
-const sharedEvent = async (mine, theirs) => {
+/** The event both share — [preferred] (the app's current event) when both
+ *  are in it, else the newest — or a refusal. */
+const sharedEvent = async (mine, theirs, preferred = null) => {
     const common = [...theirs].filter((id) => mine.has(id));
     if (!common.length) throw ApiError.forbidden("This person isn't in your event.");
+    const pick = Number(preferred) || 0;
     return Event.findOne({
-        where: { id: { [Op.in]: common } },
+        where: { id: { [Op.in]: common.includes(pick) ? [pick] : common } },
         order: [['start_date', 'DESC'], ['id', 'DESC']],
         attributes: ['id', 'name', 'start_date', 'website_client_id', 'organizer', 'organizer_image', 'contact_phone', 'contact_email'],
     });
 };
 
 /** A scanned ACCOUNT → minimal details in the event both share. */
-const resolveAccount = async (req, code) => {
+const resolveAccount = async (req, code, preferred) => {
     const person = await WebsiteClient.findOne({
         where: { qr_code: code },
         attributes: ['id', 'name', 'avatar_url', 'dial_code', 'mobile', 'email', 'vendor_id'],
@@ -77,7 +86,7 @@ const resolveAccount = async (req, code) => {
     if (!req.contactPerson && person.id === req.websiteClient.id) {
         throw ApiError.badRequest('This is your own QR code.');
     }
-    const event = await sharedEvent(await callerEventIds(req), await accountEventIds(person.id));
+    const event = await sharedEvent(await callerEventIds(req), await accountEventIds(person.id), preferred);
     const isHost = Number(event.website_client_id) === Number(person.id);
     const part = isHost ? null : await EventParticipant.findOne({
         where: { event_id: event.id, participant_client_id: person.id },
@@ -99,13 +108,13 @@ const resolveAccount = async (req, code) => {
 };
 
 /** A scanned CONTACT PERSON → their details from the event both share. */
-const resolveContactPerson = async (req, code) => {
+const resolveContactPerson = async (req, code, preferred) => {
     const cp = await ContactPersonLogin.findOne({ where: { qr_code: code }, attributes: ['id', 'vendor_id', 'mobile'] });
     if (!cp) throw ApiError.badRequest('This QR code is not valid.');
     if (req.contactPerson && organizer.nationalOf(req.contactPerson.mobile) === cp.mobile) {
         throw ApiError.badRequest('This is your own QR code.');
     }
-    const event = await sharedEvent(await callerEventIds(req), await contactEventIds(cp.mobile, cp.vendor_id));
+    const event = await sharedEvent(await callerEventIds(req), await contactEventIds(cp.mobile, cp.vendor_id), preferred);
     return {
         person_kind: 'contact_person',
         person_id: cp.id,
@@ -120,8 +129,25 @@ const resolveContactPerson = async (req, code) => {
     };
 };
 
-/** Remember the scan ("My Scans"); returns the row. Accounts only. */
-const remember = async (ownerId, d) => {
+/**
+ * Whose list: the signed-in account, or the contact person (their own row in
+ * contact_person_logins). Never the event's owner on a contact person's
+ * behalf — these routes name no event, so eventOrganizerAccess does not swap.
+ */
+const ownerOf = async (req) => {
+    if (req.contactPerson) {
+        const mobile = organizer.nationalOf(req.contactPerson.mobile);
+        const [cp] = await ContactPersonLogin.findOrCreate({
+            where: { vendor_id: req.contactPerson.vendorId, mobile },
+            defaults: { vendor_id: req.contactPerson.vendorId, mobile },
+        });
+        return { key: `cp:${cp.id}`, clientId: null, cpId: cp.id };
+    }
+    return { key: `c:${req.websiteClient.id}`, clientId: req.websiteClient.id, cpId: null };
+};
+
+/** Remember the scan ("My Scans") in THAT event's list; returns the row. */
+const remember = async (owner, d) => {
     const snapshot = {
         event_id: d.event.id,
         role: d.role,
@@ -136,18 +162,25 @@ const remember = async (ownerId, d) => {
         last_scanned_at: new Date(),
     };
     const [row, created] = await ClientQrContact.findOrCreate({
-        where: { owner_client_id: ownerId, person_kind: d.person_kind, person_id: d.person_id },
-        defaults: { ...snapshot, owner_client_id: ownerId, person_kind: d.person_kind, person_id: d.person_id },
+        where: { owner_key: owner.key, person_kind: d.person_kind, person_id: d.person_id, event_id: d.event.id },
+        defaults: {
+            ...snapshot,
+            owner_key: owner.key,
+            owner_client_id: owner.clientId,
+            owner_contact_person_id: owner.cpId,
+            person_kind: d.person_kind,
+            person_id: d.person_id,
+        },
     });
     if (!created) await row.update({ ...snapshot, scan_count: row.scan_count + 1 });
     return row;
 };
 
 /** An event QR scan, for My Scans' "Event QR" group. */
-const rememberEvent = async (ownerId, eventId) => {
+const rememberEvent = async (owner, eventId) => {
     const event = await Event.findByPk(eventId, { attributes: ['id', 'name', 'start_date', 'venue_name'] });
     if (!event) return null;
-    return remember(ownerId, {
+    return remember(owner, {
         person_kind: 'event',
         person_id: event.id,
         role: 'event',
@@ -187,7 +220,7 @@ const presentContact = (row) => {
  *   { type: 'event' }                        the app runs its event flow
  *   { type: 'person', contact: {...} }       minimal details (+ saved state)
  */
-const scan = async (req, rawToken) => {
+const scan = async (req, rawToken, preferredEventId = null) => {
     const token = String(rawToken || '').trim();
     if (!token) throw ApiError.badRequest('No QR code supplied.');
 
@@ -195,7 +228,7 @@ const scan = async (req, rawToken) => {
     if (payload && payload.eid) {
         // Remembered in My Scans ("Event QR") for an account; the app then
         // runs its own join / open-event flow.
-        if (!req.contactPerson) await rememberEvent(req.websiteClient.id, payload.eid).catch(() => null);
+        await ownerOf(req).then((o) => rememberEvent(o, payload.eid)).catch(() => null);
         return { type: 'event', event_id: payload.eid };
     }
 
@@ -203,19 +236,10 @@ const scan = async (req, rawToken) => {
     if (!parsed) throw ApiError.badRequest('This QR code is not valid.');
 
     const details = parsed.kind === 'contact_person'
-        ? await resolveContactPerson(req, parsed.code)
-        : await resolveAccount(req, parsed.code);
+        ? await resolveContactPerson(req, parsed.code, preferredEventId)
+        : await resolveAccount(req, parsed.code, preferredEventId);
 
-    if (req.contactPerson) {
-        // No account → nothing to remember; the details are still shown.
-        const { event, ...rest } = details;
-        return {
-            type: 'person',
-            contact: { id: null, ...rest, event_id: event.id, event_name: event.name, event_date: event.start_date, is_favourite: false },
-            can_save: false,
-        };
-    }
-    const row = await remember(req.websiteClient.id, details);
+    const row = await remember(await ownerOf(req), details);
     return { type: 'person', contact: presentContact(row), can_save: true };
 };
 
@@ -242,16 +266,14 @@ const myQr = async (req) => {
     return { kind: 'client', qr_token: client.qr_token, name: client.name, photo: client.avatar_url || null };
 };
 
-const ownerOf = (req) => {
-    if (req.contactPerson) throw ApiError.forbidden('My Favourites needs an account.');
-    return req.websiteClient.id;
-};
-
-/** GET /client/favourites?tab=contacts|scans&search= */
+/** GET /client/favourites?tab=contacts|scans&event_id=&search= — the
+ *  caller's own list, for ONE event when `event_id` is given. */
 const listFavourites = async (req, query = {}) => {
-    const owner = ownerOf(req);
+    const owner = await ownerOf(req);
     const tab = query.tab === 'scans' ? 'scans' : 'contacts';
-    const where = { owner_client_id: owner };
+    const eventId = Number(query.event_id) || null;
+    const base = { owner_key: owner.key, ...(eventId ? { event_id: eventId } : {}) };
+    const where = { ...base };
     if (tab === 'contacts') {
         where.is_favourite = true;
         where.person_kind = { [Op.ne]: 'event' };
@@ -273,16 +295,16 @@ const listFavourites = async (req, query = {}) => {
         limit: 500,
     });
     const [contacts, scans] = await Promise.all([
-        ClientQrContact.count({ where: { owner_client_id: owner, is_favourite: true } }),
-        ClientQrContact.count({ where: { owner_client_id: owner } }),
+        ClientQrContact.count({ where: { ...base, is_favourite: true, person_kind: { [Op.ne]: 'event' } } }),
+        ClientQrContact.count({ where: base }),
     ]);
     return { tab, rows: rows.map(presentContact), counts: { contacts, scans } };
 };
 
 /** PUT /client/favourites/:id { favourite } — Save to / remove from Favourites. */
 const setFavourite = async (req, id, favourite) => {
-    const owner = ownerOf(req);
-    const row = await ClientQrContact.findOne({ where: { id: Number(id) || 0, owner_client_id: owner } });
+    const owner = await ownerOf(req);
+    const row = await ClientQrContact.findOne({ where: { id: Number(id) || 0, owner_key: owner.key } });
     if (!row) throw ApiError.notFound('Contact not found.');
     if (row.person_kind === 'event') throw ApiError.badRequest('Only people can be saved to Favourites.');
     const on = favourite === true || favourite === 'true' || favourite === 1 || favourite === '1';

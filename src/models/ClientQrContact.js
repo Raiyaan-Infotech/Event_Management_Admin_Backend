@@ -7,7 +7,10 @@ module.exports = (sequelize, DataTypes) => sequelize.define(
     'ClientQrContact',
     {
         id: { type: DataTypes.INTEGER.UNSIGNED, primaryKey: true, autoIncrement: true },
-        owner_client_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
+        /** 'c:<client id>' or 'cp:<contact person id>' — whose list (per event). */
+        owner_key: { type: DataTypes.STRING(24), allowNull: false },
+        owner_client_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+        owner_contact_person_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
         person_kind: { type: DataTypes.ENUM('client', 'contact_person', 'event'), allowNull: false },
         person_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
         event_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },

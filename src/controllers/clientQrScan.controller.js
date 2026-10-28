@@ -10,7 +10,7 @@ const myQr = asyncHandler(async (req, res) => {
 });
 
 const scan = asyncHandler(async (req, res) => {
-    const data = await service.scan(req, req.body?.token ?? req.body?.qr_token);
+    const data = await service.scan(req, req.body?.token ?? req.body?.qr_token, req.body?.event_id);
     return ApiResponse.success(res, data, data.type === 'event' ? 'Event QR code' : 'Contact found');
 });
 
