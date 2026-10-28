@@ -17145,3 +17145,24 @@ Open: how "private event" is decided (privacy defaults to 'private' on every eve
   `ScannedContactScreen`. `dart analyze`: 0.
 - **PRODUCTION ORDER:** `apply-client-qr-contacts.js --prod --apply` and
   `apply-participant-check-in.js --prod --apply` → push backend → app.
+- **My Favourites Contact Details buttons (Jamal, 2026-10-28):** Call | WhatsApp (real logo, brand green) /
+  Chat | Share Contact, as in the mockup. Chat = the EXISTING organizer ↔ participant chat, navigation
+  only (no backend change): the owner / contact person viewing a saved participant → that participant's
+  chat (`ViewChatScreen.team`, found via the event's contact-chats list by participant client_id), or the
+  event's Participant Chats when they have not written yet; a participant viewer → "Chat with
+  participants is coming soon." App: `ContactChatSummary.participantClientId`, `ScannedContact.eventId`.
+- **Event QR scanned again (Jamal, 2026-10-28):** a participant who already joined → join refreshed +
+  event prefetched → `EventDetectedScreen` ("Detected: Event QR Code", success Lottie, info) → Open
+  Event Menus → `/home` (the event). Back returns to a live scanner. New participants: join form as before.
+- **Event Status info (Basic Details):** under the Public / Private cards, a note for the picked one —
+  Public: "a guest is counted as a participant once they complete the RSVP"; Private: "… only after
+  completing check-in at the event". TEXT ONLY — participant counts / limits are not changed by it.
+- **Edit Event → Event QR (Jamal, 2026-10-28, option B):** new row after Basic Details → `/event/qr-code?id=`
+  (organizer-only) → `EventQrScreen`: the event's `qr_token` FULL SIZE, classic black on white, name +
+  date, Copy Code. Why: the invitation card draws the ~300-char token at 84 px in theme colour/style, so a
+  gallery screenshot gave "no QR found"; the old ⋮ → Settings → Privacy path is unreachable (menu unused).
+- **Re-scan of a joined event (Jamal, 2026-10-28):** backend `guestRegistration.join` sends the Welcome
+  Invitation push only on a FIRST join (`alreadyJoined` read before the row is updated: the row's
+  participant_client_id was already this account). A host-added row claimed for the first time still
+  gets it. App `EventDetectedScreen` Open Event Menus → `go('/home')` + `push('/event/wedding')` =
+  inside the event, Home under it. No DB change — push backend only.

@@ -500,6 +500,10 @@ const join = async (client, payload = {}) => {
             where: { event_id: event.id, mobile: { [Op.in]: candidates } },
         })
         : null;
+    // Read BEFORE the row is updated below (which links it to this account):
+    // true only when this account had already joined — a re-scan.
+    const alreadyJoined = Boolean(existing)
+        && Number(existing.participant_client_id) === Number(client.id);
 
     // An event that is not collecting RSVPs stores NO answer, whatever the body
     // says — an older app build, or a hand-made request, must not write an RSVP
@@ -618,15 +622,20 @@ const join = async (client, payload = {}) => {
         await recordGuestAnswer(guest, before, fields, client.id);
     }
 
-    // Trigger Welcome Invitation (checks client portal on/off pref)
-    notificationTrigger.triggerWelcomeInvitation({
-        event,
-        guest,
-        client,
-        companyId: event.company_id,
-    }).catch((err) => {
-        logger.error?.('[guestRegistration.join] Welcome invitation trigger error:', err.message);
-    });
+    // Trigger Welcome Invitation (checks client portal on/off pref) — on a
+    // FIRST join only. Scanning the QR of an event this account already joined
+    // just reopens it; no push again (Jamal, 2026-10-28). A row the host added
+    // and this account claims for the first time still counts as a first join.
+    if (!alreadyJoined) {
+        notificationTrigger.triggerWelcomeInvitation({
+            event,
+            guest,
+            client,
+            companyId: event.company_id,
+        }).catch((err) => {
+            logger.error?.('[guestRegistration.join] Welcome invitation trigger error:', err.message);
+        });
+    }
 
     return { event: publicEvent(event), guest, created: !existing };
 };
