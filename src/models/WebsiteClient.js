@@ -37,6 +37,26 @@ module.exports = (sequelize) => {
             company_name: { type: DataTypes.STRING(150), allowNull: true },
 
             bio: { type: DataTypes.TEXT, allowNull: true },
+            // Participant Edit Profile (2026-10-29) — personal + address on the
+            // account. migrations/sql/20261029-client-personal-address.sql.
+            date_of_birth: { type: DataTypes.DATEONLY, allowNull: true },
+            gender: { type: DataTypes.ENUM('male', 'female', 'other'), allowNull: true },
+            profession: { type: DataTypes.STRING(100), allowNull: true },
+            country: { type: DataTypes.STRING(100), allowNull: true },
+            state: { type: DataTypes.STRING(100), allowNull: true },
+            city: { type: DataTypes.STRING(100), allowNull: true },
+            postal_code: { type: DataTypes.STRING(20), allowNull: true },
+            address: { type: DataTypes.STRING(500), allowNull: true },
+            // Public Visibility (2026-10-29) - see utils/profileVisibility.js.
+            profile_visibility: {
+                type: DataTypes.ENUM('everyone', 'private'),
+                allowNull: false,
+                defaultValue: 'everyone',
+            },
+            visible_fields: { type: DataTypes.JSON, allowNull: true },
+            // Additional Details (2026-10-29): {whatsapp, instagram, facebook, x}.
+            social_links: { type: DataTypes.JSON, allowNull: true },
+            cover_image_url: { type: DataTypes.STRING(500), allowNull: true },
             /**
              * Optional, because a guest who registers by scanning the invitation
              * QR proves a MOBILE NUMBER and may have no email at all — the app's

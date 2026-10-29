@@ -17195,3 +17195,93 @@ Open: how "private event" is decided (privacy defaults to 'private' on every eve
   Updated / Responsibilities too); "Enable Event Management Access" fits one line (scaleDown).
 - **My Favourites Back:** phone Back with nothing under the page → Home (was leaving the app).
 - PRODUCTION: `apply-qr-contacts-per-event.js --prod --apply` BEFORE pushing the backend.
+- **APK (2026-10-28, evening):** release arm64 built (~2 min) with the evening fixes → DocumentsventInvite_Mobile_Build\20261028_Event_Invite_v1.apk (56 MB).
+
+## More phone-review fixes (Jamal, 2026-10-29)
+- **Total Events → All:** Events tab gets an "All" tab (`OrganizerEventsTab` all/current/upcoming/past;
+  drafts already excluded). Home: Total Events → All, the others → their tab.
+- **Event Menu Access:** switch renamed "Enable Event Menu Access", smaller (caption w600, description
+  tiny). Contact Person Profile hero now name → designation → pills (same order as Event Menu Access).
+- **Guests group tabs:** as wide as their label (`alignment` had stretched each to the 200 px cap),
+  caption w600, height 36.
+- **Limit screens:** Guest limit (Add Guest + Guest form) and Participant limit → "See Upgrade Options"
+  (→ My Plan `/event/plan`: usage + Upgrade Plan / Purchase Add-on) + Back.
+- **Add or Manage Guests sheet:** header shows "used / limit guests · N left" with a bar (orange ≥90%,
+  red full; "no limit" when unlimited) from `guestCapacityProvider`. App only.
+- **APK (2026-10-29):** release arm64 built (~3 min) → DocumentsventInvite_Mobile_Build\20261029_Event_Invite.apk (56 MB).
+
+## Organizer Profile screen (Jamal's design, 2026-10-29) - app only, no backend change
+- **Entry:** Home photo -> `/profile` (organizer-only; was the Settings tab). Pencil -> `/profile/edit` (top-bar ⋮ removed, Jamal);
+  More Actions button = sheet (Settings, Theme, Logout).
+- **Hero:** photo + camera badge (Change / Remove -> `PUT|DELETE /client/me/avatar`), name + verified tick
+  (mobile_verified / email_verified), Organizer pill, Active Subscriber (subscription active/trialing),
+  bio, Phone + Email. Base City left out: website_clients has no city.
+- **My Plan:** `GET /client/billing/overview` (already used by the portal) -> plan name + description, status pill,
+  Renews on (next_billing_date), Plan Period (billing_cycle), Overall Usage = worst of events/guests/storage,
+  tiles Events Allowed / Events Used / Guests Used / Storage Used. Upgrade Plan = "soon" toast (as on Plan Info);
+  "View Billing" became **Plan Details** -> `/event/plan` (no billing screen in the app).
+- **Event Overview:** from the owned events list: Current / Upcoming / Past / Total (-> Events tab), Total Guests
+  (overview guests.used -> Guests), RSVP Confirmed + % of participants, Contact Persons, Invites Sent
+  (messages_count). The design's "Notifications Sent" has no counter -> Invites Sent.
+- **Contact Persons:** each event's contact person (organizer / contact_phone / contact_designation /
+  organizer_image, now on `EventItem`), one row per number (last 10 digits); pill Active (looks after a
+  current/upcoming event) else "N events"; tap / Add Contact Person -> choose event -> `/event/organizer-contact`.
+- **Edit Profile:** Full Name *, Mobile (read-only, it is the sign-in), Email, About -> `PUT /client/me`,
+  then `SessionNotifier.reloadUser()`. Contact persons see no pencil / camera (backend 403s them anyway).
+- Files: `organizer/profile/organizer_profile_screen.dart`, `organizer_profile_edit_screen.dart`,
+  `data/repositories/organizer_profile_repository.dart`; `ApiClient.upload(put: true)`; AppUser `bio`/`verified`.
+  `dart analyze lib`: 0 errors / 0 warnings. Not yet checked on the phone.
+
+## Participant "My Profile" screen (Jamal's design, 2026-10-29) - app only, no backend change
+- Gap audit given first (Jamal: "do this profile screen only"); Edit Profile / Additional Details / Public
+  Visibility designs NOT built (no DOB/gender/profession/address/social/cover/visibility on the account).
+- `/profile` is now a RoleRoute: organizer -> OrganizerProfileScreen, participant -> ParticipantProfileScreen
+  (`participant/profile/participant_profile_screen.dart`). Participant Home photo -> `/profile`.
+- Hero: photo + camera (same `/client/me/avatar` as organizer), name, phone, email; location line left out
+  (no city on the account). Edit Profile button = "will be available soon" toast for now.
+- Data = `/client/events/joined`. No attendance record for PUBLIC events, so status is from RSVP + date:
+  past+Yes Attended, past+other Not Attended, future+no answer Invited, future+No Declined, future+Yes/Maybe Upcoming.
+  Stat tiles Total / Attended / Not Attended / Upcoming (tap = that tab); tabs All / Invited / Attended /
+  Not Attended / Upcoming (= every not-past event).
+- Shortcuts: My Events (tab 1), Scan Invitation (`/scan-qr`), My Family + My Favourites (pick event -> `/event/family`
+  / `/favourites?event=`). Row: thumb, title, date | time, venue, status pill, View Event (`/event/open`), ⋮ sheet
+  (View Event / Family / My Favourites). `dart analyze lib`: 0 errors / 0 warnings. Not yet checked on the phone.
+
+## Participant Edit Profile: hub + Personal Info + Address Details + success (Jamal, 2026-10-29)
+- Jamal: build screens 2–4; ADD the missing fields; Social Links + Profile Visibility NOT built (not in the
+  mockup's form — "use what we have").
+- **DB:** `website_clients` + date_of_birth (DATE), gender ENUM(male,female,other), profession, country, state,
+  city, postal_code, address (all NULL). `migrations/sql/20261029-client-personal-address.sql`, tool
+  `tools/apply-client-personal-address.js`, initial_setup.sql, model. LOCAL applied. `PUT /client/me` accepts them
+  (DOB = real past YYYY-MM-DD, gender one of three, '' clears). Local test: save ok; 2099 / 30 Feb / bad gender
+  refused; row restored.
+- **App:** `/profile/edit` = RoleRoute (organizer form / participant hub). Hub: photo header (phone / email /
+  location), Personal Information + Address Details cards with Edit. `/profile/edit/personal`: photo, Full Name *,
+  Mobile * (locked = sign-in), Email *, Date of Birth (year-first picker), Gender radios, Profession dropdown
+  (Business, Salaried, Self-employed, Student, Homemaker, Doctor, Engineer, Teacher, Retired, Other), Bio 200.
+  `/profile/edit/address`: Country * → State * → City * → PIN (guest form's `GuestAddressFields`, new
+  `requiredFields`), Address 200. Save → "<section> Updated Successfully!" page → Back to Edit Profile.
+  My Profile: Edit Profile button live, location line shown when set. `dart analyze`: no issues.
+- **PRODUCTION ORDER:** `node src/database/tools/apply-client-personal-address.js --prod --apply` BEFORE pushing
+  the backend (the model reads the new columns) → app build.
+
+## Participant Public Visibility + Additional Details (Jamal, 2026-10-29)
+- **Public Visibility** (`/profile/edit/visibility`): two choices only (Jamal removed "event guests only"):
+  Visible to all participants / Private (Only me); switches = only what OTHER participants are actually shown:
+  Profile Photo, Full Name, Contact Details (Phone/Email). Bio / location / profession / social links are not
+  shown to other participants anywhere yet, so no switch for them. DB `website_clients.profile_visibility`
+  ENUM(everyone,private) default everyone + `visible_fields` JSON {photo,name,contact} (NULL = all shown).
+  Applied in the backend (`utils/profileVisibility.js`) for participant-to-participant views only:
+  `GET /client/events/:id/participants` (private = left out; hidden name = "Participant"; photo / contact
+  dropped) and a scanned personal QR (`clientQrScan.resolveAccount`: private = 403 "This person has made their
+  profile private."). Host + contact person + your own row see everything. Local test: masked / private / host /
+  self / bad value all correct, row restored.
+- **Additional Details** (`/profile/edit/additional`, replaces Address Details): Profile Picture + Cover Image
+  (Optional; `PUT/DELETE /client/me/cover`, 5MB, folder client-covers, 16:9 crop), Address (Country * State *
+  City * PIN + address), Social Links FIXED four: WhatsApp, Instagram, Facebook, X -> `social_links` JSON
+  (link without scheme gets https://; bad number / link refused). Hub shows the cover as its banner + rows.
+- DB: `website_clients.cover_image_url`, `social_links`. Migrations `20261029-client-profile-visibility.sql`,
+  `20261029-client-additional-details.sql`; `apply-client-personal-address.js` now checks EACH of the 12 new
+  columns and adds only the missing ones (safe after a partial run). LOCAL applied. initial_setup.sql + model.
+- **PRODUCTION ORDER:** `node src/database/tools/apply-client-personal-address.js --prod` (dry run) ->
+  `--prod --apply` -> push backend -> app build. `dart analyze lib`: 0 errors / 0 warnings.

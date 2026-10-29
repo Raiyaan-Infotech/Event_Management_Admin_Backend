@@ -1,4 +1,5 @@
 const bcrypt = require('bcryptjs');
+const profileVisibility = require('../utils/profileVisibility');
 const crypto = require('crypto');
 const {
     Sequelize,
@@ -882,7 +883,7 @@ const participantsDirectory = async (clientId, rawEventId, viewer = null) => {
         }),
         EventParticipant.findAll({
             where: { event_id: eventId, participant_client_id: { [Op.ne]: null } },
-            attributes: ['id', 'name', 'title', 'photo', 'relationship', 'mobile', 'email'],
+            attributes: ['id', 'name', 'title', 'photo', 'relationship', 'mobile', 'email', 'participant_client_id'],
             order: [['name', 'ASC']],
         }),
     ]);
@@ -896,16 +897,40 @@ const participantsDirectory = async (clientId, rawEventId, viewer = null) => {
     // Mobile / email only when the host switched them on in Participant
     // Settings; RSVP status never (Jamal, 2026-10-24).
     const shown = participantSettings.settingsOf(event);
-    return guests.map((g) => ({
-        id: g.id,
-        full_name: g.name,
-        title: g.title,
-        photo: g.photo,
-        relationship: g.relationship,
-        ...(shown.mobile ? { mobile: g.mobile } : {}),
-        ...(shown.email ? { email: g.email } : {}),
-        has_joined: true,
-    }));
+
+    // Each person's own Public Visibility (2026-10-29), for another PARTICIPANT
+    // only: the host (and the contact person, who reaches this as the host)
+    // sees everyone, and your own row is always shown as it is.
+    let privacy = new Map();
+    if (!isOwner) {
+        const ids = [...new Set(guests.map((g) => Number(g.participant_client_id)).filter(Boolean))];
+        const owners = ids.length
+            ? await WebsiteClient.findAll({
+                where: { id: { [Op.in]: ids } },
+                attributes: ['id', 'profile_visibility', 'visible_fields'],
+            })
+            : [];
+        privacy = new Map(owners.map((c) => [Number(c.id), profileVisibility.settingsOf(c)]));
+    }
+    const rows = [];
+    for (const g of guests) {
+        const self = Number(g.participant_client_id) === Number(clientId);
+        const v = isOwner || self
+            ? profileVisibility.ALL_SHOWN
+            : (privacy.get(Number(g.participant_client_id)) || profileVisibility.ALL_SHOWN);
+        if (v.visibility === 'private') continue;
+        rows.push({
+            id: g.id,
+            full_name: v.fields.name ? g.name : 'Participant',
+            title: v.fields.name ? g.title : null,
+            photo: v.fields.photo ? g.photo : null,
+            relationship: g.relationship,
+            ...(shown.mobile && v.fields.contact ? { mobile: g.mobile } : {}),
+            ...(shown.email && v.fields.contact ? { email: g.email } : {}),
+            has_joined: true,
+        });
+    }
+    return rows;
 };
 
 /**

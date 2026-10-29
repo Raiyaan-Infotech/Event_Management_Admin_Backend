@@ -170,6 +170,34 @@ router.put(
     controller.updateMyAvatar,
 );
 router.delete('/me/avatar', controller.removeMyAvatar);
+// Profile cover image (Additional Details, 2026-10-29) — up to 5MB.
+const coverUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+        const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+        if (allowed.includes(file.mimetype)) return cb(null, true);
+        cb(new Error('Please choose a JPG, PNG or WEBP image.'), false);
+    },
+});
+router.put(
+    '/me/cover',
+    (req, res, next) => {
+        coverUpload.single('file')(req, res, (err) => {
+            if (err) {
+                return res.status(400).json({
+                    success: false,
+                    message: err.code === 'LIMIT_FILE_SIZE'
+                        ? 'That image is larger than 5MB.'
+                        : err.message || 'That image could not be uploaded.',
+                });
+            }
+            next();
+        });
+    },
+    controller.updateMyCover,
+);
+router.delete('/me/cover', controller.removeMyCover);
 router.get('/event-options', controller.eventOptions);
 router.put('/favourite-templates', controller.setFavouriteTemplates);
 // Home → Quick Actions: the plan's menus the organizer picked, in their order.

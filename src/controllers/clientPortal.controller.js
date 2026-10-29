@@ -170,9 +170,29 @@ const removeMyAvatar = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, { client }, 'Photo removed');
 });
 
+/** Additional Details (2026-10-29): the profile cover image. */
+const updateMyCover = asyncHandler(async (req, res) => {
+    if (req.contactPerson) {
+        throw ApiError.forbidden('Your details are kept on the event. Please ask the event owner to change them.');
+    }
+    const client = await clientPortalService.updateMyCover(req.websiteClient.id, req.file);
+    logger.logRequest(req, `Client cover updated: ${req.websiteClient.id}`);
+    return ApiResponse.success(res, { client }, 'Cover image updated');
+});
+
+const removeMyCover = asyncHandler(async (req, res) => {
+    if (req.contactPerson) {
+        throw ApiError.forbidden('Your details are kept on the event. Please ask the event owner to change them.');
+    }
+    const client = await clientPortalService.removeMyCover(req.websiteClient.id);
+    return ApiResponse.success(res, { client }, 'Cover image removed');
+});
+
 module.exports = {
     updateMyAvatar,
     removeMyAvatar,
+    updateMyCover,
+    removeMyCover,
     updateMe,
     changeMyPassword,
     deleteMyAccount, me, eventOptions, setFavouriteTemplates, proxyImage,

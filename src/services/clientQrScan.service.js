@@ -1,4 +1,5 @@
 const { Sequelize, Event, EventParticipant, WebsiteClient, ContactPersonLogin, ClientQrContact } = require('../models');
+const profileVisibility = require('../utils/profileVisibility');
 const { Op } = Sequelize;
 const ApiError = require('../utils/apiError');
 const eventQr = require('../utils/eventQr');
@@ -80,7 +81,8 @@ const sharedEvent = async (mine, theirs, preferred = null) => {
 const resolveAccount = async (req, code, preferred) => {
     const person = await WebsiteClient.findOne({
         where: { qr_code: code },
-        attributes: ['id', 'name', 'avatar_url', 'dial_code', 'mobile', 'email', 'vendor_id'],
+        attributes: ['id', 'name', 'avatar_url', 'dial_code', 'mobile', 'email', 'vendor_id',
+            'profile_visibility', 'visible_fields'],
     });
     if (!person) throw ApiError.badRequest('This QR code is not valid.');
     if (!req.contactPerson && person.id === req.websiteClient.id) {
@@ -93,15 +95,25 @@ const resolveAccount = async (req, code, preferred) => {
         attributes: ['relationship', 'rsvp_side', 'photo'],
         order: [['id', 'DESC']],
     });
+    // Public Visibility (2026-10-29): the event's host and its contact person
+    // see everything; another participant sees what this person allows.
+    const callerIsHost = !req.contactPerson
+        && Number(event.website_client_id) === Number(req.websiteClient.id);
+    const v = req.contactPerson || callerIsHost
+        ? profileVisibility.ALL_SHOWN
+        : profileVisibility.settingsOf(person);
+    if (v.visibility === 'private') {
+        throw ApiError.forbidden('This person has made their profile private.');
+    }
     return {
         person_kind: 'client',
         person_id: person.id,
         role: isHost ? 'host' : 'participant',
-        name: person.name,
-        photo: person.avatar_url || part?.photo || null,
+        name: v.fields.name ? person.name : 'Participant',
+        photo: v.fields.photo ? (person.avatar_url || part?.photo || null) : null,
         dial_code: person.dial_code || '+91',
-        mobile: person.mobile || null,
-        email: person.email || null,
+        mobile: v.fields.contact ? (person.mobile || null) : null,
+        email: v.fields.contact ? (person.email || null) : null,
         relation: isHost ? 'Host' : relationOf(part),
         event,
     };

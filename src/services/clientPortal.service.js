@@ -12,6 +12,7 @@ const {
     Decoration,
     TemplateCategory,
 } = require('../models');
+const profileVisibility = require('../utils/profileVisibility');
 const { Op } = Sequelize;
 const bcrypt = require('bcryptjs');
 const ApiError = require('../utils/apiError');
@@ -604,7 +605,11 @@ const setFavouriteTemplates = async (clientId, ids) => {
  * `email` is handled separately below, because changing it changes how they
  * sign in.
  */
-const SELF_EDITABLE_FIELDS = ['name', 'company_name', 'bio', 'dial_code', 'mobile', 'avatar_url'];
+const SELF_EDITABLE_FIELDS = [
+    'name', 'company_name', 'bio', 'dial_code', 'mobile', 'avatar_url',
+    // Participant Edit Profile (2026-10-29). date_of_birth / gender are checked below.
+    'profession', 'country', 'state', 'city', 'postal_code', 'address',
+];
 
 /** Trim, and map '' to null so a cleared box is stored as empty, not as ''. */
 const selfStr = (value, max) => {
@@ -614,7 +619,41 @@ const selfStr = (value, max) => {
     return trimmed ? trimmed.slice(0, max) : null;
 };
 
-const LIMITS = { name: 200, company_name: 150, bio: 2000, dial_code: 8, avatar_url: 500 };
+const LIMITS = {
+    name: 200, company_name: 150, bio: 2000, dial_code: 8, avatar_url: 500,
+    profession: 100, country: 100, state: 100, city: 100, postal_code: 20, address: 500,
+};
+const GENDERS = ['male', 'female', 'other'];
+
+/**
+ * The four FIXED social links (Jamal, 2026-10-29): WhatsApp number, Instagram,
+ * Facebook, X. Empty = cleared. A link typed without a scheme gets https://.
+ */
+const SOCIAL_KEYS = { instagram: 'Instagram', facebook: 'Facebook', x: 'X' };
+const socialLinksFrom = (raw) => {
+    if (raw === null) return null;
+    if (typeof raw !== 'object' || Array.isArray(raw)) {
+        throw ApiError.badRequest('Please check your social links.');
+    }
+    const out = {};
+    const wa = String(raw.whatsapp ?? '').trim();
+    if (wa) {
+        if (!/^\+?[\d\s-]{7,20}$/.test(wa)) {
+            throw ApiError.badRequest('Please enter a valid WhatsApp number.');
+        }
+        out.whatsapp = wa;
+    }
+    for (const [key, label] of Object.entries(SOCIAL_KEYS)) {
+        let v = String(raw[key] ?? '').trim();
+        if (!v) continue;
+        if (!/^https?:\/\//i.test(v)) v = `https://${v}`;
+        if (v.length > 300 || !/^https?:\/\/[^\s/]+\.[^\s]+$/i.test(v)) {
+            throw ApiError.badRequest(`Please enter a valid ${label} link.`);
+        }
+        out[key] = v;
+    }
+    return Object.keys(out).length ? out : null;
+};
 
 /**
  * Update the signed-in client's own profile.
@@ -640,6 +679,34 @@ const updateMe = async (clientId, data = {}) => {
 
     if (patch.name !== undefined && !patch.name) {
         throw ApiError.badRequest('Your name cannot be empty.');
+    }
+
+    // '' / null clears. A date must be a real past day, YYYY-MM-DD.
+    if (data.date_of_birth !== undefined) {
+        const dob = String(data.date_of_birth ?? '').trim();
+        if (!dob) {
+            patch.date_of_birth = null;
+        } else {
+            const d = new Date(`${dob}T00:00:00Z`);
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(dob) || Number.isNaN(d.getTime())
+                || d.toISOString().slice(0, 10) !== dob || d > new Date()) {
+                throw ApiError.badRequest('Please enter a valid date of birth.');
+            }
+            patch.date_of_birth = dob;
+        }
+    }
+    // Additional Details (2026-10-29): the four fixed social links.
+    if (data.social_links !== undefined) {
+        patch.social_links = socialLinksFrom(data.social_links);
+    }
+    // Public Visibility (2026-10-29).
+    Object.assign(patch, profileVisibility.patchFrom(data, (m) => {
+        throw ApiError.badRequest(m);
+    }));
+    if (data.gender !== undefined) {
+        const g = String(data.gender ?? '').trim().toLowerCase();
+        if (g && !GENDERS.includes(g)) throw ApiError.badRequest('Please choose a gender.');
+        patch.gender = g || null;
     }
 
     if (data.email !== undefined) {
@@ -816,6 +883,29 @@ const updateMyAvatar = async (clientId, file) => {
     return getMe(clientId);
 };
 
+/** Additional Details (2026-10-29): the profile's cover image. Same storage as the avatar. */
+const updateMyCover = async (clientId, file) => {
+    if (!file || !file.buffer) throw ApiError.badRequest('Please choose an image to upload.');
+    const client = await WebsiteClient.findByPk(clientId);
+    if (!client) throw ApiError.notFound('Account not found.');
+    const result = await mediaService.upload(
+        file,
+        { folder: 'client-covers' },
+        client.company_id || 1
+    );
+    if (!result || !result.url) throw ApiError.badRequest('That image could not be stored.');
+    await client.update({ cover_image_url: result.url });
+    return getMe(clientId);
+};
+
+/** Clear it (the stored file stays — see removeMyAvatar). */
+const removeMyCover = async (clientId) => {
+    const client = await WebsiteClient.findByPk(clientId);
+    if (!client) throw ApiError.notFound('Account not found.');
+    await client.update({ cover_image_url: null });
+    return getMe(clientId);
+};
+
 /**
  * Remove it again.
  *
@@ -834,6 +924,8 @@ const removeMyAvatar = async (clientId) => {
 module.exports = {
     updateMyAvatar,
     removeMyAvatar,
+    updateMyCover,
+    removeMyCover,
     updateMe,
     changeMyPassword,
     deleteMyAccount, getMe, getEventOptions, setFavouriteTemplates,
