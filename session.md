@@ -17285,3 +17285,17 @@ Open: how "private event" is decided (privacy defaults to 'private' on every eve
   columns and adds only the missing ones (safe after a partial run). LOCAL applied. initial_setup.sql + model.
 - **PRODUCTION ORDER:** `node src/database/tools/apply-client-personal-address.js --prod` (dry run) ->
   `--prod --apply` -> push backend -> app build. `dart analyze lib`: 0 errors / 0 warnings.
+
+## Website login: Mobile (OTP) | Email (password) tabs + V2 app login (Jamal, 2026-10-30)
+- **Website login card** (public site `login-section.tsx` AND admin `/website-preview` copy): Mobile | Email tabs per
+  Jamal's mockup. Mobile = country code + number -> Send OTP -> code boxes (focused, scrolled to) + Resend (30 s) ->
+  Verify & Log In -> portal. Uses the EXISTING `POST /public/website-clients/login/otp/request|verify` (same as the app).
+  Email = email + password + Forgot password + Log In (mobile no longer asked on the email form). "Login with Google"
+  only (Facebook hidden here via `SocialButtons only`). The old Send OTP was fake (only showed boxes).
+  "Keep me logged in" from the mockup NOT built: sessions are always 7 days and the refresh would undo it.
+- **Backend:** `app.js` COOKIE_BEARING_PUBLIC_PATHS + `/login/otp/verify` (it sets the session cookies; without it
+  the browser drops them on the public site's cross-origin fetch). Push backend.
+- **V2 app (Eveninvit_2, participant-only):** remote -> Event_Invite_Mobile_App_V2 (main only); My Events = V1
+  organizer design (Current/Upcoming/Past, search, organizer-style card, RSVP line, no heart); login phone field =
+  all countries + per-country validation (guest form helpers), Google phone-number hint (strips the joined dial code),
+  OTP boxes autofocus after Send OTP.

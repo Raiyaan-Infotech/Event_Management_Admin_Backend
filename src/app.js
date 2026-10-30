@@ -52,6 +52,9 @@ const COOKIE_BEARING_PUBLIC_PATHS = [
   // CORS response below (`origin: '*'` cannot combine with credentials), which
   // surfaces to the visitor as a generic "Could not reach the server."
   '/api/v1/public/website-clients/login/2fa/verify',
+  // Mobile-number sign-in on the website login (Mobile tab): the verify leg
+  // sets the same session cookies. The request leg sets none and stays public.
+  '/api/v1/public/website-clients/login/otp/verify',
   '/api/v1/public/website-clients/logout',
 ];
 
